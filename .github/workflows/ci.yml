@@ -24,10 +24,50 @@ jobs:
           pip install -r requirements.txt
           pip install ruff mypy
       - name: Lint (ruff check)
-        run: ruff check pm/ tests/ run.py examples/
+        run: ruff check pm/ tests/ run.py run_server.py examples/
       - name: Format check (ruff format)
-        run: ruff format --check pm/ tests/ run.py examples/
+        run: ruff format --check pm/ tests/ run.py run_server.py examples/
       - name: Type check (mypy)
-        run: mypy pm/ run.py
-      - name: Tests (pytest)
+        # 与 pyproject 的 [tool.mypy] files 保持一致，别出现"本地查、CI 不查"的第三种口径
+        run: mypy pm/ run.py run_server.py
+      - name: Tests (pytest) —— 无 Key、且禁止任何真实出网
+        # 死端点 + 假 Key 是有意的：只要有一条调用漏到真端点（C5 那类缺陷），
+        # 这里就会 Connection error 立刻变红，而不是在开发机上静默烧额度。
+        env:
+          PM_BASE_URL: http://127.0.0.1:9/v1
+          PM_EVALUATOR_B_BASE_URL: http://127.0.0.1:9/v1
+          PM_ARBITER_BASE_URL: http://127.0.0.1:9/v1
+          PM_API_KEY: sk-ci-has-no-real-key
         run: python -m pytest tests/ -q
+      - name: Topology selftest —— 干净检出无 .env 也必须通过
+        env:
+          PM_API_KEY: ""
+        run: python run.py --selftest
+      - name: Stub e2e —— 真实 HTTP 链路与三条结构化输出通道
+        env:
+          PY: python
+          STUB_PY: python
+          PORT: "8130"
+        run: bash examples/run_e2e_stub.sh
+
+  windows:
+    # 覆盖 Windows 侧脚本（run_e2e_stub.ps1 的 UTF-8 / 端口避让 / 任务清理只在 Windows 上成立）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Tests (pytest)
+        env:
+          PM_BASE_URL: http://127.0.0.1:9/v1
+          PM_API_KEY: sk-ci-has-no-real-key
+        run: python -m pytest tests/ -q
+      - name: Stub e2e (PowerShell)
+        shell: pwsh
+        run: ./examples/run_e2e_stub.ps1

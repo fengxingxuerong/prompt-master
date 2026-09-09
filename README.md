@@ -59,6 +59,9 @@
 cd prompt-master
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+# 只想装包本身（pm/）与依赖：`pip install .` 现在可用；
+# 开发工具（pytest/ruff/mypy）在 `pip install ".[dev]"` 里。
+# 无 API Key 也能先跑一遍自检：.venv/bin/python run.py --selftest
 
 cp .env.example .env     # 填入 API Key
 ```

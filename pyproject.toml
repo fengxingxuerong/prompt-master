@@ -1,9 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "prompt-master"
 version = "1.0.0"
 description = "提示词自动生成 / 测试 / 评估 / 迭代优化闭环（LangGraph）"
 requires-python = ">=3.11"
-dependencies = []
+# 与 requirements.txt 保持同一组实测通过的版本号（tests/test_packaging.py 会比对两边，防漂移）。
+# 以前这里是空的、依赖全在 requirements.txt，导致 `pip install .` 装出来是个跑不起来的空壳。
+dependencies = [
+    "langgraph==1.2.11",
+    "langgraph-checkpoint==4.2.0",
+    "langgraph-checkpoint-sqlite==3.1.1",
+    "langchain-core==1.6.2",
+    "langchain-openai==1.6.0",
+    "pydantic==2.13.5",
+    "python-dotenv==1.2.3",
+    "fastapi==0.115.12",
+    "uvicorn[standard]==0.34.2",
+]
+
+[project.optional-dependencies]
+# 使用 Anthropic 作为 Provider 时才需要
+anthropic = ["langchain-anthropic>=0.3.0"]
+# 开发与门禁（pytest/ruff/mypy 已在 requirements.txt 里钉住）
+dev = ["pytest==9.1.1", "ruff==0.16.6", "mypy==2.3.1"]
+
+[tool.setuptools]
+# 平铺布局下 setuptools 自动发现会把 run.py / run_server.py 当成顶层模块，
+# 这里只安装 pm 包；两个入口脚本依旧用 `python run.py ...` 从仓根跑。
+packages = ["pm"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
