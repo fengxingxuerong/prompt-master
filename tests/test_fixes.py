@@ -732,3 +732,88 @@ def test_rate_limit_backoff_is_bounded(monkeypatch):
     elapsed = _t.monotonic() - t0
     assert elapsed < 1.0, f"退避没有封顶：耗时 {elapsed:.1f}s"
     assert calls["n"] == 1, "预算用尽后应立刻上抛，而不是继续第 2 次尝试"
+
+
+# --- C5：ThreadPoolExecutor 不继承 ContextVar，注入的假后端会在并发分支被绕过 ---
+
+
+def test_carry_context_reaches_pool_workers():
+    """对照实验：裸提交看不到钩子，`carry_context` 包装后看得到（含 disable_cache）。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    hook = backend.CallHook(plain=_fake_plain, disable_cache=True)
+
+    def probe(_i: int) -> tuple[bool, bool]:
+        return backend.current() is not None, backend.cache_disabled()
+
+    with backend.use(hook):
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            bare = list(ex.map(probe, range(3)))
+            carried = list(ex.map(backend.carry_context(probe), range(3)))
+
+    assert not any(any(row) for row in bare), (
+        "对照组失效：裸线程池本应看不到钩子，否则这条用例没测到东西"
+    )
+    assert all(seen and dis for seen, dis in carried), f"上下文没传进工作线程：{carried}"
+
+
+def test_target_call_in_pool_hits_injected_backend():
+    """`plain_call("target")` 在池里也必须走钩子，不许去碰真实端点。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    seen: list[str] = []
+
+    def plain(role, system, user, overrides=None):
+        seen.append(role)
+        return f"fake::{role}", {"role": role}
+
+    with backend.use(backend.CallHook(plain=plain)):
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            out = list(
+                ex.map(
+                    backend.carry_context(lambda role: llm_mod.plain_call(role, "sys", "user")[0]),
+                    ["target", "reviser"],
+                )
+            )
+
+    assert out == ["fake::target", "fake::reviser"]
+    assert sorted(seen) == ["reviser", "target"]
+
+
+def test_run_matrix_concurrency_keeps_fake_backend():
+    """`_run_matrix` 走并发分支时每条采样都要拿到假后端输出（C5 的直接回归）。
+
+    修之前这里整批 `error=缺少 API Key`：表现是"无 Key 也能跑通"的 selftest
+    与演示模式，只在恰好配了真实 Key 的开发机上通过。
+    """
+    with testing.scope("progress"):
+        runs, calls = nodes._run_matrix(
+            cases=["用例A", "用例B", "用例C"],
+            prompt="一个提示词",
+            target_model="fake-model",
+            expected_fn=lambda _i: None,
+            mode="none",
+            k=2,
+            concurrency=4,
+        )
+
+    assert len(runs) == 6
+    assert not any(r.error for r in runs), f"并发分支绕过了假后端：{[r.error for r in runs]}"
+    assert all(r.output.startswith("（fake）") for r in runs), [r.output[:30] for r in runs]
+    assert calls == 6
+
+
+def test_run_matrix_serialises_when_concurrency_is_one():
+    """`PM_TARGET_MAX_CONCURRENCY=1` 走串行分支，结果口径必须与并发分支一致。"""
+    with testing.scope("progress"):
+        serial, _ = nodes._run_matrix(
+            cases=["用例A", "用例B"],
+            prompt="一个提示词",
+            target_model="fake-model",
+            expected_fn=lambda _i: None,
+            mode="none",
+            k=2,
+            concurrency=1,
+        )
+    assert [r.test_case_index for r in serial] == [0, 0, 1, 1]
+    assert all(r.output.startswith("（fake）") for r in serial)

@@ -33,6 +33,7 @@ from langgraph.types import interrupt
 from pydantic import ValidationError
 
 from .assertions import check_assertion
+from .backend import carry_context
 from .cache import eval_cache, key_for_eval, key_for_target, target_cache
 from .llm import build_config, call_fingerprint, plain_call, structured_call
 from .prompts import (
@@ -550,21 +551,22 @@ def _run_matrix(
             for i, c, s in work
         ]
     else:
-        with ThreadPoolExecutor(max_workers=concurrency) as ex:
-            runs = list(
-                ex.map(
-                    lambda job: _run_one_target(
-                        job[0],
-                        job[1],
-                        prompt,
-                        target_model,
-                        expected=expected_fn(job[0]),
-                        assert_mode=mode,
-                        sample=job[2],
-                    ),
-                    work,
-                )
+
+        def _job(job: tuple[int, str, int]) -> TestRun:
+            return _run_one_target(
+                job[0],
+                job[1],
+                prompt,
+                target_model,
+                expected=expected_fn(job[0]),
+                assert_mode=mode,
+                sample=job[2],
             )
+
+        # carry_context 不是可选项：ThreadPoolExecutor 不继承 ContextVar，
+        # 不包一层就会在并发分支上绕过注入的假后端（C5）。
+        with ThreadPoolExecutor(max_workers=concurrency) as ex:
+            runs = list(ex.map(carry_context(_job), work))
     # 并发返回顺序不保证，按（用例, 采样）排序保持输出稳定
     runs.sort(key=lambda r: (r.test_case_index, r.sample_index))
     n_cached = sum(1 for r in runs if r.cache_hit)

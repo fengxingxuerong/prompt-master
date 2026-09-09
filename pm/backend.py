@@ -12,13 +12,16 @@
 
 ContextVar 的作用域是「当前线程 / 当前异步任务」：注入与撤销只影响自己，
 不改动任何模块属性，因此不存在"谁把谁的补丁摘掉"这类竞态。
+但**线程池工作线程不会继承提交者的上下文**，所以需要下面的 `carry_context`；
+这也是旧版注释里没写明白的一点（对应审查结论 C5）。
 """
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,3 +58,33 @@ def cache_disabled() -> bool:
     """当前上下文是否要求禁用本地缓存。"""
     hook = _VAR.get()
     return bool(hook is not None and hook.disable_cache)
+
+
+def carry_context(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """把提交侧线程的 ContextVar 快照带进线程池工作线程。
+
+    为什么需要：`ThreadPoolExecutor` 的工作线程不继承提交者的上下文（只有
+    `asyncio.to_thread` 会）。并发分支一旦走线程池，`use(hook)` 注入的假后端、
+    `disable_cache` 开关、以及 `pm.testing` 的运行态计数上下文全都会消失，表现是：
+
+    - 测试与 `PM_FAKE_BACKEND` 演示模式里，目标模型调用绕过假实现去碰真实端点
+      （没配 Key 整批 failed，“无 Key 也能跑”的卖点直接属伪；配了 Key 则测试静默烧真实额度）；
+    - 钩子里的 `disable_cache` 在并发分支失效，演示跑会污染 `logs/*_cache.json`。
+
+    用法：`ex.map(carry_context(worker), items)` —— 必须在提交侧（主线程）包装。
+    每个任务用一份独立快照：同一个 `Context` 不允许被两个线程同时 enter。
+    """
+    parent = copy_context()
+    carried = [(var, parent[var]) for var in parent]
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def _run() -> Any:
+            for var, value in carried:
+                if var.get(None) is not value:
+                    var.set(value)
+            return fn(*args, **kwargs)
+
+        return copy_context().run(_run)
+
+    return wrapper
