@@ -1,0 +1,31 @@
+# pre-commit 质量门禁：提交前自动跑 lint / format / 测试
+# 安装：pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        args: [check, pm/, tests/, run.py, examples/]
+      - id: ruff-format
+        args: [pm/, tests/, run.py, examples/]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.3.1
+    hooks:
+      - id: mypy
+        args: [pm/, run.py]
+        pass_filenames: false
+        additional_dependencies:
+          - pydantic>=2.13
+          - langgraph>=1.2
+          - langchain-core>=1.6
+          - langchain-openai>=1.6
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (quick)
+        entry: python -m pytest tests/ -q
+        language: system
+        pass_filenames: false
+        always_run: true

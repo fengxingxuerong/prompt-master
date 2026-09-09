@@ -1,0 +1,33 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 密钥（走环境变量注入，绝不让密钥进 git 历史）
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# 运行产物（状态存档 / 报告 / 缓存 / 检查点）
+logs/
+*.db
+*.log
+
+# 验收 / e2e 脚本跑出来的临时报告（不属于源码，但 .sh/.ps1 脚本本身要入库）
+e2e_report*.md
+e2e_*_report.md
+examples/sample_report.md
+.pytest_cache*
+coverage.xml
+htmlcov/
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

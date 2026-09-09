@@ -1,0 +1,53 @@
+[project]
+name = "prompt-master"
+version = "1.0.0"
+description = "提示词自动生成 / 测试 / 评估 / 迭代优化闭环（LangGraph）"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+# 目标语法：项目 README 推荐 python3.11
+target-version = "py311"
+line-length = 100
+src = ["pm", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade（现代化语法）
+    "B",      # flake8-bugbear（常见 bug 模式）
+    "BLE",    # flake8-blind-except（盲捕；代码中已有 noqa: BLE001 显式豁免）
+    "C4",     # flake8-comprehensions
+    "RUF",    # ruff 专属
+]
+ignore = [
+    "E501",   # 行长 100 内即可，不强制 79
+    "RUF001", # 混淆字符检测对中文/全角标点误报严重
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试代码允许相对宽松
+"tests/*" = ["B011"]
+"examples/*" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["pm", "run.py", "run_server.py"]
+# LangGraph / LangChain 无完整 stub，忽略缺失 import
+ignore_missing_imports = true
+# 不跟随解析第三方包（numpy 等 stub 在 3.13 下有语法兼容问题，且非本项目代码）
+follow_imports = "skip"
+# 存量代码先用非严格模式：只保证显式标注的函数签名一致
+check_untyped_defs = false
+disallow_untyped_defs = false
+warn_unused_ignores = false
+no_implicit_optional = true

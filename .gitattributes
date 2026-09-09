@@ -1,0 +1,26 @@
+# 统一换行策略：仓库内一律 LF，检出时按平台需要转换。
+# 关键作用：examples/run_e2e_stub.sh 若在 Windows 上被检成 CRLF，
+# CI 的 ubuntu runner 里会报 `bash\r: No such file or directory`。
+* text=auto
+
+*.py    text eol=lf
+*.md    text eol=lf
+*.sh    text eol=lf
+*.toml  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.txt   text eol=lf
+*.json  text eol=lf
+.env.example text eol=lf
+.gitignore   text eol=lf
+
+# PowerShell 脚本保留 CRLF：Windows PowerShell 5.1 对 here-string 的换行更挑
+*.ps1 text eol=crlf
+
+# 二进制（防止 diff/merge 破坏内容）
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.db  binary
