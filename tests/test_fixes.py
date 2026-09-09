@@ -798,7 +798,7 @@ def test_run_matrix_concurrency_keeps_fake_backend():
             prompt="一个提示词",
             target_model="fake-model",
             expected_fn=lambda _i: None,
-            mode="none",
+            mode_fn=lambda _i: "none",
             k=2,
             concurrency=4,
         )
@@ -817,7 +817,7 @@ def test_run_matrix_serialises_when_concurrency_is_one():
             prompt="一个提示词",
             target_model="fake-model",
             expected_fn=lambda _i: None,
-            mode="none",
+            mode_fn=lambda _i: "none",
             k=2,
             concurrency=1,
         )

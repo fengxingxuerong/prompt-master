@@ -51,6 +51,23 @@ def setup_logging(verbose: bool) -> None:
         logging.getLogger("openai").setLevel(logging.WARNING)
 
 
+def _resolve_case_mode(
+    item: dict, default_mode: str, index: int, p: argparse.ArgumentParser
+) -> str:
+    """取这条用例自己的 mode；没写就用全局值。非法值直接报错而不是静默回退。
+
+    静默回退会把一条本意是“规则”的断言变成“字面比对”，后果要到报告里才看得见。
+    """
+    raw = str(item.get("mode") or item.get("assert_mode") or "").strip()
+    if not raw:
+        return default_mode
+    try:
+        return assert_mode_arg(raw)
+    except argparse.ArgumentTypeError as e:
+        p.error(f"--cases-file 第 {index + 1} 条：{e}")
+        return default_mode  # 不可达：p.error 会 SystemExit
+
+
 def assert_mode_arg(value: str) -> str:
     """--assert-mode 的解析器：除内置三种外，还要能接 `custom:<name>`。
 
@@ -310,6 +327,7 @@ def main() -> int:
         metavar="MODE",
         help="事实断言模式（配合 --cases-file 的 expected，默认 contains；"
         "rule = 把 expected 当需求规则交给评委逐条核验，不做字面比对；"
+        '单条用例可用 "mode" 覆盖此默认值；'
         "可选 exact/contains/regex/rule/custom:<已注册名>）",
     )
     p.add_argument(
@@ -385,7 +403,13 @@ def main() -> int:
                 # 静默截断会让本轮永远无法判达标，且原因藏在报告角落里
                 p.error(f"--cases-file 最多 8 条用例，当前 {len(raw)} 条；请筛选后再跑")
             seed_cases.append(
-                {"input": str(item["input"]), "expected": str(item.get("expected") or "")}
+                {
+                    "input": str(item["input"]),
+                    "expected": str(item.get("expected") or ""),
+                    # 每条可自带 mode（"mode" 或 "assert_mode"），没写就用全局 --assert-mode：
+                    # 一份用例集里混着写字面片段与需求规则才是常态
+                    "mode": _resolve_case_mode(item, args.assert_mode, i, p),
+                }
             )
         # 用例数以用户提供为准（断言按序号与 expected 对齐）
         args.cases = len(seed_cases)
@@ -395,18 +419,19 @@ def main() -> int:
         # 再看报告，不如现在就拦住（真实跑踩过一次，见 qa_report 第十二节）。
         from pm.assertions import looks_like_rule
 
-        if args.assert_mode in {"contains", "exact"}:
-            rule_like = [
-                i + 1 for i, c in enumerate(seed_cases) if looks_like_rule(c.get("expected", ""))
-            ]
-            if rule_like:
-                p.error(
-                    f"--cases-file 第 {', '.join(map(str, rule_like))} 条的 expected 读起来是需求规则而不是"
-                    "字面片段，contains/exact 永远命不中。二选一："
-                    '① 改成输出里真会出现的一段字（如 "未提供：订单号"）；'
-                    "② 改用 --assert-mode rule，交给评委逐条核验（默认只提醒不否决，"
-                    "需要硬约束再设 PM_RULE_VETO=1）。"
-                )
+        rule_like = [
+            i + 1
+            for i, c in enumerate(seed_cases)
+            if c["mode"] in {"contains", "exact"} and looks_like_rule(c.get("expected", ""))
+        ]
+        if rule_like:
+            p.error(
+                f"--cases-file 第 {', '.join(map(str, rule_like))} 条的 expected 读起来是需求规则而不是"
+                "字面片段，contains/exact 永远命不中。二选一："
+                '① 改成输出里真会出现的一段字（如 "未提供：订单号"）；'
+                '② 给这几条加 "mode": "rule"（或整体 --assert-mode rule），'
+                "交给评委逐条核验（默认只提醒不否决，需要硬约束再设 PM_RULE_VETO=1）。"
+            )
 
     if not os.getenv("PM_API_KEY") and not os.getenv("PM_TARGET_API_KEY"):
         print(

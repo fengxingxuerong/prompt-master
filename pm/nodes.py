@@ -532,12 +532,45 @@ def _run_one_target(
     return _attach_assertion(run, expected, assert_mode)
 
 
+def _case_ground_truth(
+    state: State,
+) -> tuple[Callable[[int], str], Callable[[int], str], Callable[[int], str]]:
+    """一份种子用例集的三种口径：(expected_fn, mode_fn, rules_fn)。
+
+    为什么每条自带 mode：真实需求就是混着写的 —— 一行断言“输出里必须有
+    `未提供：订单号`”（字面），另一行断言“不得编造取件时间”（语义）。全局单一 mode
+    逼着整份用例集选边站，选哪边都会把另一半弄成假阳性/假阴性。
+    主路与基线共用本函数，否则两边口径不一致，Δ 不可比。
+    """
+    default_mode = (state.get("assertion_mode") or "contains").strip() or "contains"
+    seeds = state.get("seed_cases", []) or []
+
+    def _field(c: Any, key: str) -> str:
+        return str(c.get(key) or "").strip() if isinstance(c, dict) else ""
+
+    def expected(i: int) -> str:
+        if not 0 <= i < len(seeds):
+            return ""
+        return _field(seeds[i], "expected")
+
+    def mode(i: int) -> str:
+        if not 0 <= i < len(seeds):
+            return ""  # 没有对应种子：不跑断言，而不是拿全局 mode 去比空串
+        return _field(seeds[i], "mode") or _field(seeds[i], "assert_mode") or default_mode
+
+    def rules(i: int) -> str:
+        # 只有这条用例自己选了 rule 模式，它的 expected 才是给评委的核对清单
+        return expected(i) if mode(i) == RULE_MODE else ""
+
+    return expected, mode, rules
+
+
 def _run_matrix(
     cases: list[str],
     prompt: str,
     target_model: str,
-    expected_fn,
-    mode: str,
+    expected_fn: Callable[[int], str],
+    mode_fn: Callable[[int], str],
     k: int,
     concurrency: int,
 ) -> tuple[list[TestRun], int]:
@@ -550,7 +583,13 @@ def _run_matrix(
     if concurrency <= 1 or len(work) <= 1:
         runs = [
             _run_one_target(
-                i, c, prompt, target_model, expected=expected_fn(i), assert_mode=mode, sample=s
+                i,
+                c,
+                prompt,
+                target_model,
+                expected=expected_fn(i),
+                assert_mode=mode_fn(i),
+                sample=s,
             )
             for i, c, s in work
         ]
@@ -563,7 +602,7 @@ def _run_matrix(
                 prompt,
                 target_model,
                 expected=expected_fn(job[0]),
-                assert_mode=mode,
+                assert_mode=mode_fn(job[0]),
                 sample=job[2],
             )
 
@@ -583,19 +622,12 @@ def test_node(state: State) -> dict:
     cases = state.get("test_cases", [])
     target_model = state.get("target_model", "未指定")
     max_concurrency = _target_concurrency()
-    # ground-truth：seed_cases 里的 expected 与 test_cases 按序号一一对应
-    mode = (state.get("assertion_mode") or "contains").strip()
-    expected_list = [
-        (c.get("expected") or "") if isinstance(c, dict) else ""
-        for c in state.get("seed_cases", []) or []
-    ]
-
-    def _expected(i: int) -> str:
-        return expected_list[i] if i < len(expected_list) else ""
+    # ground-truth：seed_cases 里的 expected / mode 与 test_cases 按序号一一对应
+    expected_fn, mode_fn, _rules = _case_ground_truth(state)
 
     k = _samples_per_case()
     runs, n_real_calls = _run_matrix(
-        list(cases), prompt, target_model, _expected, mode, k, max_concurrency
+        list(cases), prompt, target_model, expected_fn, mode_fn, k, max_concurrency
     )
 
     n_failed = sum(1 for r in runs if r.error)
@@ -804,22 +836,13 @@ def _rule_veto_enabled() -> bool:
 
 
 def _rules_for_case(state: State) -> Callable[[int], str]:
-    """rule 模式下把 seed_cases 的 expected 当核对清单交给评委；其他模式一律返回空。
+    """给评委的核对清单：仅当**该条用例自己**选了 rule 模式。
 
-    为什么需要这个模式：真实跑里人写的 expected 九成是“必须标注缺失项”这种规则，
+    为什么需要：真实跑里人写的 expected 九成是“必须标注缺失项”这种规则，
     拿它去跑 contains 只会永远命不中，基线与优化版一起被打死，对比失去意义。
+    口径与主路/基线共用 `_case_ground_truth`，避免两边对同一条用例理解不一致。
     """
-    if (state.get("assertion_mode") or "").strip() != RULE_MODE:
-        return lambda _i: ""
-    rules = [
-        str(c.get("expected") or "").strip() if isinstance(c, dict) else ""
-        for c in state.get("seed_cases", []) or []
-    ]
-
-    def _fn(i: int) -> str:
-        return rules[i] if 0 <= i < len(rules) else ""
-
-    return _fn
+    return _case_ground_truth(state)[2]
 
 
 def _merge_rule_verdicts(
@@ -1419,23 +1442,16 @@ def baseline_node(state: State) -> dict:
     task = state["task"]
     context = state.get("context", "")
     target_model = state.get("target_model", "未指定")
-    mode = (state.get("assertion_mode") or "contains").strip()
-    expected_list = [
-        (c.get("expected") or "") if isinstance(c, dict) else ""
-        for c in state.get("seed_cases", []) or []
-    ]
-
-    def _expected(i: int) -> str:
-        return expected_list[i] if i < len(expected_list) else ""
+    # 与主路共用同一个口径函数：expected / mode / rules 三者必须逐条一致，否则 Δ 不可比
+    _expected, _mode, rules_fn = _case_ground_truth(state)
 
     judges = _active_judges()
     judge_spec = _judge_spec(judges)
     # 基线用与主路完全相同的采样次数与评分口径，否则 Δ 不可比
     k = _samples_per_case()
-    rules_fn = _rules_for_case(state)
     try:
         runs, n_calls = _run_matrix(
-            cases, task, target_model, _expected, mode, k, _target_concurrency()
+            cases, task, target_model, _expected, _mode, k, _target_concurrency()
         )
         evals_raw, errors, _, n_eval_calls = _evaluate_runs(
             [r.model_dump() for r in runs],

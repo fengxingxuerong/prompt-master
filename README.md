@@ -87,7 +87,14 @@ cp .env.example .env     # 填入 API Key
 # 确定性校验失败会一票否决"达标"（评委放水会被标记）
 .venv/bin/python run.py --task "解析销售数据 CSV" \
                         --cases-file cases.json --assert-mode contains
-#   cases.json: [{"input": "华东,120,华南,98", "expected": "华东"}]
+#   cases.json 支持逐条覆盖模式（一份用例集里混写两类才是常态）：
+#   cases.json: [
+#     {"input": "华东,120,华南,98", "expected": "华东"},                       # 跟全局：contains
+#     {"input": "缺货", "expected": "数据缺失", "mode": "exact"},                # 字面片段
+#     {"input": "含糊提问", "expected": "必须先列出缺失信息再回答", "mode": "rule"}  # 交评委核验
+#   ]
+#   API 侧同名字段是 `test_cases[].assert_mode`（逐条）与 `assertion_mode`（全局）。
+#   字面类模式 + 规则形状的 expected 会被 CLI 当场拦住（也会在运行时降级为 ⚠️ 仅提醒）。
 #   ⚠️ `expected` 有两种写法，别再弄混（两种都是支持的，但语义完全不同）：
 #   • 字面片段 → 用 `contains` / `exact` / `regex` / `custom:<name>`，确定性校验，失败**一票否决**；
 #   • 需求规则 → 用 `--assert-mode rule`，它会被当作核对清单注入评估器（<RULES>），

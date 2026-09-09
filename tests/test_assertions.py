@@ -744,3 +744,148 @@ def test_rule_verdicts_reach_report_rows():
     assert "⚠️ 语义判定" in report
     assert "PM_RULE_VETO" in report, "报告要说明这是语义判定、默认不否决"
     assert final["aggregate"]["n_assertions"] == 0, "语义判定默认不进否决计数"
+
+
+# --- 逐条 mode：一份用例集里混写字面片段与需求规则 ---
+
+
+def test_case_ground_truth_per_mode():
+    from pm.nodes import _case_ground_truth
+
+    state = {
+        "assertion_mode": "contains",
+        "seed_cases": [
+            {"input": "a", "expected": "未提供：订单号"},
+            {"input": "b", "expected": "不得编造取件时间", "mode": "rule"},
+            {"input": "c", "expected": "\\d{4}", "assert_mode": "regex"},
+        ],
+    }
+    expected, mode, rules = _case_ground_truth(state)
+    assert [mode(i) for i in range(3)] == ["contains", "rule", "regex"]
+    assert expected(1) == "不得编造取件时间"
+    assert [rules(i) for i in range(3)] == ["", "不得编造取件时间", ""]
+    assert expected(9) == "" and mode(9) == "" and rules(9) == ""
+    # 没种子就不能拿全局 mode 去比空串
+    empty = _case_ground_truth({"assertion_mode": "rule", "seed_cases": []})
+    assert empty[1](0) == "" and empty[2](0) == ""
+
+
+def test_mixed_modes_end_to_end(monkeypatch):
+    """同一份用例集：case#0 走确定性否决，case#1 走评委语义判定（只提醒）。"""
+    from pm import testing
+    from pm.graph import build_app
+    from pm.schemas import EvaluationResult as ER
+    from pm.schemas import RuleCheck
+    from pm.state import initial_state
+
+    base = testing._fake_structured
+
+    def structured(role, model_cls, system, user, max_retries=3, overrides=None):
+        ev, meta = base(role, model_cls, system, user, max_retries, overrides)
+        if model_cls is ER and "<RULES>" in user:
+            ev.rule_checks = [
+                RuleCheck(rule="不得编造取件时间", satisfied=False, evidence="未找到")
+            ]
+        return ev, meta
+
+    state = initial_state(
+        task="让AI分析销售数据",
+        target_model="fake",
+        n_test_cases=2,
+        max_iterations=0,
+        assertion_mode="contains",
+        seed_cases=[
+            {"input": "华东,120", "expected": "未提供：订单号"},
+            {"input": "华南,98", "expected": "不得编造取件时间", "mode": "rule"},
+        ],
+    )
+    with testing.scope("progress", structured=structured):
+        final = build_app().invoke(
+            state, {"configurable": {"thread_id": "mixed-mode"}, "recursion_limit": 60}
+        )
+
+    by_case: dict[int, dict] = {}
+    for r in final.get("test_runs", []):
+        a = r.get("assertion")
+        if isinstance(a, dict):
+            by_case[int(r["test_case_index"])] = a
+    assert by_case[0]["mode"] == "contains" and not by_case[0]["passed"]
+    assert by_case[0].get("advisory_kind", "") != "semantic"
+    assert by_case[1]["mode"] == "rule" and by_case[1]["advisory_kind"] == "semantic"
+
+    agg = final["aggregate"]
+    # 只有确定性那条进否决计数；语义判定只提醒
+    assert agg["n_assertions"] == 1 and agg["n_assertions_failed"] == 1
+    assert agg["assertion_veto"] is True
+
+    report = final["final_report"] or ""
+    assert "❌ 未通过" in report and "⚠️ 语义判定" in report
+    assert "未提供：订单号" in report and "不得编造取件时间" in report
+
+
+def test_cli_per_case_mode_overrides_global_and_validates(tmp_path):
+    """非法的逐条 mode 必须当场报错并指出是第几条，不能静默回退成字面比对。"""
+    import json
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    cases = tmp_path / "cases.json"
+
+    def run_cli(payload: list[dict], extra: list[str]):
+        cases.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return subprocess.run(
+            [
+                sys.executable,
+                "run.py",
+                "--task",
+                "写一个分析数据的提示词",
+                "--cases-file",
+                str(cases),
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            # 关键：把 key 清空 + 端点指死。否则 run.py 会 load_dotenv() 捡到仓库 .env
+            # 里的真实 Key，这条用例就变成"真打 180 秒网络"——CLI 边界测试必须自己掐断这条退路。
+            env={
+                **os.environ,
+                "PYTHONIOENCODING": "utf-8",
+                "PM_API_KEY": "",
+                "PM_TARGET_API_KEY": "",
+                "PM_BASE_URL": "http://127.0.0.1:9/v1",
+            },
+            timeout=120,
+            cwd=str(root),
+        )
+
+    bad = run_cli([{"input": "a", "expected": "x", "mode": "semantic"}], [])
+    assert bad.returncode == 2
+    assert "第 1 条" in (bad.stderr or "") and "未知断言模式" in (bad.stderr or "")
+
+    # 全局 contains 会因规则形状的 expected 被拦；给那条加 "mode": "rule" 就放行到下一阶段
+    blocked = run_cli([{"input": "a", "expected": "必须标注缺失项"}], [])
+    assert blocked.returncode == 2 and "永远命不中" in (blocked.stderr or "")
+    allowed = run_cli(
+        [{"input": "a", "expected": "必须标注缺失项", "mode": "rule"}], ["--max-iter", "0"]
+    )
+    assert "永远命不中" not in (allowed.stderr or ""), allowed.stderr[-300:]
+    # 预检放行后才走到 Key 检查：说明"逐条 mode"确实改变了判定路径，而不是被忽略
+    assert "未检测到 PM_API_KEY" in (allowed.stderr or ""), allowed.stderr[-300:]
+
+
+def test_api_case_level_assert_mode():
+    from pm.server import CaseInput
+
+    ok = CaseInput(input="a", expected="必须标注缺失项", assert_mode="rule")
+    assert ok.assert_mode == "rule"
+    assert CaseInput(input="a").assert_mode == "", "留空表示用请求级默认"
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CaseInput(input="a", assert_mode="startswith")

@@ -89,6 +89,13 @@ class CaseInput(BaseModel):
 
     input: str = Field(min_length=1, max_length=8000, description="测试输入")
     expected: str = Field(default="", max_length=8000, description="期望输出（ground-truth，可空）")
+    # 逐条覆盖全局 assertion_mode：一份用例集里混着写字面片段与需求规则才是常态
+    assert_mode: str = Field(
+        default="",
+        max_length=40,
+        pattern=r"^(|exact|contains|regex|rule|custom:[a-zA-Z][a-zA-Z0-9_]*)$",
+        description="本条的断言模式；空 = 用请求级的 assertion_mode",
+    )
 
 
 class OptimizeRequest(BaseModel):
