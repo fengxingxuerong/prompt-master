@@ -95,6 +95,7 @@ def test_assertion_rows_are_rendered_as_hard_evidence():
                     "mode": "contains",
                     "passed": False,
                     "detail": "缺少「数据缺失」标注",
+                    "expected": "缺失信息必须写明「数据缺失」",
                 },
             }
         ]
@@ -102,6 +103,21 @@ def test_assertion_rows_are_rendered_as_hard_evidence():
     text, _ = render_report(state)
     assert "## 事实断言（ground-truth 校验）" in text
     assert "❌ 未通过" in text and "缺少「数据缺失」标注" in text
+    assert "缺失信息必须写明「数据缺失」" in text, "期望片段要进表，否则人无法复核判定"
+
+
+def test_long_expected_is_clipped_so_the_table_does_not_break():
+    state = _state(
+        test_runs=[
+            {
+                "test_case_index": 1,
+                "assertion": {"mode": "regex", "passed": True, "expected": "一" * 300},
+            }
+        ]
+    )
+    text, _ = render_report(state)
+    row = next(ln for ln in text.splitlines() if ln.startswith("| case#1 |"))
+    assert row.count("|") == 6, f"表格列数被撑坏了：{row}"
 
 
 def test_pick_best_backtracks_to_historical_high():

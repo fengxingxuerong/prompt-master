@@ -204,12 +204,16 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     if assert_runs:
         lines.append("## 事实断言（ground-truth 校验）")
         lines.append("")
-        lines.append("| 用例 | 模式 | 结果 | 说明 |")
-        lines.append("|---|---|---|---|")
+        lines.append("| 用例 | 模式 | 结果 | 说明 | 期望片段 |")
+        lines.append("|---|---|---|---|---|")
         for r, a in assert_runs:
+            exp_cell = str(a.get("expected") or "")
+            if len(exp_cell) > 120:
+                exp_cell = exp_cell[:120] + "…"
             lines.append(
                 f"| case#{r.get('test_case_index', '?')} | {a.get('mode', '-')} "
-                f"| {'✅ 通过' if a.get('passed') else '❌ 未通过'} | {a.get('detail', '')} |"
+                f"| {'✅ 通过' if a.get('passed') else '❌ 未通过'} "
+                f"| {a.get('detail', '')} | {exp_cell} |"
             )
         lines.append("")
 

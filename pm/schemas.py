@@ -289,18 +289,36 @@ class AggregateScore(BaseModel):
             for k, v in raw_assertions.items()
         }
         n_assert = len(assertions)
-        failed_idx = {i for i, a in assertions.items() if not a.get("passed")}
-        n_assert_failed = len(failed_idx)
+        failed_items = [(k, a) for k, a in assertions.items() if not (a or {}).get("passed")]
+        failed_keys = {k for k, _ in failed_items}
+        n_assert_failed = len(failed_items)
         assertion_veto = n_assert_failed > 0
         if assertion_veto:
-            issues.insert(
-                0,
+            # 只给计数的否决等于没给信息：修订器不知道哪条期望没满足、实际输出长什么样，
+            # 就会在同一处错误上反复空修订。把“比什么 / 拿到什么”逐条贴上去。
+            failed_items.sort(key=lambda kv: str(kv[0]))
+            veto_lines = [
                 f"[事实断言] {n_assert_failed}/{n_assert} 条带标注用例的确定性校验未通过"
-                "（事实不符），无论评委打分多高都不判达标。",
-            )
+                "（事实不符），无论评委打分多高都不判达标。"
+            ]
+            for case_idx, raw_a in failed_items[:5]:
+                a: dict[str, Any] = raw_a or {}
+                bits = [f"[事实断言] case#{case_idx} {a.get('mode', '-')} 未通过"]
+                detail = str(a.get("detail") or "").strip()
+                exp = str(a.get("expected") or "").strip()
+                got = str(a.get("output_excerpt") or "").strip()
+                if detail:
+                    bits.append(f"：{detail}")
+                if exp:
+                    bits.append(f"｜期望片段：{exp}")
+                if got:
+                    bits.append(f"｜实际输出：{got}")
+                bits.append("｜请优先修正这一条，它比评委分数硬。")
+                veto_lines.append("".join(bits))
+            issues[:0] = veto_lines
         # 评委给高分但事实不符 —— 这是 LLM 评委被输出说服（放水）的直接证据
         gaming = [
-            e for e in evals if e.test_case_index in failed_idx and e.weighted_score >= threshold
+            e for e in evals if e.test_case_index in failed_keys and e.weighted_score >= threshold
         ]
         for e in gaming:
             issues.append(

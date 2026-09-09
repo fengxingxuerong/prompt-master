@@ -117,6 +117,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File examples/run_e2e_stub.ps1
 | `PM_PAIRWISE` | `1` | 是否做成对盲评（优化版 vs 基线，A/B 随机映射） |
 | `PM_UNSTABLE_SPREAD` | `1.5` | 同用例采样分差超过此值 → 报告点名为“结论不稳” |
 | `PM_JUDGE_BIAS_ALERT` | `1.0` | 评委自报分系统性高于代码加权分的告警线 |
+| `PM_ASSERT_NORMALIZE` | `1` | `contains` 断言忽略大小写 / 全半角 / 空白差异（veto 下不误杀排版差异）；`0` 回到严格字面 |
+| `PM_ASSERT_REGEX_TIMEOUT` | `2` | 有风险形状的正则（量词包住分组）在子进程里跑，超预算即杀并按未通过处理 |
 | `PM_FORCE_JSON_CHANNEL` | 关 | 置 1 则跳过原生结构化输出通道（不置也行：撞过 400 后会记住端点指纹自动跳过） |
 | `PM_STRUCT_METHOD` | 空 | 结构化输出方法：空 = langchain 默认（`json_schema`）；端点只认 function calling 时设 `function_calling`（trace 的 `channel` 会如实标为 `function_calling`） |
 | `PM_JUDGES` / `PM_JUDGE_DISAGREEMENT` | `2` / `2.0` | 评委数与分差阈值 |
@@ -261,6 +263,12 @@ system prompt"（元话语泄漏）而评估器给高分的情况——评估器
 
 **评委放水监控从日志进了报告**：`judge_bias = mean(自报分 - 代码加权分)`，
 超过 `PM_JUDGE_BIAS_ALERT`（默认 1.0）就在「置信度」一节里告警，建议换评委家族或降温。
+
+**断言失败不再只报个计数**：`[事实断言] case#N <mode> 未通过：… ｜期望片段：… ｜实际输出：…`
+会逐条贴进修订器的反馈（期望片段给到 600 字而不是旧版 60 字），报告里的断言表也多了「期望片段」列。
+`contains` 默认忽略大小写 / 全半角 / 空白（`exact` 仍逐字严格）；`regex` 遇到嵌套量词直接拒执行，
+其余被量词包住的模式放到子进程里跑并受 `PM_ASSERT_REGEX_TIMEOUT` 约束——因为 `re` 在 C 层匹配时
+不释放 GIL，线程超时根本抢不到运行机会（实测过），只有进程能被 `terminate()`。
 
 **成本**：默认口径约为旧版的 1.9×（自检场景 32 → 61 次调用）；预算紧时：
 

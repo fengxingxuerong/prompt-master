@@ -22,6 +22,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -48,6 +49,27 @@ def setup_logging(verbose: bool) -> None:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         logging.getLogger("openai").setLevel(logging.WARNING)
+
+
+def assert_mode_arg(value: str) -> str:
+    """--assert-mode 的解析器：除内置三种外，还要能接 `custom:<name>`。
+
+    只能用 argparse 的 choices 时，注册过的自定义断言从 API 能跑、从 CLI 跑不了
+    （一个只剩半边入口的功能等于没做）。这里改成显式校验，错误提示也写清楚。
+    """
+    raw = (value or "").strip()
+    if raw in {"exact", "contains", "regex"}:
+        return raw
+    if raw.startswith("custom:"):
+        name = raw[len("custom:") :].strip()
+        if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", name):
+            raise argparse.ArgumentTypeError(
+                f"custom: 后的断言名非法：{name!r}（仅允许字母开头的字母/数字/下划线）"
+            )
+        return f"custom:{name}"
+    raise argparse.ArgumentTypeError(
+        f"未知断言模式：{value!r}（可选 exact / contains / regex / custom:<已注册名>）"
+    )
 
 
 def recursion_budget(max_iterations: int) -> int:
@@ -284,8 +306,10 @@ def main() -> int:
     p.add_argument(
         "--assert-mode",
         default="contains",
-        choices=["exact", "contains", "regex"],
-        help="事实断言模式（配合 --cases-file 的 expected，默认 contains）",
+        type=assert_mode_arg,
+        metavar="MODE",
+        help="事实断言模式（配合 --cases-file 的 expected，默认 contains；"
+        "可选 exact/contains/regex/custom:<已注册名>）",
     )
     p.add_argument(
         "--samples",
