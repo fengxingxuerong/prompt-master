@@ -218,6 +218,12 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
                 f"| case#{r.get('test_case_index', '?')} | {a.get('mode', '-')} "
                 f"| {mark} | {a.get('detail', '')} | {exp_cell} |"
             )
+        if any(str(a.get("mode")) == "rule" for _, a in assert_runs):
+            lines.append("")
+            lines.append(
+                "> `rule` 行由**评委**逐条核验（带主观噪声），默认不计入否决；"
+                "要把它当硬约束请设 `PM_RULE_VETO=1`。"
+            )
         lines.append("")
 
     # 代码侧质量门警告（元话语/上下文泄漏，评估时已注入核查）

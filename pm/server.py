@@ -109,8 +109,8 @@ class OptimizeRequest(BaseModel):
     assertion_mode: str = Field(
         default="",
         max_length=40,
-        pattern=r"^(|exact|contains|regex|custom:[a-zA-Z][a-zA-Z0-9_]*)$",
-        description="事实断言模式；空 = contains",
+        pattern=r"^(|exact|contains|regex|rule|custom:[a-zA-Z][a-zA-Z0-9_]*)$",
+        description="事实断言模式；空 = contains，rule = 把 expected 当需求规则交评委核验",
     )
 
 

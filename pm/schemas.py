@@ -164,6 +164,22 @@ class DimensionScores(BaseModel):
     quality: float = Field(ge=1, le=10, description="质量与深度")
 
 
+class RuleCheck(BaseModel):
+    """评委对**语义规则**的逐条核验（`--assert-mode rule`）。
+
+    为什么需要它：`contains`/`exact` 只能比字面片段，而大多数 ground-truth 标注写的是
+    “必须标注缺失项”这类规则——对它们做确定性比对永远命不中，只会把基线与优化版
+    一起打死。规则就交给评委判，但**与打分解耦**：它只回答“满足没满足”，
+    不影响维度分（否则同一件事被计入两次）。
+    """
+
+    rule: str = Field(description="规则原文（从核对清单里原样抄回来）")
+    satisfied: bool = Field(description="输出是否满足该条规则")
+    evidence: str = Field(
+        default="", description="判据：从测试输出里摘的一句证据；找不到写“未找到”"
+    )
+
+
 class EvaluationResult(BaseModel):
     dimension_scores: DimensionScores
     model_reported_score: float = Field(
@@ -173,6 +189,10 @@ class EvaluationResult(BaseModel):
     suggestions: list[str] = Field(default_factory=list, description="可操作的改进建议")
     should_revise: bool = Field(description="是否需要修订")
     test_case_index: int = Field(default=0, description="本条评估对应的测试用例序号")
+    rule_checks: list[RuleCheck] = Field(
+        default_factory=list,
+        description="<RULES> 清单的逐条核验结果；没给清单就留空",
+    )
 
     # --- 代码侧派生字段（不交给模型填写） ---
     weighted_score: float = Field(default=0.0, description="按 WEIGHTS 加权计算的总分")

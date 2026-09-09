@@ -58,7 +58,7 @@ def assert_mode_arg(value: str) -> str:
     （一个只剩半边入口的功能等于没做）。这里改成显式校验，错误提示也写清楚。
     """
     raw = (value or "").strip()
-    if raw in {"exact", "contains", "regex"}:
+    if raw in {"exact", "contains", "regex", "rule"}:
         return raw
     if raw.startswith("custom:"):
         name = raw[len("custom:") :].strip()
@@ -68,7 +68,7 @@ def assert_mode_arg(value: str) -> str:
             )
         return f"custom:{name}"
     raise argparse.ArgumentTypeError(
-        f"未知断言模式：{value!r}（可选 exact / contains / regex / custom:<已注册名>）"
+        f"未知断言模式：{value!r}（可选 exact / contains / regex / rule / custom:<已注册名>）"
     )
 
 
@@ -309,7 +309,8 @@ def main() -> int:
         type=assert_mode_arg,
         metavar="MODE",
         help="事实断言模式（配合 --cases-file 的 expected，默认 contains；"
-        "可选 exact/contains/regex/custom:<已注册名>）",
+        "rule = 把 expected 当需求规则交给评委逐条核验，不做字面比对；"
+        "可选 exact/contains/regex/rule/custom:<已注册名>）",
     )
     p.add_argument(
         "--samples",
@@ -388,6 +389,24 @@ def main() -> int:
             )
         # 用例数以用户提供为准（断言按序号与 expected 对齐）
         args.cases = len(seed_cases)
+
+        # 预检：contains/exact 比的是字面片段，而人写的 expected 常常是需求规则。
+        # 那种写法永远命不中，只会把基线与优化版一起打死 —— 与其跑完 20 次计费调用
+        # 再看报告，不如现在就拦住（真实跑踩过一次，见 qa_report 第十二节）。
+        from pm.assertions import looks_like_rule
+
+        if args.assert_mode in {"contains", "exact"}:
+            rule_like = [
+                i + 1 for i, c in enumerate(seed_cases) if looks_like_rule(c.get("expected", ""))
+            ]
+            if rule_like:
+                p.error(
+                    f"--cases-file 第 {', '.join(map(str, rule_like))} 条的 expected 读起来是需求规则而不是"
+                    "字面片段，contains/exact 永远命不中。二选一："
+                    '① 改成输出里真会出现的一段字（如 "未提供：订单号"）；'
+                    "② 改用 --assert-mode rule，交给评委逐条核验（默认只提醒不否决，"
+                    "需要硬约束再设 PM_RULE_VETO=1）。"
+                )
 
     if not os.getenv("PM_API_KEY") and not os.getenv("PM_TARGET_API_KEY"):
         print(

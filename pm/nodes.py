@@ -26,13 +26,14 @@ import logging
 import os
 import random
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from langgraph.types import interrupt
 from pydantic import ValidationError
 
-from .assertions import check_assertion
+from .assertions import RULE_MODE, check_assertion
 from .backend import carry_context
 from .cache import eval_cache, key_for_eval, key_for_target, target_cache
 from .llm import build_config, call_fingerprint, plain_call, structured_call
@@ -41,6 +42,7 @@ from .prompts import (
     CLARIFIER_USER,
     COMPARATOR_SYSTEM,
     COMPARATOR_USER,
+    EVALUATOR_RULES,
     EVALUATOR_SYSTEM,
     EVALUATOR_USER,
     MOCKGEN_SYSTEM,
@@ -767,6 +769,66 @@ def _dedupe(items: list[str]) -> list[str]:
     return out
 
 
+def _rule_veto_enabled() -> bool:
+    """`PM_RULE_VETO=1` 时，评委判定的“规则未满足”也一票否决（默认只提醒）。
+
+    默认不否决是因为：评委判定本身带噪声，拿它否决等于把主观判断伪装成客观事实；
+    而确定性断言（contains/exact/regex/custom）才是硬证据。想要硬约束就显式开。
+    """
+    return (os.getenv("PM_RULE_VETO") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _rules_for_case(state: State) -> Callable[[int], str]:
+    """rule 模式下把 seed_cases 的 expected 当核对清单交给评委；其他模式一律返回空。
+
+    为什么需要这个模式：真实跑里人写的 expected 九成是“必须标注缺失项”这种规则，
+    拿它去跑 contains 只会永远命不中，基线与优化版一起被打死，对比失去意义。
+    """
+    if (state.get("assertion_mode") or "").strip() != RULE_MODE:
+        return lambda _i: ""
+    rules = [
+        str(c.get("expected") or "").strip() if isinstance(c, dict) else ""
+        for c in state.get("seed_cases", []) or []
+    ]
+
+    def _fn(i: int) -> str:
+        return rules[i] if 0 <= i < len(rules) else ""
+
+    return _fn
+
+
+def _merge_rule_verdicts(
+    assertions: dict[int, dict[str, Any]], evals: list[EvaluationResult]
+) -> dict[int, dict[str, Any]]:
+    """把评委的 rule_checks 折进断言视图：一个用例一条，任一规则不满足即视为未通过。
+
+    已有确定性断言的用例不被覆盖（硬证据优先）。默认标为 advisory：只提醒不否决。
+    """
+    veto = _rule_veto_enabled()
+    for ev in evals:
+        checks = list(getattr(ev, "rule_checks", None) or [])
+        if not checks:
+            continue
+        idx = int(ev.test_case_index)
+        if idx in assertions:
+            continue
+        bad = [c for c in checks if not c.satisfied]
+        assertions[idx] = {
+            "mode": RULE_MODE,
+            "passed": not bad,
+            "advisory": not veto,
+            "detail": (
+                "；".join(f"「{c.rule[:40]}」未满足：{c.evidence or '未找到证据'}" for c in bad[:3])
+                if bad
+                else f"{len(checks)} 条规则全部满足"
+            ),
+            "expected": "；".join(c.rule for c in checks)[:600],
+            "output_excerpt": "",
+            "score": 1.0 if not bad else 0.0,
+        }
+    return assertions
+
+
 def _evaluate_one(
     run: dict[str, Any],
     *,
@@ -777,6 +839,7 @@ def _evaluate_one(
     judge_spec: str,
     q_warns: list[str],
     errors: list[str],
+    rules: str = "",
 ) -> tuple[dict[str, Any], int, bool]:
     """评一份输出（一个采样），返回 (评估 dict, 额外 LLM 调用数, 是否命中缓存)。
 
@@ -807,16 +870,23 @@ def _evaluate_one(
     )
     if q_warns:
         user_prompt += evaluator_warning_block(q_warns)
+    if rules:
+        # 规则模式：把 expected 当核对清单（不是字面片段）交给评委逐条核验
+        user_prompt += render(EVALUATOR_RULES, rules=rules)
 
     # 1) 命中缓存直接复用（断点续跑 / 相同输出重复评估）
     cache = eval_cache()
     # 键里带上原始需求 / 上下文 / 质量警告：不同 task 不能串用同一份评估结果（H1）
+    extra = f"{task}\n{context}\n{'|'.join(q_warns)}"
+    if rules:
+        # 规则变了评估结论就会变：不进键就会拿到旧清单的判定
+        extra += f"\n<RULES>{rules}"
     ck = key_for_eval(
         prompt,
         run["test_input"],
         run["output"],
         judge_spec,
-        extra=f"{task}\n{context}\n{'|'.join(q_warns)}",
+        extra=extra,
     )
     if cache is not None:
         cached = cache.get(ck)
@@ -873,6 +943,7 @@ def _evaluate_runs(
     judges: list[str],
     judge_spec: str,
     q_warns: list[str],
+    rules_fn: Callable[[int], str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], int, int]:
     """逐样本评分后把同一用例的多次采样压成一条（中位数定分、极差当噪声）。"""
     raw: list[dict[str, Any]] = []
@@ -889,6 +960,7 @@ def _evaluate_runs(
             judge_spec=judge_spec,
             q_warns=q_warns,
             errors=errors,
+            rules=rules_fn(int(run.get("test_case_index", 0) or 0)) if rules_fn else "",
         )
         n_llm_calls += calls
         n_cache_hit += 1 if hit else 0
@@ -968,10 +1040,21 @@ def evaluate_node(state: State) -> dict:
         judges=judges,
         judge_spec=judge_spec,
         q_warns=q_warns,
+        rules_fn=_rules_for_case(state),
     )
     evals = [EvaluationResult.model_validate(e) for e in evaluations]
     # 事实断言（ground-truth）：从 test_runs 收集断言结果，参与聚合的一票否决
-    assertions = _collect_assertions(runs)
+    assertions = _merge_rule_verdicts(_collect_assertions(runs), evals)
+    n_rule = sum(1 for a in assertions.values() if a.get("mode") == RULE_MODE)
+    if n_rule:
+        logger.info(
+            "规则核验：%d 条用例走了 <RULES> 清单，未满足 %d 条（否决=%s）",
+            n_rule,
+            sum(
+                1 for a in assertions.values() if a.get("mode") == RULE_MODE and not a.get("passed")
+            ),
+            _rule_veto_enabled(),
+        )
     # 以**声明条数**为基准：用例数不足时 AggregateScore 自己拒绝判达标（C1）
     agg = AggregateScore.from_evaluations(
         evals,
@@ -1311,6 +1394,7 @@ def baseline_node(state: State) -> dict:
     judge_spec = _judge_spec(judges)
     # 基线用与主路完全相同的采样次数与评分口径，否则 Δ 不可比
     k = _samples_per_case()
+    rules_fn = _rules_for_case(state)
     try:
         runs, n_calls = _run_matrix(
             cases, task, target_model, _expected, mode, k, _target_concurrency()
@@ -1323,6 +1407,7 @@ def baseline_node(state: State) -> dict:
             judges=judges,
             judge_spec=judge_spec,
             q_warns=[],
+            rules_fn=rules_fn,
         )
     except Exception as e:  # noqa: BLE001 - 基线失败不应阻断主流程
         logger.warning("基线跑失败（不影响主流程）：%s", e)
@@ -1332,7 +1417,7 @@ def baseline_node(state: State) -> dict:
     agg = AggregateScore.from_evaluations(
         evals,
         n_expected=int(state.get("n_test_cases", 0) or 0),
-        assertions=_collect_assertions([r.model_dump() for r in runs]),
+        assertions=_merge_rule_verdicts(_collect_assertions([r.model_dump() for r in runs]), evals),
     )
     logger.info(
         "基线结果：avg=%.2f min=%.2f（与优化版同口径，用于算 Δ）", agg.avg_score, agg.min_score

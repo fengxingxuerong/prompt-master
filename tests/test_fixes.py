@@ -170,10 +170,16 @@ def test_leak_tags_are_derived_from_real_templates():
     from pm import prompts as P
 
     users = [v for k, v in vars(P).items() if k.endswith("_USER") and isinstance(v, str)]
+    # 不以 *_USER 结尾、但会被 render() 注入的模板（如评估器规则清单）同样算合法来源
+    users += [
+        getattr(P, name)
+        for name in P.EXTRA_RENDERED_TEMPLATES
+        if isinstance(getattr(P, name, None), str)
+    ]
     derived = [t for t in LEAK_TAGS if t not in EXTRA_LEAK_MARKERS]
     assert derived, "应能从模板推导标签"
     for tag in derived:
-        assert any(tag in tpl for tpl in users), f"{tag} 不在任何 *_USER 模板里"
+        assert any(tag in tpl for tpl in users), f"{tag} 不在任何渲染模板里"
     assert "<<task_description>>" in LEAK_TAGS
     assert "<<task>>" in LEAK_TAGS  # 澄清器模板用的就是这个名字
     assert "<TEST_OUTPUT>" in LEAK_TAGS and "</TEST_OUTPUT>" in LEAK_TAGS

@@ -150,8 +150,14 @@ def _eval_state() -> dict:
 
 
 def test_evaluate_node_cache_hit_skips_llm(tmp_path, monkeypatch):
-    """相同输入输出二次评估：命中缓存，不再消耗 LLM 调用。"""
+    """相同输入输出二次评估：命中缓存，不再消耗 LLM 调用。
+
+    缓存开关要显式打开：`tests/conftest.py` 默认把落盘缓存关了，
+    否则用例结果会跟着开发机 `logs/*_cache.json` 里的残留变。
+    """
     monkeypatch.setenv("PM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("PM_EVAL_CACHE", "1")
+    monkeypatch.setenv("PM_TARGET_CACHE", "1")
     monkeypatch.setenv("PM_JUDGES", "1")  # 单评委，便于精确计数
     cache_mod._eval_cache = None
     cache_mod._target_cache = None

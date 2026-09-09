@@ -57,7 +57,7 @@ _RULE_MARKERS = (
 )
 
 
-def _looks_like_rule(exp: str) -> bool:
+def looks_like_rule(exp: str) -> bool:
     """启发式：这段 expected 更像给人看的规则，而不是期望出现的字面片段。"""
     if any(marker in exp for marker in _RULE_MARKERS):
         return True
@@ -191,14 +191,23 @@ class AssertionResult(BaseModel):
     output_excerpt: str = Field(default="", description="被测输出摘要（单行截断版）")
 
 
+# 规则模式：expected 是“需求规则”，由评委逐条核验（见 schemas.RuleCheck），
+# 不进确定性比对 —— 拿“必须……”去跑 contains 只会永远命不中。
+RULE_MODE = "rule"
+
+
 def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | None:
     """执行确定性断言。
 
     返回 None 表示"该用例没有可执行的断言"，调用方应跳过而不是当作失败。
+    `rule` 模式永远返回 None：它走评委的 <RULES> 核对清单，不走这里。
 
     自定义断言（custom:*）不需要 expected：判定完全交由注册的断言函数；
     其余模式必须以非空 expected 为前提（exact/contains/regex 才有"比什么"的问题）。
     """
+    if mode == RULE_MODE:
+        return None
+
     out = output or ""
     out_scan = out[:_MAX_SCANNED]
     exp_full = _clip((expected or "").strip(), _EXPECTED_CLIP)
@@ -240,8 +249,8 @@ def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | 
     if not exp:
         return None
 
-    # 只对字面比对类模式做提醒：regex / custom 本来就是写“条件”的地方，不该拦。
-    advisory = mode in {"contains", "exact"} and _looks_like_rule(exp)
+    # 只对字面比对类模式做提醒：regex / custom / rule 本来就是写“条件”的地方，不该拦。
+    advisory = mode in {"contains", "exact"} and looks_like_rule(exp)
     warn = (
         "⚠️ 这条期望读起来像需求规则而不是字面片段，contains/exact 永远命不中；"
         "已只作提醒、不计入否决。要校语义请交给评委，或改用 custom:<name>"
