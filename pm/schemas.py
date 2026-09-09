@@ -28,7 +28,20 @@ WEIGHTS: dict[str, float] = {
     "quality": 0.15,
 }
 
-PASS_THRESHOLD = float(os.getenv("PM_PASS_THRESHOLD", "8.0"))  # >= 阈值视为生产可用
+
+def _env_float(name: str, default: float, *, positive_only: bool = False) -> float:
+    """容错读浮点：空值/非法值回退默认，不让一个手抖的 .env 炸掉整条链（A2 同源问题）。"""
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        val = float(raw)
+    except ValueError:
+        return default
+    return val if (not positive_only or val > 0) else default
+
+
+PASS_THRESHOLD = _env_float("PM_PASS_THRESHOLD", 8.0, positive_only=True)  # >= 阈值视为生产可用
 
 # --------------------------------------------------------------------------
 # P3: 修订提前终止（回退 / 平台期）—— 来自真实 revise 收敛实验的教训
@@ -37,31 +50,42 @@ PASS_THRESHOLD = float(os.getenv("PM_PASS_THRESHOLD", "8.0"))  # >= 阈值视为
 # --------------------------------------------------------------------------
 REGRESSION_MARGIN = 0.2  # 回退判定：当前轮 avg 低于历史最佳超过该值
 PLATEAU_MARGIN = 0.2  # 平台期判定：连续两轮未能超过历史最佳（含该余量）
+# 噪声不可估（每条用例只采样 1 次）时，0.2 这个量级完全落在抖动里：
+# 要么把判定放宽到看得见的差距，要么就别下“平台期”这种结论。
+UNESTIMATED_MARGIN = _env_float("PM_UNESTIMATED_MARGIN", 0.5, positive_only=True)
 
 # 采样噪声阈值：同一用例重复采样的分差超过该值 → 该用例结论标记为不稳
-UNSTABLE_SPREAD = float(os.getenv("PM_UNSTABLE_SPREAD", "1.5"))
+UNSTABLE_SPREAD = _env_float("PM_UNSTABLE_SPREAD", 1.5, positive_only=True)
 # 评委自报分与代码加权分的平均偏差超过该值 → 判定为系统性放水
-JUDGE_BIAS_ALERT = float(os.getenv("PM_JUDGE_BIAS_ALERT", "1.0"))
+JUDGE_BIAS_ALERT = _env_float("PM_JUDGE_BIAS_ALERT", 1.0, positive_only=True)
 
 
-def noise_margin(noise: float = 0.0) -> float:
+def noise_margin(noise: float | None = 0.0) -> float:
     """迭代收益判定余量：至少 2× 采样噪声。
 
     旧版写死 0.2，而评委自身抖动就 >0.2，导致“没提升”与“测不出提升”无法区分。
+
+    `noise=None` 表示**噪声不可估**（`PM_SAMPLES_PER_CASE=1`，没有极差可依据）：
+    此时不能把 0.2 当成“真实回退”的依据，否则一次运气好的采样就能把修订提前卡死，
+    所以退到 `UNESTIMATED_MARGIN`（默认 0.5）并关掉平台期规则。
     """
-    return max(0.2, 2.0 * max(0.0, float(noise or 0.0)))
+    if noise is None:
+        return max(PLATEAU_MARGIN, UNESTIMATED_MARGIN)
+    return max(PLATEAU_MARGIN, 2.0 * max(0.0, float(noise or 0.0)))
 
 
-def early_stop_reason(avg_scores: list[float], noise: float = 0.0) -> str | None:
+def early_stop_reason(avg_scores: list[float], noise: float | None = 0.0) -> str | None:
     """根据版本分数轨迹判断是否应提前终止修订。
 
     avg_scores: 按版本顺序的各轮 avg 分（最后一个是当前轮）。
+    noise: 采样噪声（平均极差）；传 None 表示采样次数不足以估计噪声。
     返回终止原因（str）或 None（应继续修订）。
 
     规则：
     1. 回退：当前轮低于历史最佳超过余量 —— 继续修大概率随评估标准摇摆震荡，
        直接交付历史最佳版本。
     2. 平台期：最近两轮都未能超过更早的历史最佳（含余量）—— 修订已无实质提升。
+       **仅在噪声可估（k≥2）时才启用**：单次采样下“连续两轮没超过”完全可能是噪声。
     余量 = max(REGRESSION_MARGIN, 2×noise)：噪声大时不能拿 0.2 当“真实回退”的依据。
     """
     if len(avg_scores) < 2:
@@ -76,7 +100,7 @@ def early_stop_reason(avg_scores: list[float], noise: float = 0.0) -> str | None
     best_prev = max(avg_scores[:-1])
     if best_prev - cur > margin:
         return f"修订回退：当前 {cur} 低于历史最佳 {best_prev}（余量 {round(margin, 2)}）"
-    if len(avg_scores) >= 3:
+    if len(avg_scores) >= 3 and noise is not None:
         best_before_last2 = max(avg_scores[:-2])
         if cur <= best_before_last2 + margin and avg_scores[-2] <= best_before_last2 + margin:
             return (

@@ -280,3 +280,82 @@ def test_no_baseline_run_without_optimize_success():
         )
     assert final["status"] == "failed"
     assert final.get("pairwise") in (None, {}), "没有可比较的两份输出时不应硬凑结论"
+
+
+# --- M4：噪声不可估时不收窄余量（单次采样不能把"测不出"当成"没有"） ---
+
+
+def test_unestimable_noise_does_not_declare_plateau():
+    """k=1 时极差恒为 0：那是"测不出噪声"，不是"没有噪声"。"""
+    from pm.schemas import early_stop_reason
+
+    traj = [8.63, 8.93, 8.8, 8.75]
+    est = early_stop_reason(traj, noise=0.0)
+    assert est is not None and "平台期" in est, "噪声可估（k≥2 且极差为 0）时仍应保持旧判定"
+    assert early_stop_reason(traj, noise=None) is None, "单次采样不该靠平台期把修订提前卡死"
+
+
+def test_unestimable_noise_widens_the_regression_margin():
+    """同一串轨迹：可估时按 0.2 判回退，不可估时要求看得见 0.5 的差距。"""
+    from pm.schemas import early_stop_reason
+
+    assert "回退" in str(early_stop_reason([8.5, 8.05], noise=0.0))
+    assert early_stop_reason([8.5, 8.05], noise=None) is None
+    assert "回退" in str(early_stop_reason([8.5, 7.9], noise=None)), "真掉下去还是要停"
+
+
+def test_noise_margin_floors_and_defaults():
+    from pm import schemas
+    from pm.schemas import noise_margin
+
+    assert noise_margin(0.0) == schemas.PLATEAU_MARGIN
+    assert abs(noise_margin(0.35) - 0.7) < 1e-9
+    assert noise_margin(-5) == schemas.PLATEAU_MARGIN, "负噪声不能把余量压到 0.2 以下"
+    assert noise_margin(None) == max(schemas.PLATEAU_MARGIN, schemas.UNESTIMATED_MARGIN)
+
+
+def test_env_float_is_tolerant(monkeypatch):
+    """一个手抖的 .env 不该炸掉整条判定链（A2 同源问题，这次覆盖 schemas 侧常量）。"""
+    from pm.schemas import _env_float
+
+    monkeypatch.setenv("PM_TEST_VAL", "")
+    assert _env_float("PM_TEST_VAL", 0.5) == 0.5
+    monkeypatch.setenv("PM_TEST_VAL", "  ")
+    assert _env_float("PM_TEST_VAL", 0.5) == 0.5
+    monkeypatch.setenv("PM_TEST_VAL", "abc")
+    assert _env_float("PM_TEST_VAL", 0.5) == 0.5
+    monkeypatch.setenv("PM_TEST_VAL", "0")
+    assert _env_float("PM_TEST_VAL", 0.5, positive_only=True) == 0.5
+    monkeypatch.setenv("PM_TEST_VAL", "0.7")
+    assert _env_float("PM_TEST_VAL", 0.5, positive_only=True) == 0.7
+    monkeypatch.setenv("PM_TEST_VAL", "-1")
+    assert _env_float("PM_TEST_VAL", 0.5) == -1.0, "不要求正数时就该照收（保留显式覆盖能力）"
+
+
+def test_single_sample_loop_is_not_stopped_by_unmeasurable_noise(monkeypatch):
+    """整图验证 M4：k=1 的持平轨迹不该被"平台期"提前判停（旧口径会）。"""
+    from pm.schemas import early_stop_reason
+
+    monkeypatch.setenv("PM_SAMPLES_PER_CASE", "1")
+    monkeypatch.setenv("PM_BASELINE", "0")
+    monkeypatch.setenv("PM_PAIRWISE", "0")
+
+    with testing.scope("stall"):
+        final = build_app().invoke(
+            initial_state(
+                task="让AI分析销售数据",
+                target_model="fake",
+                n_test_cases=3,
+                max_iterations=3,
+            ),
+            {"configurable": {"thread_id": "m4-k1"}, **CFG},
+        )
+    traj = [
+        v["avg_score"] for v in final.get("prompt_versions", []) if v.get("avg_score") is not None
+    ]
+    assert len(traj) >= 3, f"没跑出可比轨迹：{traj}"
+    assert early_stop_reason(traj, noise=0.0) is not None, (
+        "前提失效：旧口径本来也不会判停，这条用例没测到东西"
+    )
+    assert not final.get("early_stop_reason"), "单次采样仍被提前判停了"
+    assert final.get("status") == "max_iterations", final.get("status")

@@ -116,6 +116,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File examples/run_e2e_stub.ps1
 | `PM_BASELINE` | `1` | 是否跑基线（原始需求直喂 target）。关掉就只会有“绝对分”，没有 Δ |
 | `PM_PAIRWISE` | `1` | 是否做成对盲评（优化版 vs 基线，A/B 随机映射） |
 | `PM_UNSTABLE_SPREAD` | `1.5` | 同用例采样分差超过此值 → 报告点名为“结论不稳” |
+| `PM_UNESTIMATED_MARGIN` | `0.5` | `PM_SAMPLES_PER_CASE=1` 时拿不到噪声：早停余量退到这个值，且不判平台期 |
 | `PM_JUDGE_BIAS_ALERT` | `1.0` | 评委自报分系统性高于代码加权分的告警线 |
 | `PM_ASSERT_NORMALIZE` | `1` | `contains` 断言忽略大小写 / 全半角 / 空白差异（veto 下不误杀排版差异）；`0` 回到严格字面 |
 | `PM_ASSERT_REGEX_TIMEOUT` | `2` | 有风险形状的正则（量词包住分组）在子进程里跑，超预算即杀并按未通过处理 |

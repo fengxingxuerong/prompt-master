@@ -1032,7 +1032,10 @@ def evaluate_node(state: State) -> dict:
         # P3: 修订提前终止——回退/平台期时继续修只会随评估标准摇摆震荡，
         # 直接按未达标终态交付历史最佳版本（report_node 已有该兜底逻辑）。
         avg_scores = [v["avg_score"] for v in versions if v.get("avg_score") is not None]
-        stop_reason = early_stop_reason(avg_scores, noise=agg.noise)
+        # 单次采样时极差恒为 0，那不是“没噪声”而是“测不出噪声”：传 None 让余量放宽
+        # 并关掉平台期规则（M4）——否则一次运气好的采样就能把修订提前卡死。
+        noise = agg.noise if (agg.n_samples or 1) >= 2 else None
+        stop_reason = early_stop_reason(avg_scores, noise=noise)
         if stop_reason:
             patch["status"] = "early_stopped"
             patch["should_revise"] = False
