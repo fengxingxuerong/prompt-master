@@ -211,7 +211,7 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             if len(exp_cell) > 120:
                 exp_cell = exp_cell[:120] + "…"
             if a.get("advisory"):
-                mark = "⚠️ 仅提醒"
+                mark = "⚠️ 语义判定" if a.get("advisory_kind") == "semantic" else "⚠️ 仅提醒"
             else:
                 mark = "✅ 通过" if a.get("passed") else "❌ 未通过"
             lines.append(

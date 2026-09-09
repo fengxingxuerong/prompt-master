@@ -183,7 +183,11 @@ class AssertionResult(BaseModel):
     score: float = Field(description="1.0 通过 / 0.0 失败")
     advisory: bool = Field(
         default=False,
-        description="True = 这条 expected 读起来像需求规则而不是字面片段；只提醒，不参与否决",
+        description="True = 只提醒、不参与否决（写错了模式，或评委的语义判定）",
+    )
+    advisory_kind: str = Field(
+        default="",
+        description="提醒类型：mode_mismatch = 模式选错了；semantic = 评委对规则的语义判定",
     )
     # 反馈要能"照着改"，所以把比什么、实际拿到什么都带上（各自截断）。
     # 只有计数的否决会让修订器瞎猜，同一处错误反复修不掉。
@@ -278,6 +282,7 @@ def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | 
             expected=exp_full,
             output_excerpt=excerpt,
             advisory=advisory,
+            advisory_kind="mode_mismatch" if advisory else "",
         )
 
     if mode == "contains":
@@ -302,6 +307,7 @@ def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | 
             expected=exp_full,
             output_excerpt=excerpt,
             advisory=advisory,
+            advisory_kind="mode_mismatch" if advisory else "",
         )
 
     if mode == "regex":

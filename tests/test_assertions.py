@@ -627,3 +627,120 @@ def test_server_accepts_rule_mode():
     )
     with pytest.raises(ValidationError):
         OptimizeRequest(task="写个分析数据的提示词", assertion_mode="semantic")
+
+
+# --- 真实端点 rule 跑暴露的三处缺陷 ---
+
+
+def test_merged_judges_keep_rule_verdicts():
+    """双评委无分歧时走 merged：rule_checks 必须保守合并后留下，不能凭空消失。"""
+    from pm.nodes import _merge_judge_results, _merge_rule_checks
+    from pm.schemas import RuleCheck
+
+    a = EvaluationResult(
+        test_case_index=0,
+        dimension_scores=_dims(),
+        model_reported_score=9.0,
+        should_revise=False,
+        rule_checks=[
+            RuleCheck(rule="必须标注缺失项", satisfied=True, evidence="有"),
+            RuleCheck(rule="不得编造", satisfied=True, evidence="有"),
+        ],
+    ).finalize()
+    b = EvaluationResult(
+        test_case_index=0,
+        dimension_scores=_dims(),
+        model_reported_score=8.8,
+        should_revise=False,
+        rule_checks=[
+            RuleCheck(rule="必须标注缺失项", satisfied=False, evidence="未找到订单号"),
+            RuleCheck(rule="不得编造", satisfied=True, evidence="有"),
+        ],
+    ).finalize()
+
+    merged_rules = _merge_rule_checks(a, b)
+    assert len(merged_rules) == 2
+    got = {c.rule: (c.satisfied, c.evidence) for c in merged_rules}
+    assert got["必须标注缺失项"] == (False, "未找到订单号"), "任一侧判未满足就要按未满足算"
+    assert got["不得编造"] == (True, "有")
+
+    out = _merge_judge_results([("evaluator", a), ("evaluator_b", b)], 0, "")
+    assert out.judge == "merged"
+    assert len(out.rule_checks) == 2, "merged 分支必须带 rule_checks（旧版在这里丢掉）"
+    assert any(not c.satisfied for c in out.rule_checks)
+
+
+def test_mode_mismatch_and_semantic_advisories_use_different_words():
+    from pm.schemas import RuleCheck  # noqa: F401  （断言 dict 手搓，这里只为语义清晰）
+
+    """选错模式与评委判未满足是两回事，措辞不能混：前者要教人改写法，后者要给证据。"""
+    mismatch = {
+        "mode": "contains",
+        "passed": False,
+        "advisory": True,
+        "advisory_kind": "mode_mismatch",
+        "detail": "输出未包含期望片段",
+        "expected": "必须标注缺失项",
+    }
+    semantic = {
+        "mode": "rule",
+        "passed": False,
+        "advisory": True,
+        "advisory_kind": "semantic",
+        "detail": "「必须标注缺失项」未满足：未找到证据",
+        "expected": "必须标注缺失项",
+    }
+    a1 = AggregateScore.from_evaluations([_ev(0, 8.6)], n_expected=1, assertions={0: mismatch})
+    a2 = AggregateScore.from_evaluations([_ev(0, 8.6)], n_expected=1, assertions={0: semantic})
+
+    assert any(i.startswith("[断言口径]") for i in a1.all_issues)
+    assert not any(i.startswith("[规则核验]") for i in a1.all_issues)
+    rule_line = next(i for i in a2.all_issues if i.startswith("[规则核验]"))
+    assert "未找到证据" in rule_line and "PM_RULE_VETO=1" in rule_line
+    assert "疑似是需求规则" not in rule_line, "选对模式了就不该再被说写错"
+    assert not a1.assertion_veto and not a2.assertion_veto
+
+
+def test_rule_verdicts_reach_report_rows():
+    """规则判定必须回填到 test_runs[].assertion，否则报告的断言表整节都不出现。"""
+    from pm import testing
+    from pm.graph import build_app
+    from pm.schemas import EvaluationResult as ER
+    from pm.schemas import RuleCheck
+    from pm.state import initial_state
+
+    base = testing._fake_structured
+
+    def structured(role, model_cls, system, user, max_retries=3, overrides=None):
+        ev, meta = base(role, model_cls, system, user, max_retries, overrides)
+        if model_cls is ER and "<RULES>" in user:
+            ev.rule_checks = [
+                RuleCheck(rule="必须标注缺失项", satisfied=False, evidence="未找到订单号")
+            ]
+        return ev, meta
+
+    state = initial_state(
+        task="让AI分析销售数据",
+        target_model="fake",
+        n_test_cases=2,
+        max_iterations=0,
+        assertion_mode="rule",
+        seed_cases=[
+            {"input": "华东,120", "expected": "必须标注缺失项"},
+            {"input": "华南,98", "expected": "必须标注缺失项"},
+        ],
+    )
+    with testing.scope("progress", structured=structured):
+        final = build_app().invoke(
+            state, {"configurable": {"thread_id": "rule-report"}, "recursion_limit": 60}
+        )
+
+    rows = [r for r in final.get("test_runs", []) if isinstance(r.get("assertion"), dict)]
+    assert rows, "规则判定没回填到 test_runs"
+    assert all(r["assertion"]["mode"] == "rule" for r in rows)
+    assert all(r["assertion"]["advisory_kind"] == "semantic" for r in rows)
+    report = final.get("final_report") or ""
+    assert "## 事实断言（ground-truth 校验）" in report
+    assert "⚠️ 语义判定" in report
+    assert "PM_RULE_VETO" in report, "报告要说明这是语义判定、默认不否决"
+    assert final["aggregate"]["n_assertions"] == 0, "语义判定默认不进否决计数"

@@ -64,6 +64,7 @@ from .schemas import (
     MockInputSet,
     PreferenceResult,
     PromptVersion,
+    RuleCheck,
     TestRun,
     early_stop_reason,
 )
@@ -674,6 +675,27 @@ def _call_evaluator(
     return ev, meta
 
 
+def _merge_rule_checks(ev_a: EvaluationResult, ev_b: EvaluationResult) -> list[RuleCheck]:
+    """保守合并两位评委的规则判定：同一规则只要有一侧判未满足，就按未满足算。
+
+    按规则原文对齐（两位评委拿到的是同一份清单）；只有一侧给出判定时取那一侧。
+    """
+    out: list[RuleCheck] = []
+    seen: dict[str, RuleCheck] = {}
+    for src in (ev_a, ev_b):
+        for c in src.rule_checks or []:
+            key = c.rule.strip()
+            prev = seen.get(key)
+            if prev is None:
+                copy = c.model_copy()
+                seen[key] = copy
+                out.append(copy)
+            elif prev.satisfied and not c.satisfied:
+                prev.satisfied = False
+                prev.evidence = c.evidence or prev.evidence
+    return out
+
+
 def _merge_judge_results(
     results: list[tuple[str, EvaluationResult]], idx: int, user_prompt: str
 ) -> EvaluationResult:
@@ -727,6 +749,9 @@ def _merge_judge_results(
             judge="merged",
             judge_scores=judge_scores,
             judge_disagreement=round(diff, 2),
+            # 规则判定必须跟着合并结果走：不带的话，双评委（无分歧）时两位的 rule_checks
+            # 一起被丢掉，报告里那一行凭空消失——只有触发仲裁才碰巧留下（真实跑发现）。
+            rule_checks=_merge_rule_checks(ev_a, ev_b),
         ).finalize()
         # 保守：任一评委要求修订，或均值未达标，都进入修订
         merged.should_revise = merged.should_revise or not merged.passed
@@ -817,6 +842,7 @@ def _merge_rule_verdicts(
             "mode": RULE_MODE,
             "passed": not bad,
             "advisory": not veto,
+            "advisory_kind": "semantic",
             "detail": (
                 "；".join(f"「{c.rule[:40]}」未满足：{c.evidence or '未找到证据'}" for c in bad[:3])
                 if bad
@@ -1045,6 +1071,16 @@ def evaluate_node(state: State) -> dict:
     evals = [EvaluationResult.model_validate(e) for e in evaluations]
     # 事实断言（ground-truth）：从 test_runs 收集断言结果，参与聚合的一票否决
     assertions = _merge_rule_verdicts(_collect_assertions(runs), evals)
+    # 规则判定只活在 aggregate 里的话，报告的断言表看不到它（真实跑暴露的）：
+    # 回填到对应用例的 assertion 上，让“事实/语义”两张面孔共用同一处呈现。
+    rule_only = {k: v for k, v in assertions.items() if v.get("mode") == RULE_MODE}
+    patch_runs = bool(rule_only)
+    if patch_runs:
+        runs = [dict(r) for r in runs]
+        for r in runs:
+            verdict = rule_only.get(int(r.get("test_case_index", -1)))
+            if verdict and not r.get("assertion"):
+                r["assertion"] = verdict
     n_rule = sum(1 for a in assertions.values() if a.get("mode") == RULE_MODE)
     if n_rule:
         logger.info(
@@ -1101,6 +1137,8 @@ def evaluate_node(state: State) -> dict:
         "revision_history": history,
         "llm_calls": state.get("llm_calls", 0) + n_llm_calls,
     }
+    if patch_runs:
+        patch["test_runs"] = runs
     if errors:
         patch["errors"] = errors
 

@@ -365,11 +365,20 @@ class AggregateScore(BaseModel):
                 veto_lines.append("".join(bits))
             issues[:0] = veto_lines
         for k, raw_a in advisory_items[:3]:
-            amode = str((raw_a or {}).get("mode") or "-")
-            issues.append(
-                f"[断言口径] case#{k} 的 expected 疑似是需求规则而不是字面片段（{amode}），"
-                "本轮不计入否决；请改成输出里真会出现的一段字，或者交给评委判语义。"
-            )
+            a = raw_a or {}
+            amode = str(a.get("mode") or "-")
+            if a.get("advisory_kind") == "semantic":
+                # 模式选对了（rule），只是评委判未满足：给证据，而不是说“你写错了”
+                issues.append(
+                    f"[规则核验] case#{k} 评委判定规则未满足："
+                    f"{str(a.get('detail') or '').strip()}"
+                    f"（{amode}，默认不计入否决；需要硬约束请设 PM_RULE_VETO=1）"
+                )
+            else:
+                issues.append(
+                    f"[断言口径] case#{k} 的 expected 疑似是需求规则而不是字面片段（{amode}），"
+                    "本轮不计入否决；请改成输出里真会出现的一段字，或者交给评委判语义。"
+                )
         # 评委给高分但事实不符 —— 这是 LLM 评委被输出说服（放水）的直接证据
         gaming = [
             e for e in evals if e.test_case_index in failed_keys and e.weighted_score >= threshold
