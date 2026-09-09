@@ -312,8 +312,12 @@ class AggregateScore(BaseModel):
             (int(k) if isinstance(k, str) and k.strip().lstrip("-").isdigit() else k): v
             for k, v in raw_assertions.items()
         }
-        n_assert = len(assertions)
-        failed_items = [(k, a) for k, a in assertions.items() if not (a or {}).get("passed")]
+        # 疑似“把规则当片段”的断言只提醒不否决：否则用户一个笔误就能让整轮优化永远不达标，
+        # 而且基线与优化版会同款失败，对比彻底失去信息量（真实跑踩过一次）。
+        advisory_items = [(k, a) for k, a in assertions.items() if (a or {}).get("advisory")]
+        scoring = {k: a for k, a in assertions.items() if not (a or {}).get("advisory")}
+        n_assert = len(scoring)
+        failed_items = [(k, a) for k, a in scoring.items() if not (a or {}).get("passed")]
         failed_keys = {k for k, _ in failed_items}
         n_assert_failed = len(failed_items)
         assertion_veto = n_assert_failed > 0
@@ -340,6 +344,12 @@ class AggregateScore(BaseModel):
                 bits.append("｜请优先修正这一条，它比评委分数硬。")
                 veto_lines.append("".join(bits))
             issues[:0] = veto_lines
+        for k, raw_a in advisory_items[:3]:
+            amode = str((raw_a or {}).get("mode") or "-")
+            issues.append(
+                f"[断言口径] case#{k} 的 expected 疑似是需求规则而不是字面片段（{amode}），"
+                "本轮不计入否决；请改成输出里真会出现的一段字，或者交给评委判语义。"
+            )
         # 评委给高分但事实不符 —— 这是 LLM 评委被输出说服（放水）的直接证据
         gaming = [
             e for e in evals if e.test_case_index in failed_keys and e.weighted_score >= threshold

@@ -88,6 +88,9 @@ cp .env.example .env     # 填入 API Key
 .venv/bin/python run.py --task "解析销售数据 CSV" \
                         --cases-file cases.json --assert-mode contains
 #   cases.json: [{"input": "华东,120,华南,98", "expected": "华东"}]
+#   ⚠️ `expected` 必须是“输出里真会出现的一段字”（或 regex / custom:<name>）。
+#   写成“必须标注缺失项”这种需求规则永远命不中 —— 系统会识破并只给提醒（⚠️ 仅提醒），
+#   不会拿它否决，但那条断言也就等于没写：语义规则请交给评委或写成断言函数。
 
 # 启动 REST API 服务（FastAPI）
 .venv/bin/python run_server.py --port 8080
@@ -119,6 +122,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File examples/run_e2e_stub.ps1
 | `PM_UNESTIMATED_MARGIN` | `0.5` | `PM_SAMPLES_PER_CASE=1` 时拿不到噪声：早停余量退到这个值，且不判平台期 |
 | `PM_JUDGE_BIAS_ALERT` | `1.0` | 评委自报分系统性高于代码加权分的告警线 |
 | `PM_ASSERT_NORMALIZE` | `1` | `contains` 断言忽略大小写 / 全半角 / 空白差异（veto 下不误杀排版差异）；`0` 回到严格字面 |
+| `PM_ASSERT_REGEX_TIMEOUT` | `2` | 有风险形状的正则（量词包住分组）在子进程里跑，超预算即杀并按未通过处理 |
+| 断言口径防呆 | — | `contains`/`exact` 的 `expected` 若含“必须/不得/应……而非……”这类规则词或超过 80 字，判为“写错了对象”：仍显示失败但标 `⚠️ 仅提醒`，**不计入否决**（`regex`/`custom:*` 不受此限制） |
 | `PM_ASSERT_REGEX_TIMEOUT` | `2` | 有风险形状的正则（量词包住分组）在子进程里跑，超预算即杀并按未通过处理 |
 | `PM_FORCE_JSON_CHANNEL` | 关 | 置 1 则跳过原生结构化输出通道（不置也行：撞过 400 后会记住端点指纹自动跳过） |
 | `PM_STRUCT_METHOD` | 空 | 结构化输出方法：空 = langchain 默认（`json_schema`）；端点只认 function calling 时设 `function_calling`（trace 的 `channel` 会如实标为 `function_calling`） |

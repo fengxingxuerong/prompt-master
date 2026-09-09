@@ -37,6 +37,33 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# 把“要求”当成“期望片段”是最容易踩的写法（本项目第一次真实跑就踩了）：
+# contains 要的是输出里真会出现的一段字，而“必须……并写明……”永远不可能被逐字命中，
+# 结果是基线与优化版一起被判未通过，比较彻底失去信息量。这里只做提醒，不改判。
+_RULE_MARKERS = (
+    "必须",
+    "应当",
+    "应该",
+    "请勿",
+    "禁止",
+    "不得",
+    "不要",
+    "务必",
+    "需要包含",
+    "要求",
+    "若未",
+    "如未",
+    "而非",
+)
+
+
+def _looks_like_rule(exp: str) -> bool:
+    """启发式：这段 expected 更像给人看的规则，而不是期望出现的字面片段。"""
+    if any(marker in exp for marker in _RULE_MARKERS):
+        return True
+    return len(exp) > 80
+
+
 # 自定义断言注册表：name -> fn(expected, output) -> bool
 _CUSTOM_ASSERTIONS: dict[str, Callable[[str, str], bool]] = {}
 _REGISTRY_LOCK = threading.Lock()
@@ -154,6 +181,10 @@ class AssertionResult(BaseModel):
     passed: bool
     detail: str = Field(default="", description="失败原因或校验说明")
     score: float = Field(description="1.0 通过 / 0.0 失败")
+    advisory: bool = Field(
+        default=False,
+        description="True = 这条 expected 读起来像需求规则而不是字面片段；只提醒，不参与否决",
+    )
     # 反馈要能"照着改"，所以把比什么、实际拿到什么都带上（各自截断）。
     # 只有计数的否决会让修订器瞎猜，同一处错误反复修不掉。
     expected: str = Field(default="", description="期望片段（单行截断版，供修订器定位）")
@@ -209,13 +240,27 @@ def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | 
     if not exp:
         return None
 
+    # 只对字面比对类模式做提醒：regex / custom 本来就是写“条件”的地方，不该拦。
+    advisory = mode in {"contains", "exact"} and _looks_like_rule(exp)
+    warn = (
+        "⚠️ 这条期望读起来像需求规则而不是字面片段，contains/exact 永远命不中；"
+        "已只作提醒、不计入否决。要校语义请交给评委，或改用 custom:<name>"
+        if advisory
+        else ""
+    )
+
+    def _det(base: str) -> str:
+        if not warn:
+            return base
+        return f"{warn}｜{base}" if base else warn
+
     if mode == "exact":
         # exact 保持字面严格：它的用途就是"逐字一致"，归一化会悄悄放宽语义。
         passed = out.strip() == exp
         return AssertionResult(
             mode=mode,
             passed=passed,
-            detail=(
+            detail=_det(
                 ""
                 if passed
                 else f"要求逐字一致：期望 {len(exp)} 字符，实际输出 {len(out.strip())} 字符"
@@ -223,6 +268,7 @@ def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | 
             score=1.0 if passed else 0.0,
             expected=exp_full,
             output_excerpt=excerpt,
+            advisory=advisory,
         )
 
     if mode == "contains":
@@ -242,10 +288,11 @@ def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | 
         return AssertionResult(
             mode=mode,
             passed=passed,
-            detail="" if passed else f"输出未包含期望片段{note}",
+            detail=_det("" if passed else f"输出未包含期望片段{note}"),
             score=1.0 if passed else 0.0,
             expected=exp_full,
             output_excerpt=excerpt,
+            advisory=advisory,
         )
 
     if mode == "regex":

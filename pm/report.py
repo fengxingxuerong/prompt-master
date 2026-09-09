@@ -210,10 +210,13 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             exp_cell = str(a.get("expected") or "")
             if len(exp_cell) > 120:
                 exp_cell = exp_cell[:120] + "…"
+            if a.get("advisory"):
+                mark = "⚠️ 仅提醒"
+            else:
+                mark = "✅ 通过" if a.get("passed") else "❌ 未通过"
             lines.append(
                 f"| case#{r.get('test_case_index', '?')} | {a.get('mode', '-')} "
-                f"| {'✅ 通过' if a.get('passed') else '❌ 未通过'} "
-                f"| {a.get('detail', '')} | {exp_cell} |"
+                f"| {mark} | {a.get('detail', '')} | {exp_cell} |"
             )
         lines.append("")
 

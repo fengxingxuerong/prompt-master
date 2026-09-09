@@ -319,3 +319,107 @@ def test_cli_accepts_registered_custom_assert_mode():
         run_mod.assert_mode_arg("startswith")
     with pytest.raises(argparse.ArgumentTypeError, match="断言名非法"):
         run_mod.assert_mode_arg("custom:2 bad name")
+
+
+# --- 断言口径防呆：把"需求规则"当成"期望片段"时只提醒、不否决 ---
+
+
+def _dims():
+    return DimensionScores(
+        task_completion=9.0,
+        format_adherence=9.0,
+        constraint_compliance=9.0,
+        robustness=9.0,
+        quality=9.0,
+    )
+
+
+def _ev(case: int, weighted: float) -> EvaluationResult:
+    return EvaluationResult(
+        test_case_index=case,
+        dimension_scores=_dims(),
+        weighted_score=weighted,
+        self_reported_score=weighted,
+        model_reported_score=weighted,
+        should_revise=False,
+        issues=[],
+        suggestions=[],
+    )
+
+
+def test_rule_shaped_expected_is_flagged_not_vetoing():
+    """真实跑踩过的那次：expected 写成"必须在表格里单列…"，contains 永远命不中。"""
+    res = check_assertion(
+        "必须在表格里单列「缺失信息」，并写明订单号、购买时间、漏水照片这三项未提供",
+        "| 对话1 | 流程问题 | 未提供：订单号 |",
+        "contains",
+    )
+    assert res is not None and not res.passed
+    assert res.advisory, "规则形状的 expected 必须被识别出来"
+    assert "永远命不中" in res.detail
+
+
+def test_literal_fragment_expected_still_vetoes():
+    res = check_assertion("未提供：订单号", "| 对话1 | 流程问题 | 无 |", "contains")
+    assert res is not None and not res.passed and not res.advisory
+
+
+def test_long_but_plain_fragment_is_still_advisory_free():
+    """长度只是辅助信号：一段很长的字面引用不该被当成规则。"""
+    literal = "未提供：订单号、购买时间、漏水照片、取件时间、责任方判定依据、补偿金额上限说明"
+    assert len(literal) > 30
+    res = check_assertion(literal, "输出里没有这段话", "contains")
+    assert res is not None and not res.advisory
+
+
+def test_regex_and_custom_are_never_downgraded():
+    """regex / custom 本来就是写条件的地方，不能被这个启发式误伤。"""
+    rule = "必须在输出中包含「数据缺失」四个字"
+    res = check_assertion(rule, "输出里没有这段话", "regex")
+    assert res is not None and not res.passed and not res.advisory
+
+
+def test_advisory_does_not_block_passing():
+    from pm.schemas import AggregateScore
+
+    advisory = {
+        "mode": "contains",
+        "passed": False,
+        "advisory": True,
+        "detail": "⚠️ 像规则",
+        "expected": "必须写明缺失项",
+        "output_excerpt": "无",
+    }
+    strict = {"mode": "contains", "passed": False, "advisory": False, "expected": "数据缺失"}
+
+    loose = AggregateScore.from_evaluations([_ev(0, 8.6)], n_expected=1, assertions={0: advisory})
+    assert not loose.assertion_veto and loose.n_assertions == 0
+    assert loose.passed, "advisory 不该改变判定：否则“提醒”其实又是一次否决"
+    assert any("[断言口径]" in i for i in loose.all_issues)
+
+    hard = AggregateScore.from_evaluations([_ev(0, 8.6)], n_expected=1, assertions={0: strict})
+    assert hard.assertion_veto and hard.n_assertions == 1 and hard.n_assertions_failed == 1
+
+
+def test_report_marks_advisory_rows_with_warning():
+    from pm.report import render_report
+
+    state = {
+        "run_id": "r",
+        "status": "passed",
+        "aggregate": {},
+        "prompt_versions": [{"iteration": 0, "prompt": "P", "avg_score": 8.6, "min_score": 8.4}],
+        "test_runs": [
+            {
+                "test_case_index": 0,
+                "assertion": {
+                    "mode": "contains",
+                    "passed": False,
+                    "advisory": True,
+                    "expected": "必须写明",
+                },
+            }
+        ],
+    }
+    text, _ = render_report(state)
+    assert "⚠️ 仅提醒" in text and "❌ 未通过" not in text
