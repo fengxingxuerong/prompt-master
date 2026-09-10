@@ -360,6 +360,11 @@ def main() -> int:
     p.add_argument("--out", default=None, help="报告输出路径")
     p.add_argument("--mermaid", action="store_true", help="打印图结构并退出")
     p.add_argument("--selftest", action="store_true", help="拓扑与控制流自检，不需要 API Key")
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="端点预检：逐角色冒烟调用 + 脱敏配置摘要（花大钱之前先确认端点活着）",
+    )
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
 
@@ -386,6 +391,13 @@ def main() -> int:
 
     if args.selftest:
         return selftest()
+
+    if args.preflight:
+        from pm.preflight import render_preflight, run_preflight
+
+        report = run_preflight()
+        print(render_preflight(report))
+        return 0 if report.all_ok else 1
 
     if not args.task and not args.task_file:
         p.error("需要 --task / --task-file，或用 --selftest 进行自检")

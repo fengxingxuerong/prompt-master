@@ -120,6 +120,12 @@ PM_FAKE_BACKEND=progress .venv/bin/python run_server.py --port 8080
 .venv/bin/python eval_prompts.py --node clarifier
 # 真实调用模式（花真钱，手动跑；用确定性代码侧校验而非 LLM 自评）
 .venv/bin/python eval_prompts.py --live
+
+# 用例集模板库（case_templates/）：带 ground-truth 的领域模板，字面断言与
+# 语义规则混写，可直接作为 --cases-file 使用；跑批前建议先做端点预检
+.venv/bin/python run.py --preflight
+.venv/bin/python run.py --task "让 AI 分析销售数据" \
+                        --cases-file case_templates/sales_analysis.json
 bash examples/run_e2e_stub.sh          # Linux / macOS
 .venv\Scripts\python.exe -m pytest tests/ -q
 # Windows 等价的桩服务 e2e（自动挑端口、跑前清缓存、断言两条通道）：
@@ -341,6 +347,7 @@ prompt-master/
 ├── run_server.py               REST API 服务启动入口（FastAPI + uvicorn）
 ├── eval_prompts.py             节点提示词回归评测（离线结构契约 / --live 真实校验）
 ├── prompt_eval/cases.json      节点提示词评测用例集（离线用 vars 与模板占位符对应）
+├── case_templates/             领域用例集模板（带 ground-truth，可直接作 --cases-file）
 ├── pm/
 │   ├── backend.py              可注入的调用钩子（演示模式 / 自测的任务级隔离）
 │   ├── ratelimit.py            服务层滑动窗口限流（提交入口成本护栏，默认 10 次/分钟）
@@ -362,7 +369,7 @@ prompt-master/
 │   ├── openai_stub_server.py    OpenAI 兼容桩服务
 │   ├── run_e2e_stub.sh          双通道本地 e2e（Linux / macOS）
 │   └── run_e2e_stub.ps1         同上，Windows 版（额外做端口避让、缓存隔离与端点自检）
-├── tests/                      105 项回归测试
+├── tests/                      回归测试（pytest 209 项，口径见第六节）
 ├── .github/workflows/ci.yml    CI：ruff + mypy + pytest × 3 个 Python 版本
 └── pyproject.toml              ruff / mypy / pytest 配置
 ```
@@ -384,6 +391,13 @@ prompt-master/
 - 限流退避与降级重试是**相乘**的：通道 A 耗尽 429 退避后会落入通道 B 再跑一轮完整退避。
   现在每个调用点有 `PM_RATE_LIMIT_MAX_WAIT`（默认 60s）的退避预算，超预算就停止重试直接上抛——
   宁叫失败不叫卡死。真端点实测过：配额紧时一个 2 用例的任务在旧行为下能跑 20+ 分钟。
+- **真实端点的运维性格（2026-09-10 实测记录，供错峰参考）**：
+  - `ip_rate_limit_exceeded` 是 **IP 级**限流，Key 池轮换无效；实测 90 秒、3 分钟冷却
+    都不够，**5 分钟以上**才恢复。同机连续跑多个 `--live` / 批量任务时必须在节点间留足间隔。
+  - 长纯文本生成调用（optimizer / reviser 一类的长输出）偶发 **504 Gateway Time-out**，
+    属端点侧瞬时故障——单独错峰重跑即可，不代表提示词或代码有问题。
+  - 晚高峰可能出现账号级全池 429。跑批前建议先 `python run.py --preflight` 做一次
+    逐角色冒烟预检（64 token 成本可忽略）：全绿再开任务，限流类失败按建议错峰。
 - 降级通道 B 的“每轮降温重试”策略只对普通模型有效：思考型模型（o 系 / reasoning 模式）
   会忽略 temperature，等于重试同样的输出。配思考型模型时建议直接调大 `PM_<ROLE>_MAX_TOKENS`
   并接受首轮即定，或换非思考模型做判定类角色。
