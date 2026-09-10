@@ -195,6 +195,29 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             lines.append(f"- `{e}`")
         lines.append("")
 
+    # ---- 模型用量与耗时（按角色台账）：9 次调用花了多少 token、哪个角色最贵，一眼可见 ----
+    usage = state.get("llm_usage") or {}
+    if usage:
+        lines.append("## 模型用量与耗时（按角色）")
+        lines.append("")
+        lines.append("| 角色 | 调用次数 | 输入 tokens | 输出 tokens | 累计耗时 |")
+        lines.append("|---|---|---|---|---|")
+        tot_calls = tot_in = tot_out = 0
+        tot_ms = 0
+        for role in sorted(usage):
+            t = usage.get(role) or {}
+            calls = int(t.get("calls", 0) or 0)
+            inp = int(t.get("input_tokens", 0) or 0)
+            out = int(t.get("output_tokens", 0) or 0)
+            ms = int(t.get("latency_ms", 0) or 0)
+            tot_calls += calls
+            tot_in += inp
+            tot_out += out
+            tot_ms += ms
+            lines.append(f"| {role} | {calls} | {inp} | {out} | {ms / 1000:.1f}s |")
+        lines.append(f"| **合计** | {tot_calls} | {tot_in} | {tot_out} | {tot_ms / 1000:.1f}s |")
+        lines.append("")
+
     # 事实断言（ground-truth）结果：确定性校验的逐条对错，评委分之外的硬证据
     assert_runs = [
         (r, r["assertion"])

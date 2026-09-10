@@ -32,7 +32,13 @@ load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from pm.bootstrap import ensure_utf8_stdio  # noqa: E402
+
+# Windows 控制台/重定向编码兜底（L12）：任何打印之前先统一为 UTF-8
+ensure_utf8_stdio()
+
 from pm.graph import build_app, mermaid  # noqa: E402
+from pm.llm import usage_scope  # noqa: E402
 from pm.state import initial_state  # noqa: E402
 
 LOG_DIR = Path(os.getenv("PM_LOG_DIR") or (Path(__file__).parent / "logs"))
@@ -93,7 +99,8 @@ def recursion_budget(max_iterations: int) -> int:
     """按迭代上限算递归预算，并给交互澄清留出余量。
 
     写死 100 时，`--max-iter 30` 会先烧完 30 轮真实计费调用再撞 GraphRecursionError（A5）。
-    拓扑每轮固定 3 个 superstep（test/evaluate/revise），外加 clarify⇄ask_user 最多 4 个。
+    拓扑每轮固定 3 个 superstep（test/evaluate/revise），外加 clarify 链最多
+    5 个（3 次 clarify 分析 + 2 次 ask_user 提问，M8 起「2 轮提问」按提问轮数计）。
     """
     per_run = 3 * (max(0, int(max_iterations)) + 1) + 10
     return max(40, 4 * per_run)
@@ -136,34 +143,38 @@ def run_pipeline(args, init: dict) -> dict:
         "recursion_limit": recursion_budget(args.max_iter),
     }
 
-    app.invoke(init, config)
+    with usage_scope() as ledger:
+        app.invoke(init, config)
 
-    if not args.interactive:
-        return app.get_state(config).values
+        if not args.interactive:
+            final = app.get_state(config).values
+        else:
+            # 交互模式：不断响应澄清中断，直到流程走完
+            rounds = 0
+            while rounds < 5:
+                interrupts = _pending_interrupts(app, config)
+                if not interrupts:
+                    break
+                payload = interrupts[0]
+                print("\n" + "=" * 60)
+                print("需要澄清（需求不够清晰）")
+                print("=" * 60)
+                if isinstance(payload, dict):
+                    print(f"任务理解：{payload.get('task_summary', '')}\n")
+                    for i, q in enumerate(payload.get("questions", []), 1):
+                        print(f"  {i}. {q}")
+                print("\n请输入回答（直接回车表示按系统推断继续）：")
+                try:
+                    answer = input("> ").strip()
+                except EOFError:
+                    answer = ""
+                app.invoke(Command(resume=answer or "按你的推断继续"), config)
+                rounds += 1
+            final = app.get_state(config).values
 
-    # 交互模式：不断响应澄清中断，直到流程走完
-    rounds = 0
-    while rounds < 5:
-        interrupts = _pending_interrupts(app, config)
-        if not interrupts:
-            break
-        payload = interrupts[0]
-        print("\n" + "=" * 60)
-        print("需要澄清（需求不够清晰）")
-        print("=" * 60)
-        if isinstance(payload, dict):
-            print(f"任务理解：{payload.get('task_summary', '')}\n")
-            for i, q in enumerate(payload.get("questions", []), 1):
-                print(f"  {i}. {q}")
-        print("\n请输入回答（直接回车表示按系统推断继续）：")
-        try:
-            answer = input("> ").strip()
-        except EOFError:
-            answer = ""
-        app.invoke(Command(resume=answer or "按你的推断继续"), config)
-        rounds += 1
-
-    return app.get_state(config).values
+    # 台账快照写回 state：报告与 /api/status 直接展示（usage_scope 外已无记账）
+    final["llm_usage"] = ledger.snapshot()
+    return final
 
 
 # --------------------------------------------------------------------------

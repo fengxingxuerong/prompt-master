@@ -454,6 +454,13 @@ class MockInputSet(BaseModel):
     test_cases: list[str] = Field(
         description="N 条模拟用户输入，覆盖主路径 + 边界/歧义场景", min_length=1, max_length=8
     )
+    # 场景类型与 test_cases 逐条对齐（提示词#1 升级）：
+    # 只靠 rationale 自由文本没法做代码侧覆盖校验，枚举化后 mock_node 才能强制
+    # 「至少 1 条主路径 + 1 条边界」，而不是全拿到同一类用例还照常打分
+    scenario: list[str] = Field(
+        default_factory=list,
+        description="每条用例的场景类型（与 test_cases 逐条对齐）：main_path / boundary / stress",
+    )
     rationale: list[str] = Field(
         default_factory=list, description="每条用例覆盖的场景说明，便于人工审查"
     )

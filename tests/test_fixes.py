@@ -32,7 +32,17 @@ META = {"model": "fake", "channel": "fake", "attempts": 1, "latency_ms": 1, "tem
 
 
 def _mock_set(cases: list[str], rationale: list[str] | None = None):
-    return MockInputSet(test_cases=cases, rationale=rationale or ["x"] * len(cases)), META
+    # scenario 与新契约对齐（提示词#1 场景覆盖校验）：首条主路径、次条边界、其余压力；
+    # 单条用例只有 main_path，覆盖缺失告警由专门的用例去验证
+    scenarios = ["main_path"] + ["boundary"] + ["stress"] * max(0, len(cases) - 2)
+    return (
+        MockInputSet(
+            test_cases=cases,
+            scenario=scenarios[: len(cases)],
+            rationale=rationale or ["x"] * len(cases),
+        ),
+        META,
+    )
 
 
 # --------------------------------------------------------------------------

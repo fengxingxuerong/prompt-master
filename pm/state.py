@@ -66,6 +66,11 @@ class State(TypedDict, total=False):
     clarification: dict | None  # ClarificationResult -> dict
     clarification_answers: str  # 用户回答（交互模式）
     clarify_round: int
+    # 已向用户提问的轮数（M8）：与 clarify_round 分开计数。
+    # clarify_round 是"clarify 分析次数"（每次分析 +1，含带答案重分析），
+    # 用它当提问上限会把"最多 2 轮提问"缩水成"最多 1 轮"——
+    # 一轮交互 = clarify + ask_user + clarify = 3 次分析，第二轮问题永远问不出去。
+    clarify_questions_asked: int
     needs_reanalysis: bool  # 收到用户回答后需重新分析
     unresolved_questions: list[str]
 
@@ -96,6 +101,9 @@ class State(TypedDict, total=False):
     errors: Annotated[list[str], operator.add]
     trace: Annotated[list[dict], trace_reducer]
     llm_calls: int
+    # 按角色的 token/调用/耗时台账（llm.usage_scope 记账，run_pipeline / scheduler 收快照）
+    # 覆盖语义：执行入口一次性写入汇总值，不需要 reducer 累加
+    llm_usage: dict
 
 
 def initial_state(
@@ -126,6 +134,7 @@ def initial_state(
         "clarification": None,
         "clarification_answers": "",
         "clarify_round": 0,
+        "clarify_questions_asked": 0,
         "needs_reanalysis": False,
         "unresolved_questions": [],
         "prompt": "",
@@ -146,6 +155,9 @@ def initial_state(
         # reducer 累加进本轮。全新线程下该标记是无操作（old 为空）。
         "trace": [dict(TRACE_RESET)],
         "llm_calls": 0,
+        # 按角色用量台账（llm.usage_scope 记账）：空 dict 占位保证键始终存在，
+        # 无台账（如绕过执行入口的测试直调）时报告不渲染用量表
+        "llm_usage": {},
     }
 
 

@@ -113,6 +113,13 @@ PM_FAKE_BACKEND=progress .venv/bin/python run_server.py --port 8080
 # 查看图结构、跑自检、跑本地 e2e
 .venv/bin/python run.py --mermaid
 .venv/bin/python run.py --selftest
+
+# 节点提示词回归评测：离线结构契约（零成本，已纳入 pytest）；
+# 改动 pm/prompts.py 后先跑这个，提示词改坏了结构会立刻红
+.venv/bin/python eval_prompts.py
+.venv/bin/python eval_prompts.py --node clarifier
+# 真实调用模式（花真钱，手动跑；用确定性代码侧校验而非 LLM 自评）
+.venv/bin/python eval_prompts.py --live
 bash examples/run_e2e_stub.sh          # Linux / macOS
 .venv\Scripts\python.exe -m pytest tests/ -q
 # Windows 等价的桩服务 e2e（自动挑端口、跑前清缓存、断言两条通道）：
@@ -306,9 +313,10 @@ system prompt"（元话语泄漏）而评估器给高分的情况——评估器
 
 | 层次 | 命令 | 证明 | **不**证明 |
 |---|---|---|---|
-| 单元测试 | `pytest tests/ -q`（125 项） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀）、null 容错、演示模式隔离与产物落盘 | 任何与模型能力相关的结论 |
+| 单元测试 | `pytest tests/ -q`（209 项） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀）、null 容错、演示模式隔离与产物落盘、**服务层限流**（滑动窗口 / 429+Retry-After / 赛马按任务数计费）、**两轮澄清提问语义**、**MockGen 场景覆盖校验**、**用量台账**、**入口编码兜底**、**节点提示词结构契约** | 任何与模型能力相关的结论 |
 | 拓扑自检 | `python run.py --selftest` | 图能跑通、状态正确累加、迭代终止与兜底正确、双评委仲裁路径 | 优化效果（用的是假后端） |
 | 真实 HTTP e2e | `bash examples/run_e2e_stub.sh` / `examples/run_e2e_stub.ps1` | 真实客户端 → HTTP → 响应解析 → 校验链路通畅；两条结构化输出通道均可用；**所有角色端点都被锁在桩上** | 优化效果（桩服务返回固定内容） |
+| 提示词回归评测 | `python eval_prompts.py`（离线，零成本）/ `--live`（真实调用） | **节点提示词自身的结构契约**（占位符渲染、安全约束块、专项规则块）随 pytest 常态回归；`--live` 用确定性代码侧校验（质量门 / 场景覆盖 / 提问预算 / 劣质输出压分 / 修订净增量 ≤30%）验证提示词行为 | `--live` 之外的任何效果结论（离线只保证结构，不保证生成质量） |
 
 **要验证提示词优化的实际效果，必须配置真实 API Key 运行。**前三层只能保证
 "代码是对的"，不能保证"提示词变好了"——这两件事经常被混为一谈。
@@ -331,8 +339,12 @@ CI（GitHub Actions）在 push / PR 时对 Python 3.11/3.12/3.13 跑以上全部
 prompt-master/
 ├── run.py                      CLI 入口
 ├── run_server.py               REST API 服务启动入口（FastAPI + uvicorn）
+├── eval_prompts.py             节点提示词回归评测（离线结构契约 / --live 真实校验）
+├── prompt_eval/cases.json      节点提示词评测用例集（离线用 vars 与模板占位符对应）
 ├── pm/
 │   ├── backend.py              可注入的调用钩子（演示模式 / 自测的任务级隔离）
+│   ├── ratelimit.py            服务层滑动窗口限流（提交入口成本护栏，默认 10 次/分钟）
+│   ├── bootstrap.py            入口引导（Windows 控制台 UTF-8 编码兜底）
 │   ├── assertions.py           事实断言（ground-truth）：exact/contains/regex/自定义，一票否决达标
 │   ├── state.py                LangGraph 状态与 reducer
 │   ├── schemas.py              Pydantic 数据契约（含加权评分、评委元信息、用例数完整性、断言聚合）

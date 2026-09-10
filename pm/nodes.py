@@ -36,7 +36,7 @@ from pydantic import ValidationError
 from .assertions import RULE_MODE, check_assertion
 from .backend import carry_context
 from .cache import eval_cache, key_for_eval, key_for_target, target_cache
-from .llm import build_config, call_fingerprint, plain_call, structured_call
+from .llm import build_config, call_fingerprint, current_ledger, plain_call, structured_call
 from .prompts import (
     CLARIFIER_SYSTEM,
     CLARIFIER_USER,
@@ -201,6 +201,9 @@ def ask_user_node(state: State) -> dict:
             "needs_reanalysis": True,
             "clarification_answers": merged,
             "clarify_round": state.get("clarify_round", 0) + 1,
+            # 提问轮数独立计数（M8）：一轮交互 = clarify + ask_user + clarify，
+            # clarify_round 会把这三步都算进去，用它当提问上限会缩水一轮
+            "clarify_questions_asked": state.get("clarify_questions_asked", 0) + 1,
         },
         "user_answered",
         questions=questions,
@@ -338,9 +341,29 @@ def mock_node(state: State) -> dict:
     user_prompt = render(MOCKGEN_USER, prompt=state["prompt"], n=n)
     cases: list[str] = []
     rationale: list[str] = []
+    scenarios: list[str] = []
     meta: dict[str, Any] = {}
     calls = 0
     err: str | None = None
+
+    def _has_coverage(kind: list[str] | None = None) -> bool:
+        """场景覆盖校验（提示词#1）：至少 1 条主路径 + 1 条边界。
+
+        只校验条数时，模型可以给回 n 条几乎同质的"正常输入"——数量达标、
+        评估却在最简单的路径上打分，边界行为完全没被测到。
+        kind 为空时检查当前 scenarios。
+        """
+        kinds = [s.lower() for s in (scenarios if kind is None else kind) if s and s.strip()]
+        return "main_path" in kinds and "boundary" in kinds
+
+    def _coverage_hint() -> str:
+        kinds = [s.lower() for s in scenarios if s and s.strip()]
+        missing = []
+        if "main_path" not in kinds:
+            missing.append("main_path（典型主路径）")
+        if "boundary" not in kinds:
+            missing.append("boundary（边界/歧义）")
+        return "、".join(missing)
 
     for attempt in (1, 2):
         try:
@@ -352,14 +375,23 @@ def mock_node(state: State) -> dict:
         calls += 1
         # 只截不补是 C1 的根源：这里改成“不够就再要一次”，而不是默默拿 1 条去当基准
         got = [c for c in result.test_cases if c and c.strip()][:n]
-        if len(got) > len(cases):
+        got_scenario = list(result.scenario or [])[: len(got)]
+        if len(got) > len(cases) or (len(got) == len(cases) and _has_coverage(got_scenario)):
             cases, rationale = got, list(result.rationale or [])
-        if len(cases) >= n:
+            scenarios = got_scenario
+        if len(cases) >= n and _has_coverage():
             break
-        logger.warning("mock 只给了 %d/%d 条用例，重新生成", len(cases), n)
+        # 逐项归因：条数不足与场景缺失是两类问题，重生成 hint 要对症
+        reasons = []
+        if len(cases) < n:
+            reasons.append(f"只输出了 {len(cases)}/{n} 条")
+        if not _has_coverage():
+            reasons.append(f"场景覆盖缺失：{_coverage_hint()}")
+        logger.warning("mock 未达标：%s，重新生成", "；".join(reasons))
         user_prompt += (
-            f"\n\n<count_warning>上次只输出了 {len(cases)} 条。请严格输出 {n} 条彼此不重复的模拟输入，"
-            "且 rationale 与 test_cases 逐条对齐。</count_warning>"
+            f"\n\n<count_warning>上次不合格：{'；'.join(reasons)}。"
+            f"请严格输出 {n} 条彼此不重复的模拟输入，scenario 与 test_cases 逐条对齐"
+            "（必须同时包含 main_path 与 boundary）。</count_warning>"
         )
 
     degraded = False
@@ -367,6 +399,7 @@ def mock_node(state: State) -> dict:
         # 降级基准：没有可用用例时退回原始需求本身，但标记为 degraded，不允许据此判达标。
         cases = [state["task"]]
         rationale = ["（降级）mock 未产出用例，回退为原始需求"]
+        scenarios = ["main_path"]  # 降级基准只有一条：按主路径标注，避免误导后续消费方
         degraded = True
         err = err or "mockgen 未返回可用用例"
 
@@ -379,6 +412,13 @@ def mock_node(state: State) -> dict:
     elif len(cases) < n:
         # 条数不够不能静默：评分口径受限要写进错误列表与报告（C1）
         patch["errors"] = [f"mock: 只得到 {len(cases)}/{n} 条用例，样本量不足以支撑达标判定"]
+    if not degraded and not _has_coverage():
+        # 场景覆盖缺失也不能静默（提示词#1）：全部用例同质时评估只覆盖了最简单路径，
+        # 报告里必须让读者知道"边界行为没被测到"，而不是只看到分数
+        patch["errors"] = [
+            *(patch.get("errors") or []),
+            f"mock: 场景覆盖缺失（{_coverage_hint()}），评估结论未覆盖全部场景类型",
+        ]
 
     return _apply(
         state,
@@ -389,6 +429,8 @@ def mock_node(state: State) -> dict:
         n_expected=n,
         degraded=degraded,
         rationale=rationale[: len(cases)],
+        scenarios=scenarios[: len(cases)],
+        coverage_ok=_has_coverage(),
         model=meta.get("model"),
         latency_ms=meta.get("latency_ms"),
         channel=meta.get("channel"),
@@ -1636,11 +1678,20 @@ def report_node(state: State) -> dict:
     渲染逻辑在 `pm/report.py`（纯字符串组装，便于单测与改文案）；
     这里只负责把结果写回图状态。
     """
+    # 用量台账在图内收口：报告渲染发生在本节点，早于外层（run_pipeline/scheduler）
+    # 写回 state，所以必须在这里从当前上下文取快照，报告里的用量表才非空
+    ledger = current_ledger()
     report, best = render_report(state)
+    patch: dict[str, Any] = {
+        "final_report": report,
+        "prompt": best.get("prompt", state.get("prompt", "")),
+    }
+    if ledger is not None:
+        patch["llm_usage"] = ledger.snapshot()
     return _apply(
         state,
         "report",
-        {"final_report": report, "prompt": best.get("prompt", state.get("prompt", ""))},
+        patch,
         "report_done",
         status=state.get("status", "running"),
         best_iteration=best.get("iteration"),

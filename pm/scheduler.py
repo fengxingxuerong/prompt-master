@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from .graph import build_app
+from .llm import usage_scope
 from .state import initial_state
 
 logger = logging.getLogger("pm.scheduler")
@@ -63,17 +64,67 @@ class RaceRecord:
 
 
 def _progress_of(state: dict[str, Any]) -> dict[str, Any]:
-    """从图状态里裁出「给外部轮询用」的进度视图。"""
+    """从图状态里裁出「给外部轮询用」的进度视图。
+
+    旧版只裁了薄薄一层（status/iteration/aggregate/版本数/调用数），够轮询状态用，
+    但富 UI 要做节点级流水线、提示词版本/diff、维度雷达图——这些数据本就存在于图状态，
+    只是没有对外暴露。这里补齐：不动旧字段（向后兼容旧控制台），只追加富视图字段。
+    """
     versions = state.get("prompt_versions", [])
-    return {
+    pv_list = versions if isinstance(versions, list) else []
+    out = {
         "run_id": state.get("run_id"),
         "status": state.get("status", "running"),
         "iteration": state.get("iteration", 0),
         "aggregate": state.get("aggregate"),
         # 容忍两种输入：完整图状态（list）与已经裁过的进度快照（int）
-        "prompt_versions": len(versions) if isinstance(versions, list) else int(versions or 0),
+        "prompt_versions": len(pv_list) if pv_list else int(versions or 0),
         "llm_calls": state.get("llm_calls", 0),
     }
+    # ---- 富 UI 视图字段（数据本就存在于状态，旧版未对外暴露）----
+    out["task"] = str(state.get("task", "") or "")
+    out["target_model"] = str(state.get("target_model", "") or "")
+    out["n_test_cases"] = int(state.get("n_test_cases", 0) or 0)
+    out["test_cases"] = [str(c) for c in (state.get("test_cases", []) or [])]
+    # 提示词全文版本（供版本切换 + diff）：只取展示所需的叶子字段，不挂整份 state
+    out["prompt_version_list"] = [
+        {
+            "iteration": v.get("iteration"),
+            "prompt": str(v.get("prompt", "") or ""),
+            "note": str(v.get("note", "") or ""),
+            "avg_score": v.get("avg_score"),
+            "min_score": v.get("min_score"),
+        }
+        for v in pv_list
+        if isinstance(v, dict)
+    ]
+    # 节点级 trace（供流水线可视化）
+    out["trace"] = [dict(t) for t in (state.get("trace", []) or []) if isinstance(t, dict)]
+    # 逐用例评估（供维度雷达图 + 评估表）：只取叶子，丢掉大段 evidence
+    out["evaluations"] = [
+        {
+            "test_case_index": e.get("test_case_index"),
+            "weighted_score": e.get("weighted_score"),
+            "model_reported_score": e.get("model_reported_score"),
+            "dimension_scores": e.get("dimension_scores"),
+            "judge": e.get("judge"),
+            "passed": e.get("passed"),
+            "issues": list(e.get("issues", []) or []),
+            "suggestions": list(e.get("suggestions", []) or []),
+            "sample_scores": list(e.get("sample_scores", []) or []),
+        }
+        for e in (state.get("evaluations", []) or [])
+        if isinstance(e, dict)
+    ]
+    out["baseline_aggregate"] = state.get("baseline_aggregate")
+    out["pairwise"] = state.get("pairwise")
+    out["early_stop_reason"] = state.get("early_stop_reason")
+    # 按角色的 token/调用/耗时台账（运行中随节点推进实时刷新）
+    out["llm_usage"] = dict(state.get("llm_usage", {}) or {})
+    out["prompt_quality_issues"] = [
+        dict(q) for q in (state.get("prompt_quality_issues", []) or []) if isinstance(q, dict)
+    ]
+    return out
 
 
 def _save_artifacts(run_id: str, state: dict[str, Any]) -> tuple[Path | None, Path | None]:
@@ -271,18 +322,21 @@ class TaskManager:
                 "recursion_limit": 100,
             }
 
-            with hook_cm:
+            with hook_cm, usage_scope() as ledger:
                 final: dict[str, Any] = {}
                 # 逐节点刷新进度，运行中就能看到迭代/评分（H2）
                 for chunk in app.stream(init, config, stream_mode="values"):
-                    final = chunk
+                    final = dict(chunk)
+                    # token 用量随节点推进实时可见，不用等到任务结束
+                    final["llm_usage"] = ledger.snapshot()
                     with self._lock:
                         if rec:
-                            rec.progress = _progress_of(chunk)
+                            rec.progress = _progress_of(final)
                             # 报告一落地就对外可见：否则存在"/api/status 已说 passed、
                             # /api/report 还 404"的窗口，控制台会显示"报告未生成"
                             if chunk.get("final_report"):
-                                rec.result = chunk
+                                rec.result = final
+                final["llm_usage"] = ledger.snapshot()
 
             report_path, _ = _save_artifacts(run_id, final)
             with self._lock:

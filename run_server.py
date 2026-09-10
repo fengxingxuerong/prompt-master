@@ -15,6 +15,16 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+from pm.bootstrap import ensure_utf8_stdio
+
+# Windows 下 stdout 默认走系统码页（GBK），中文日志重定向到文件会乱码（L12）。
+# 在任何打印之前统一 reconfigure 为 UTF-8，用户不再需要手动设 PYTHONIOENCODING。
+ensure_utf8_stdio()
 
 
 def main() -> None:

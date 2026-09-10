@@ -1,0 +1,83 @@
+{
+  "_comment": "节点提示词回归评测用例集。每个节点至少 1 条用例：vars 与该节点 user 模板的 <<VAR>> 占位符一一对应。--offline 只做结构契约校验（零成本、CI 可跑）；--live 用真实 LLM 执行并用确定性代码侧校验打分（花真钱，手动跑）。",
+  "clarifier": [
+    {
+      "name": "模糊需求触发提问",
+      "vars": {
+        "task": "帮我搞个 prompt",
+        "context": ""
+      },
+      "expect": {
+        "comment": "需求极模糊：应判 is_clear=false 且问题数 ≤3（提问预算）；若判清晰也必须给出完整推断值",
+        "max_questions": 3
+      }
+    },
+    {
+      "name": "完整需求直接放行",
+      "vars": {
+        "task": "写一个提示词：让 AI 把客服对话按投诉根因分类（物流/质量/服务态度/其他），输出 Markdown 表格（类别|数量|典型原话），给客服主管看，语气专业",
+        "context": "字段：对话文本已分轮次"
+      },
+      "expect": {
+        "comment": "三要素齐全：应判 is_clear=true 且不提问",
+        "is_clear": true,
+        "max_questions": 0
+      }
+    }
+  ],
+  "optimizer": [
+    {
+      "name": "数据分析提示词生成",
+      "vars": {
+        "target_model": "deepseek-v3",
+        "model_profile": "未知模型：采用通用最佳实践（短句、显式格式模板、不过度嵌套）",
+        "task_description": "让 AI 分析销售数据 CSV，输出趋势结论与异常点",
+        "context": "（无）",
+        "revision_hint": ""
+      }
+    }
+  ],
+  "mockgen": [
+    {
+      "name": "3 条用例覆盖校验",
+      "vars": {
+        "prompt": "[角色] 数据分析顾问\n[任务] 分析给定销售数据并输出 Markdown 表格\n[约束] 缺失数据必须显式标注「数据缺失」，不得编造\n[输出格式] Markdown 表格（区域|销售额）+ 3 条结论",
+        "n": "3"
+      },
+      "expect": {
+        "min_cases": 3,
+        "require_main_path": true,
+        "require_boundary": true
+      }
+    }
+  ],
+  "evaluator": [
+    {
+      "name": "劣质输出应低分且有证据",
+      "vars": {
+        "original_task": "让 AI 分析销售数据",
+        "context": "（无）",
+        "prompt": "[角色] 数据分析顾问\n[任务] 分析销售数据并输出 Markdown 表格（区域|销售额）+ 3 条结论，缺失数据标注「数据缺失」",
+        "test_input": "销售额：华东 null，华南 98 万，产品字段缺失",
+        "test_output": "销售情况不错，整体向好，建议继续努力。"
+      },
+      "expect": {
+        "comment": "输出完全未执行任务且编造结论：加权分应 <8 且 issues 非空（先取证后打分）",
+        "max_weighted": 8.0,
+        "require_issues": true
+      }
+    }
+  ],
+  "reviser": [
+    {
+      "name": "针对反馈定向修订",
+      "vars": {
+        "original_task": "让 AI 分析销售数据",
+        "previous_prompt": "[角色] 资深数据分析顾问，具备 5 年以上零售行业 BI 分析经验，擅长从原始销售数据中提取可执行结论。\n[背景] 输入为用户提供的一段时间内各区域/产品的销售额数据，可能包含缺失字段、异常值或格式不一致的日期。\n[任务] 逐项分析销售数据：输出按区域汇总的 Markdown 表格（列固定为：区域｜销售额｜同比变化），随后给出不多于 3 条趋势结论。\n[约束] 1. 每个结论必须引用数据中的具体数值；2. 缺失或无法解析的数据必须显式标注「数据缺失」，不得编造或推算；3. 输入含矛盾信息时指出矛盾并停止处理；4. 不使用第一人称，不输出与数据无关的建议。\n[输出格式] 先输出 Markdown 表格，再输出 3 条以「-」开头的结论，除此之外不输出任何内容。",
+        "evaluation_feedback": "case#0：输出把「华东 null」编造为具体数值 120 万，违反缺失数据标注要求；case#1：输出缺少要求的 Markdown 表格结构，直接以文字段落呈现；case#0：结论出现了 4 条，超出 3 条上限。",
+        "attempted": "（无历史修订）",
+        "n": "2"
+      }
+    }
+  ]
+}

@@ -22,11 +22,12 @@ import os
 import uuid
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from .ratelimit import SlidingWindowLimiter, parse_rate_limit_env
 from .scheduler import TaskManager
 from .web import WEB_CONSOLE_HTML
 
@@ -82,6 +83,44 @@ if not os.getenv("PM_API_TOKEN", "").strip():
 
 
 # --------------------------------------------------------------------------
+# 提交端点限流（H3 遗留半边：鉴权挡不住合法身份的高频滥用）
+# --------------------------------------------------------------------------
+_rate_per_min, _rate_warning = parse_rate_limit_env(os.getenv("PM_RATE_LIMIT_PER_MIN"))
+if _rate_warning:
+    logger.warning(_rate_warning)
+if _rate_per_min == 0:
+    logger.warning("PM_RATE_LIMIT_PER_MIN=0：提交端点限流已显式关闭（仅建议本地单人开发使用）")
+_limiter = SlidingWindowLimiter(max_events=max(1, _rate_per_min)) if _rate_per_min > 0 else None
+
+
+async def enforce_rate_limit(request: Request, cost: int = 1) -> None:
+    """提交端点的限流检查（在 handler 内显式调用，不是 Depends）。
+
+    为什么不用 Depends：依赖在 handler 之前执行，而 `/api/race` 的 cost
+    依赖已解析的请求体（参赛任务数），此时还拿不到 —— 旧写法在 handler 里
+    设置 request.state.rate_cost 对依赖来说永远晚一步，赛马会被按 1 次计费。
+    在 handler 内调用则两个端点都能拿到真实成本。
+
+    计费口径：key = API token（区分身份）否则客户端 IP；
+    `/api/race` 的 cost = 参赛任务数（成本跟任务数走，不是跟请求数走）。
+    超额返回 429 + Retry-After，调用方拿到明确等待时间而不是盲目重试。
+    """
+    if _limiter is None:
+        return
+    expected = os.getenv("PM_API_TOKEN", "").strip()
+    key = expected or (request.client.host if request.client else "unknown")
+    cost = max(1, int(cost or 1))
+    ok, retry_after = _limiter.acquire(key, cost)
+    if not ok:
+        logger.warning("限流触发：key=%s cost=%d，%.1fs 后可重试", key, cost, retry_after)
+        raise HTTPException(
+            status_code=429,
+            detail=f"提交过于频繁（每分钟上限 {_rate_per_min} 次提交），请 {max(1, int(retry_after) + 1)} 秒后重试",
+            headers={"Retry-After": str(max(1, int(retry_after) + 1))},
+        )
+
+
+# --------------------------------------------------------------------------
 # 请求 / 响应模型
 # --------------------------------------------------------------------------
 class CaseInput(BaseModel):
@@ -134,6 +173,20 @@ class StatusResponse(BaseModel):
     prompt_versions: int = 0
     llm_calls: int = 0
     error: str | None = None  # 任务异常终止时给出来因，否则调用方只能看到 status=failed
+    # ---- 富 UI 视图字段（数据本就存在于图状态，旧版未对外暴露）----
+    task: str = ""
+    target_model: str = ""
+    n_test_cases: int = 0
+    test_cases: list[str] = []
+    prompt_version_list: list[dict[str, Any]] = []
+    trace: list[dict[str, Any]] = []
+    evaluations: list[dict[str, Any]] = []
+    baseline_aggregate: dict[str, Any] | None = None
+    pairwise: dict[str, Any] | None = None
+    early_stop_reason: str | None = None
+    prompt_quality_issues: list[dict[str, Any]] = []
+    # 按角色的 token 用量与耗时（{role: {calls, input_tokens, output_tokens, latency_ms}}）
+    llm_usage: dict[str, dict[str, int]] = {}
 
 
 class ReportResponse(BaseModel):
@@ -178,8 +231,13 @@ async def health():
     return {"status": "ok", "service": "prompt-master"}
 
 
-@app.post("/api/optimize", response_model=OptimizeResponse, dependencies=[Depends(require_token)])
-async def optimize(req: OptimizeRequest):
+@app.post(
+    "/api/optimize",
+    response_model=OptimizeResponse,
+    dependencies=[Depends(require_token)],
+)
+async def optimize(req: OptimizeRequest, request: Request):
+    await enforce_rate_limit(request, cost=1)
     run_id = uuid.uuid4().hex[:12]
     seeds = [c.model_dump() for c in req.test_cases] if req.test_cases else None
     if seeds:
@@ -219,7 +277,9 @@ async def report(run_id: str):
 
 
 @app.post("/api/race", response_model=RaceResponse, dependencies=[Depends(require_token)])
-async def race(req: RaceRequest):
+async def race(req: RaceRequest, request: Request):
+    # 赛马的成本 = 参赛任务数：一次 10 任务提交按 10 次计费，不能让批量入口变成限流旁路
+    await enforce_rate_limit(request, cost=len(req.tasks))
     specs = [
         {
             "task": t.task,

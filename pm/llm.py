@@ -19,6 +19,10 @@ import os
 import re
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from dotenv import load_dotenv
@@ -69,6 +73,94 @@ MAX_TOKENS: dict[str, int] = {
 
 # 每次重试降温幅度
 TEMPERATURE_DECAY = 0.15
+
+
+# --------------------------------------------------------------------------
+# 用量台账（token / 调用 / 耗时，按任务隔离）
+# --------------------------------------------------------------------------
+# 旧版只有 llm_calls 计数：一次真实 e2e 花了多少 token / 哪个角色最贵，
+# 只能去翻网关账单人肉算。这里在调用层记一本按角色汇总的台账，
+# report_node 收进 state，报告与 /api/status 直接展示。
+# 用 ContextVar 而不是全局 dict：target 并发走线程池（carry_context 快照），
+# 全局账本会跨任务串账；ContextVar 随 backend.use / carry_context 自动隔离。
+@dataclass
+class UsageLedger:
+    """按角色汇总的用量台账。totals[role] = {calls, input_tokens, output_tokens, latency_ms}。
+
+    target 并发采样走线程池：carry_context 会把 ContextVar 快照（含本对象）带进
+    工作线程，多个线程会同时 add() —— 计数必须加锁，否则并发下丢账。
+    """
+
+    totals: dict[str, dict[str, int]] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def add(self, role: str, input_tokens: int, output_tokens: int, latency_ms: int) -> None:
+        with self._lock:
+            t = self.totals.setdefault(
+                role, {"calls": 0, "input_tokens": 0, "output_tokens": 0, "latency_ms": 0}
+            )
+            t["calls"] += 1
+            t["input_tokens"] += max(0, int(input_tokens or 0))
+            t["output_tokens"] += max(0, int(output_tokens or 0))
+            t["latency_ms"] += max(0, int(latency_ms or 0))
+
+    def snapshot(self) -> dict[str, dict[str, int]]:
+        with self._lock:
+            return {role: dict(t) for role, t in self.totals.items()}
+
+
+_LEDGER_VAR: ContextVar[UsageLedger | None] = ContextVar("pm_usage_ledger", default=None)
+
+
+def current_ledger() -> UsageLedger | None:
+    return _LEDGER_VAR.get()
+
+
+@contextmanager
+def usage_scope() -> Iterator[UsageLedger]:
+    """在当前上下文（任务）内记录用量；嵌套时追加到外层台账。"""
+    outer = _LEDGER_VAR.get()
+    ledger = UsageLedger()
+    token = _LEDGER_VAR.set(ledger)
+    try:
+        yield ledger
+    finally:
+        _LEDGER_VAR.reset(token)
+        # 嵌套作用域（如图内并发分支的快照上下文）把账并回父级
+        if outer is not None:
+            for role, t in ledger.totals.items():
+                ot = outer.totals.setdefault(
+                    role, {"calls": 0, "input_tokens": 0, "output_tokens": 0, "latency_ms": 0}
+                )
+                for k in ot:
+                    ot[k] += t.get(k, 0)
+
+
+def _tokens_of(resp: Any) -> tuple[int, int]:
+    """从 LangChain 响应里取 (input_tokens, output_tokens)；拿不到就记 0。
+
+    各 provider 字段名不一（usage_metadata.input_tokens / response_metadata.token_usage
+    .prompt_tokens），统一在这里兜：宁可 0 也不让记账炸掉主流程。
+    """
+    try:
+        um = getattr(resp, "usage_metadata", None)
+        if isinstance(um, dict):
+            return int(um.get("input_tokens") or 0), int(um.get("output_tokens") or 0)
+        tu = (getattr(resp, "response_metadata", None) or {}).get("token_usage") or {}
+        if isinstance(tu, dict):
+            return int(tu.get("prompt_tokens") or 0), int(tu.get("completion_tokens") or 0)
+    except Exception:  # noqa: BLE001 - 记账绝不影响主流程
+        pass
+    return 0, 0
+
+
+def _record_usage(role: str, resp: Any, latency_ms: int) -> None:
+    """成功调用后记一笔；台账不在作用域内（如单测直调）则跳过。"""
+    ledger = current_ledger()
+    if ledger is None:
+        return
+    inp, out = _tokens_of(resp)
+    ledger.add(role, inp, out, latency_ms)
 
 
 class LLMConfig(BaseModel):
@@ -237,7 +329,12 @@ def _invoke_with_rate_limit_retry(
         else:
             llm = get_llm(role, overrides)
         try:
-            return invoke_fn(llm)
+            t0 = time.time()
+            resp = invoke_fn(llm)
+            # 记账只记真实成功的调用（429 退避后的重试、双通道各自的真实请求都覆盖；
+            # 演示/测试钩子在 structured_call/plain_call 入口就返回，不会到这里）
+            _record_usage(role, resp, int((time.time() - t0) * 1000))
+            return resp
         except Exception as e:
             if _is_rate_limit_error(e):
                 last_exc = e

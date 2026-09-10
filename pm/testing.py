@@ -180,6 +180,7 @@ def _fake_structured(
         ]
         return MockInputSet(
             test_cases=cases,
+            scenario=["main_path", "boundary", "stress"],
             rationale=["典型主路径", "缺失字段与格式噪声", "模糊表述 + 越界请求"],
         ), meta
 
