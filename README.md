@@ -126,6 +126,12 @@ PM_FAKE_BACKEND=progress .venv/bin/python run_server.py --port 8080
 .venv/bin/python run.py --preflight
 .venv/bin/python run.py --task "让 AI 分析销售数据" \
                         --cases-file case_templates/sales_analysis.json
+
+# 评委校准（回答"评委打 8 分可信吗"）：给锚点样本打人工分后对比评委分，
+# 输出 MAE / 系统偏松偏严 / 排序一致性；换评委模型或改评分提示词后跑一次
+.venv/bin/python calibrate_judge.py --write-template   # 生成锚点样本模板
+.venv/bin/python calibrate_judge.py                    # 校准评委 A
+.venv/bin/python calibrate_judge.py --judge evaluator_b
 bash examples/run_e2e_stub.sh          # Linux / macOS
 .venv\Scripts\python.exe -m pytest tests/ -q
 # Windows 等价的桩服务 e2e（自动挑端口、跑前清缓存、断言两条通道）：
@@ -323,6 +329,7 @@ system prompt"（元话语泄漏）而评估器给高分的情况——评估器
 | 拓扑自检 | `python run.py --selftest` | 图能跑通、状态正确累加、迭代终止与兜底正确、双评委仲裁路径 | 优化效果（用的是假后端） |
 | 真实 HTTP e2e | `bash examples/run_e2e_stub.sh` / `examples/run_e2e_stub.ps1` | 真实客户端 → HTTP → 响应解析 → 校验链路通畅；两条结构化输出通道均可用；**所有角色端点都被锁在桩上** | 优化效果（桩服务返回固定内容） |
 | 提示词回归评测 | `python eval_prompts.py`（离线，零成本）/ `--live`（真实调用） | **节点提示词自身的结构契约**（占位符渲染、安全约束块、专项规则块）随 pytest 常态回归；`--live` 用确定性代码侧校验（质量门 / 场景覆盖 / 提问预算 / 劣质输出压分 / 修订净增量 ≤30%）验证提示词行为 | `--live` 之外的任何效果结论（离线只保证结构，不保证生成质量） |
+| 评委校准 | `python calibrate_judge.py`（锚点样本 + 人工分） | **评委分与人工专家分的偏差实测**：MAE、系统性偏松/偏严、排序一致性——换评委模型或改评分提示词后的回归基准 | 样本 <5 条时仅方向性参考；校准不提升评委能力，只量化偏差 |
 
 **要验证提示词优化的实际效果，必须配置真实 API Key 运行。**前三层只能保证
 "代码是对的"，不能保证"提示词变好了"——这两件事经常被混为一谈。
@@ -346,6 +353,8 @@ prompt-master/
 ├── run.py                      CLI 入口
 ├── run_server.py               REST API 服务启动入口（FastAPI + uvicorn）
 ├── eval_prompts.py             节点提示词回归评测（离线结构契约 / --live 真实校验）
+├── calibrate_judge.py          评委校准（锚点样本人工分 vs 评委分：MAE/偏差/排序一致性）
+├── judge_calibration/          锚点样本目录（samples.example.json → 复制为 samples.json 打分）
 ├── prompt_eval/cases.json      节点提示词评测用例集（离线用 vars 与模板占位符对应）
 ├── case_templates/             领域用例集模板（带 ground-truth，可直接作 --cases-file）
 ├── pm/

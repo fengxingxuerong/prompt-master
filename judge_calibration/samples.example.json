@@ -1,0 +1,30 @@
+[
+  {
+    "_comment": "评委校准锚点样本模板（--write-template 复制为 samples.json）。人工核对每条 human_score（1-10，按你对输出质量的专家判断）后运行：python calibrate_judge.py。字段与主管道评估器完全同口径；<5 条时结论仅方向性参考。",
+    "id": "demo-good",
+    "original_task": "让 AI 分析销售数据",
+    "context": "",
+    "prompt": "[角色] 资深数据分析顾问\n[任务] 分析给定销售数据，输出按区域汇总的 Markdown 表格（区域|销售额|同比）与不超过 3 条结论\n[约束] 每个结论必须引用具体数值；缺失数据必须显式标注「数据缺失」，不得编造\n[输出格式] 先表格后结论，不输出其他内容",
+    "test_input": "销售额：华东 null，华南 98 万，华北 45 万",
+    "test_output": "| 区域 | 销售额 | 同比 |\n|---|---|---|\n| 华东 | 数据缺失 | - |\n| 华南 | 98 万 | - |\n| 华北 | 45 万 | - |\n- 华南销售额最高（98 万）；华北次之（45 万）；华东数据缺失，无法对比。",
+    "human_score": 8
+  },
+  {
+    "id": "demo-hallucinated",
+    "original_task": "让 AI 分析销售数据",
+    "context": "",
+    "prompt": "[角色] 数据分析顾问\n[任务] 分析销售数据并给出结论",
+    "test_input": "销售额：华东 null，华南 98 万",
+    "test_output": "销售情况整体向好：华东销售额 120 万表现最佳，华南 98 万紧随其后，建议加大华东地区的库存备货。",
+    "human_score": 3
+  },
+  {
+    "id": "demo-vague",
+    "original_task": "让 AI 分析销售数据",
+    "context": "",
+    "prompt": "帮我分析一下销售数据",
+    "test_input": "华东 120 万，华南 98 万",
+    "test_output": "销售数据还不错，各区域表现良好，整体呈上升趋势，建议继续努力。",
+    "human_score": 4
+  }
+]

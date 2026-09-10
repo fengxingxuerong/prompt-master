@@ -12,6 +12,11 @@ from typing import Any
 
 from .schemas import PASS_THRESHOLD
 
+# 用例区分度自检阈值：基线均分达到该值以上时，判定「用例对优化不敏感」。
+# 基线 = 原始需求直喂 target：它都拿到接近满分，说明这批用例太简单，
+# 任何合理的提示词都能过——优化版即使 9 分也证明不了相对价值（评不出差异）。
+BASELINE_DISCRIMINATION_FLOOR = 8.0
+
 # 报告只“读”状态，不依赖 State 的完整字段定义（也不该依赖）：
 # 用 Mapping 接单，方便单测直接传 dict，又避开 TypedDict 的窄接受。
 ReportState = Mapping[str, Any]
@@ -130,6 +135,17 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             lines.append(
                 "> ⚠️ 本轮优化相对基线**没有正向提升**。流水线跑得通不等于创造了价值，"
                 "建议人工比对两份输出或提高 PM_SAMPLES_PER_CASE 后重跑。"
+            )
+            lines.append("")
+        # 用例区分度自检：基线（原始需求直喂）都接近满分 = 用例太简单，
+        # 任何合理提示词都能过，优化版的分数证明不了相对价值（评不出差异）。
+        base_avg = float(base.get("avg_score") or 0.0)
+        if base_avg >= BASELINE_DISCRIMINATION_FLOOR:
+            lines.append(
+                f"> ⚠️ **用例区分度不足**：基线均分已达 {base_avg}（≥ {BASELINE_DISCRIMINATION_FLOOR}），"
+                "说明当前测试用例对优化不敏感——连原始需求都能拿高分，"
+                "本报告的达标结论不能证明优化版相对更好。"
+                "建议换用更难的用例（参考 `case_templates/` 的边界与注入场景）或提高采样口径后重跑。"
             )
             lines.append("")
     elif not pw:

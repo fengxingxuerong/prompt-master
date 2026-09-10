@@ -73,6 +73,23 @@ def test_non_positive_delta_warns():
     assert "没有正向提升" in text
 
 
+def test_high_baseline_flags_no_discrimination():
+    """用例区分度自检：基线（原始需求直喂）都接近满分 = 用例太简单，必须点名。"""
+    state = _state(baseline_aggregate=_agg(avg_score=8.6, min_score=8.0))
+    text, _ = render_report(state)
+    assert "用例区分度不足" in text
+    assert "8.6" in text
+    assert "不能证明优化版相对更好" in text
+    assert "case_templates" in text  # 给出对症去处
+
+
+def test_low_baseline_does_not_flag_discrimination():
+    """基线分数正常（低于阈值）时不误报区分度问题。"""
+    state = _state(baseline_aggregate=_agg(avg_score=6.2, min_score=5.5))
+    text, _ = render_report(state)
+    assert "用例区分度不足" not in text
+
+
 def test_unstable_cases_and_judge_bias_are_surfaced():
     state = _state(aggregate=_agg(unstable_cases=[0, 2], judge_bias=1.4, judge_bias_warning=True))
     text, _ = render_report(state)
