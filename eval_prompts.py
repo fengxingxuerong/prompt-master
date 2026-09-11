@@ -89,8 +89,15 @@ def check_structure(node: str, case: dict[str, Any]) -> list[str]:
     """渲染模板并做结构契约校验。返回问题列表（空 = 通过）。"""
     issues: list[str] = []
     system_tpl, user_tpl = TEMPLATES[node]
-    system = render(system_tpl, **case["vars"])
-    user = render(user_tpl, **case["vars"])
+    render_vars = dict(case["vars"])
+    # reviser 模板带注入式字符预算占位符（prev_len/max_len）：
+    # 与 check_live / revise_node 同口径注入，离线渲染才不残留占位符
+    if node == "reviser" and "previous_prompt" in render_vars:
+        prev = render_vars["previous_prompt"]
+        render_vars.setdefault("prev_len", len(prev))
+        render_vars.setdefault("max_len", int(len(prev) * 1.3) + 1)
+    system = render(system_tpl, **render_vars)
+    user = render(user_tpl, **render_vars)
 
     # 1) 占位符必须全部渲染：残留 <<VAR>> 说明用例缺变量或模板笔误
     for label, text in (("system", system), ("user", user)):
@@ -128,8 +135,15 @@ def check_structure(node: str, case: dict[str, Any]) -> list[str]:
 def check_live(node: str, case: dict[str, Any]) -> list[str]:
     issues: list[str] = []
     system_tpl, user_tpl = TEMPLATES[node]
-    system = render(system_tpl, **case["vars"])
-    user = render(user_tpl, **case["vars"])
+    render_vars = dict(case["vars"])
+    # reviser：注入字符预算（与主管道 revise_node 同口径）——抽象的"净增量≤30%"
+    # 在真实端点上执行不稳，必须翻译成具体数字模型才可执行
+    if node == "reviser" and "previous_prompt" in render_vars:
+        prev = render_vars["previous_prompt"]
+        render_vars.setdefault("prev_len", len(prev))
+        render_vars.setdefault("max_len", int(len(prev) * 1.3) + 1)
+    system = render(system_tpl, **render_vars)
+    user = render(user_tpl, **render_vars)
     expect = case.get("expect", {})
 
     if node == "optimizer" or node == "reviser":

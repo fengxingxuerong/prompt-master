@@ -1252,13 +1252,19 @@ def evaluate_node(state: State) -> dict:
 # ==========================================================================
 def revise_node(state: State) -> dict:
     node = "revise"
+    prev_prompt = state["prompt"]
+    # 字符预算注入：抽象的"净增量≤30%"在真实端点上执行不稳（实测 572/578 字符
+    # 连续超限），把比例翻译成具体数字模型才可执行——与 Optimizer 自己的
+    # "模糊形容词替换为可测量要求"原则一致
     user_prompt = render(
         REVISER_USER,
         original_task=state["task"],
-        previous_prompt=state["prompt"],
+        previous_prompt=prev_prompt,
         evaluation_feedback=state.get("revision_feedback", "（无）"),
         attempted=_attempted_text(state),
         n=len(state.get("test_cases", [])),
+        prev_len=len(prev_prompt),
+        max_len=int(len(prev_prompt) * 1.3) + 1,
     )
 
     try:
