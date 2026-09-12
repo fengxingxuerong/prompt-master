@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import uuid
 from typing import Any
 
@@ -29,15 +30,19 @@ from pydantic import BaseModel, Field
 
 from .ratelimit import SlidingWindowLimiter, parse_rate_limit_env
 from .scheduler import TaskManager
+from .store import store_from_env
 from .web import WEB_CONSOLE_HTML
 
 logger = logging.getLogger("pm.server")
 
 # --------------------------------------------------------------------------
-# 全局调度器单例（注意：它是**进内**的。多 worker 部署时任务只存在于接到 POST
-# 的那个进程里，其他 worker 查不到 → 默认单 worker，详见 run_server.py）
+# 全局调度器单例
 # --------------------------------------------------------------------------
-_scheduler = TaskManager()
+# 记录存哪里由 PM_TASK_DB 决定（见 pm/store.py）：
+# - 不设 → 进程内记录，此时只能单 worker（多 worker 会让 status/report 随机 404）；
+# - 设了 → SQLite 共享记录，各 worker 读同一份，可放心 --workers > 1。
+# 注意线程池仍是进程内的：任务由接到 POST 的那个 worker 执行，查询可以打给任意 worker。
+_scheduler = TaskManager(store=store_from_env())
 
 # --------------------------------------------------------------------------
 # FastAPI 应用
@@ -60,6 +65,58 @@ if _origins:
     )
 else:
     logger.info("未配置 PM_ALLOW_ORIGINS，已关闭跳源访问")
+
+
+# --------------------------------------------------------------------------
+# 安全响应头
+# --------------------------------------------------------------------------
+# 控制台是零外部依赖的单页（CSS/JS/canvas 全内联，无任何 CDN 请求），所以能上
+# `default-src 'self'`：即便有人往报告里塞了 <img src=外部地址>，外联也会被浏览器掐掉。
+#
+# `script-src` / `style-src` 用**逐响应 nonce** 而不是 'unsafe-inline'：
+# 'unsafe-inline' 一旦打开，注入进来的内联脚本照样能跑，等于把 CSP 降级成"只防外联"。
+# 代价是控制台自己也不能用内联事件属性（onclick=...）与 style 属性 —— 那部分已改成
+# data-* + 事件委托与工具类（见 pm/web.py），所以这里可以不给 'unsafe-inline'。
+CSP_NONCE_PLACEHOLDER = "__CSP_NONCE__"
+
+
+def render_csp(nonce: str) -> str:
+    return (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        f"style-src 'self' 'nonce-{nonce}'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "font-src 'self' data:; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'"
+    )
+
+
+# Swagger UI / ReDoc 从 CDN 拉静态资源，套 strict CSP 会白屏 —— 这几个路径跳过 CSP，
+# 其余安全头照给（它们是 HTML 页面，值得防嵌套与嗅探）。
+_CSP_EXEMPT_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    """给所有响应补基础安全头；控制台页额外上带 nonce 的 CSP。
+
+    nonce 必须在**处理请求之前**生成并放进 request.state，路由渲染 HTML 时才能用同一个值；
+    响应头在 call_next 之后补。两者是同一个 nonce，否则控制台自己的脚本会被自家 CSP 拦下。
+    """
+    nonce = secrets.token_urlsafe(16)
+    request.state.csp_nonce = nonce
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    if not request.url.path.startswith(_CSP_EXEMPT_PATHS):
+        resp.headers.setdefault("Content-Security-Policy", render_csp(nonce))
+    return resp
 
 
 def require_token(x_api_key: str | None = Header(default=None)) -> None:
@@ -221,9 +278,15 @@ class RaceReportResponse(BaseModel):
 # 路由
 # --------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-async def web_console():
-    """Web 控制台（单 HTML 页面）。"""
-    return WEB_CONSOLE_HTML
+async def web_console(request: Request):
+    """Web 控制台（单 HTML 页面）。
+
+    nonce 占位符在渲染时替换成中间件为本请求生成的值；替换后 HTML 与响应头里的
+    nonce 必须一致 —— 不一致的表现是控制台完全没反应（脚本被 CSP 拦掉），
+    tests/test_web_console.py 有断言比对两者。
+    """
+    nonce = getattr(request.state, "csp_nonce", "")
+    return WEB_CONSOLE_HTML.replace(CSP_NONCE_PLACEHOLDER, nonce)
 
 
 @app.get("/api/health")

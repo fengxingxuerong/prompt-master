@@ -20,7 +20,7 @@ WEB_CONSOLE_HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PromptMaster · Agent</title>
-<style>
+<style nonce="__CSP_NONCE__">
   :root{
     --bg:#0b0d13; --bg2:#0f1218; --panel:#161922; --panel2:#1c2030; --border:#262b3c; --border2:#333a4f;
     --text:#e6e9f0; --muted:#8b93a7; --dim:#6b7280; --accent:#5b8cff; --accent2:#7c5cff;
@@ -172,12 +172,24 @@ WEB_CONSOLE_HTML = r"""<!DOCTYPE html>
   .ci-opts input{width:60px;background:#0d0f15;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 6px;font-size:11px;font-family:inherit;text-align:center}
   .ci-opts label{display:flex;align-items:center;gap:4px}
   .err-text{color:var(--bad);font-size:11px;margin-top:4px}
+
+  /* ---- 工具类：替代内联 style 属性（CSP 收紧后 style 属性会被浏览器拦掉）---- */
+  .u-muted{color:var(--muted)}
+  .u-warn{color:var(--warn)}
+  .u-bad{color:var(--bad)}
+  .u-text{color:var(--text)}
+  .u-brand-sub{color:var(--muted);font-weight:400;font-size:12px}
+  .u-empty-side{color:var(--muted);font-size:12px;padding:12px 4px}
+  .u-mt8{margin-top:8px}
+  .u-mt14{margin-top:14px}
+  .u-nomax{max-height:none}
+  .u-w100{width:100%}
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <div class="logo"><span class="dot"></span>PromptMaster<span style="color:var(--muted);font-weight:400;font-size:12px">· Agent</span></div>
+  <div class="logo"><span class="dot"></span>PromptMaster<span class="u-brand-sub">· Agent</span></div>
   <div class="spacer"></div>
   <div class="health" id="health"><span class="led"></span><span id="healthText">检测中</span></div>
   <button id="raceBtn">🏁 批量赛马</button>
@@ -187,7 +199,7 @@ WEB_CONSOLE_HTML = r"""<!DOCTYPE html>
   <!-- 左栏：任务历史 -->
   <div class="sidebar">
     <h3>任务历史</h3>
-    <div class="run-list" id="runList"><div style="color:var(--muted);font-size:12px;padding:12px 4px">还没有任务，在下方输入需求开始</div></div>
+    <div class="run-list" id="runList"><div class="u-empty-side">还没有任务，在下方输入需求开始</div></div>
     <div class="newbar">
       <input id="targetModel" value="DeepSeek-V4-Flash" placeholder="目标模型">
     </div>
@@ -218,14 +230,14 @@ WEB_CONSOLE_HTML = r"""<!DOCTYPE html>
       <div class="ci-opts">
         <label>用例数 <input id="optCases" type="number" value="2" min="1" max="8"></label>
         <label>最大迭代 <input id="optIter" type="number" value="2" min="0" max="10"></label>
-        <span id="optHint" style="color:var(--muted)">· Enter 发送 / Shift+Enter 换行</span>
+        <span id="optHint" class="u-muted">· Enter 发送 / Shift+Enter 换行</span>
       </div>
       <div class="err-text" id="ciErr"></div>
     </div>
   </div>
 </div>
 
-<script>
+<script nonce="__CSP_NONCE__">
 "use strict";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -306,13 +318,13 @@ async function poll(){
 function renderRunList(){
   const box = $("runList");
   const keys = Object.keys(runs);
-  if(!keys.length){ box.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 4px">还没有任务，在下方输入需求开始</div>'; return; }
+  if(!keys.length){ box.innerHTML = '<div class="u-empty-side">还没有任务，在下方输入需求开始</div>'; return; }
   // 最新提交在最上
   box.innerHTML = keys.reverse().map(rid => {
     const r = runs[rid];
     const agg = r.aggregate || {};
     const cls = (r.status==="running"||r.status==="pending") ? "running" : r.status;
-    return `<div class="run-item ${rid===activeRid?'active':''}" onclick="selectRun('${esc(rid)}')">
+    return `<div class="run-item ${rid===activeRid?'active':''}" data-run="${esc(rid)}">
       <div class="ri-top"><span class="ri-id">${esc(rid.slice(0,8))}</span><span class="badge ${cls}">${esc(r.status)}</span></div>
       <div class="ri-task">${esc(r.task ? r.task.slice(0,40) : (rid.slice(0,8)))}</div>
       <div class="ri-meta"><span>迭代 ${r.iteration ?? 0}</span><span>均分 ${agg.avg_score ?? '-'}</span><span>${r.llm_calls ?? 0} 调用</span></div>
@@ -355,8 +367,8 @@ function renderChat(r){
   card += `<div class="bc-row"><span>迭代</span><b>${r.iteration ?? 0}</b></div>`;
   card += `<div class="bc-row"><span>LLM 调用</span><b>${r.llm_calls ?? 0}</b></div>`;
   if(agg.avg_score != null) card += `<div class="bc-row"><span>当前均分 / 最低</span><b>${agg.avg_score} / ${agg.min_score}</b></div>`;
-  if(r.early_stop_reason) card += `<div class="bc-row"><span>早停原因</span><b style="color:var(--warn)">${esc(r.early_stop_reason)}</b></div>`;
-  if((r.prompt_quality_issues||[]).length) card += `<div class="bc-row"><span>质量警告</span><b style="color:var(--warn)">${r.prompt_quality_issues.length} 条</b></div>`;
+  if(r.early_stop_reason) card += `<div class="bc-row"><span>早停原因</span><b class="u-warn">${esc(r.early_stop_reason)}</b></div>`;
+  if((r.prompt_quality_issues||[]).length) card += `<div class="bc-row"><span>质量警告</span><b class="u-warn">${r.prompt_quality_issues.length} 条</b></div>`;
   card += "</div>";
 
   if(running){
@@ -371,12 +383,12 @@ function renderChat(r){
     const best = [...pvs].sort((a,b)=>(b.avg_score||0)-(a.avg_score||0))[0];
     copyStore.best = best.prompt || "";
     const note = best.note ? ` · ${esc(best.note)}` : "";
-    parts.push(msgBot("交付提示词", `<button class="copybtn" onclick="copyText(this,'best')">复制</button><b>第 ${best.iteration ?? 0} 版${note} · 均分 ${best.avg_score ?? '-'}</b><div class="prompt-box">${esc(best.prompt)}</div>`));
+    parts.push(msgBot("交付提示词", `<button class="copybtn" data-copy="best">复制</button><b>第 ${best.iteration ?? 0} 版${note} · 均分 ${best.avg_score ?? '-'}</b><div class="prompt-box">${esc(best.prompt)}</div>`));
   }
 
   // 报告
   if(r.status && r.status !== "running" && r.status !== "pending"){
-    parts.push(`<div class="msg bot"><div class="ava">📋</div><div class="body"><div class="who">交付报告</div><div class="content"><button class="copybtn" id="rptBtn" onclick="loadReport('${esc(activeRid)}')">加载完整报告</button><div id="rptBox" style="margin-top:8px"></div></div></div></div>`);
+    parts.push(`<div class="msg bot"><div class="ava">📋</div><div class="body"><div class="who">交付报告</div><div class="content"><button class="copybtn" id="rptBtn" data-report="${esc(activeRid)}">加载完整报告</button><div id="rptBox" class="u-mt8"></div></div></div></div>`);
   }
 
   box.innerHTML = parts.join("");
@@ -397,7 +409,7 @@ async function loadReport(rid){
     $("rptBox").innerHTML = `<div class="md">${md2html(d.report)}</div>`;
     $("rptBtn").style.display = "none";
   }catch(e){
-    $("rptBox").innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+    $("rptBox").innerHTML = `<span class="u-bad">${esc(e.message)}</span>`;
     $("rptBtn").textContent = "重试"; $("rptBtn").disabled = false;
   }
 }
@@ -432,7 +444,7 @@ function renderPipeline(r){
       if(t.concurrency != null) meta += `<span>并发 ${t.concurrency}</span>`;
       if(t.calls != null) meta += `<span>${t.calls} 调用</span>`;
       if(t.reason) meta += `<span>${esc(t.reason)}</span>`;
-      if(t.error) meta += `<span style="color:var(--bad)">${esc(t.error)}</span>`;
+      if(t.error) meta += `<span class="u-bad">${esc(t.error)}</span>`;
       html += `<div class="node-row"><div class="node-ic ${cls}">${ic}</div><div class="node-info"><div class="ni-name">${esc(node)}</div><div class="ni-event">${esc(ev)}</div><div class="ni-meta">${meta}</div></div></div>`;
     });
     html += "</div>";
@@ -454,13 +466,13 @@ function renderPromptView(r){
   copyStore.pv = cur.prompt || "";
   box.innerHTML = `
     <div class="pv-bar">
-      <select id="pvSelectA" onchange="pvA=+this.value;renderPromptView(runs[activeRid])">${opts}</select>
-      <span style="color:var(--muted)">↔ 对比</span>
-      <select id="pvSelectB" onchange="pvB=+this.value;renderPromptView(runs[activeRid])">${optsB}</select>
-      <button class="copybtn" onclick="copyText(this,'pv')">复制当前版</button>
+      <select id="pvSelectA" data-pv="A">${opts}</select>
+      <span class="u-muted">↔ 对比</span>
+      <select id="pvSelectB" data-pv="B">${optsB}</select>
+      <button class="copybtn" data-copy="pv">复制当前版</button>
     </div>
     <div class="pv-cols">
-      <div class="pv-col"><h4>v${pvA} 全文（${(cur.prompt||"").length} 字）</h4><div class="prompt-box" style="max-height:none">${esc(cur.prompt||"")}</div></div>
+      <div class="pv-col"><h4>v${pvA} 全文（${(cur.prompt||"").length} 字）</h4><div class="prompt-box u-nomax">${esc(cur.prompt||"")}</div></div>
       <div class="pv-col"><h4>diff v${pvA} ↔ v${pvB}</h4>${renderDiff(pvs[pvA]?.prompt||"", pvs[pvB]?.prompt||"")}</div>
     </div>`;
 }
@@ -506,13 +518,13 @@ function renderScoreView(r){
     cards += `<div class="stat-card"><h4>成对盲评</h4><div class="big ${vColor}">${esc(pw.verdict)}</div><div class="sub">胜${(pw.votes&&pw.votes.better)||0}/负${(pw.votes&&pw.votes.worse)||0}/平${(pw.votes&&pw.votes.tie)||0}${pw.conflict?' · ⚠️结论冲突':''}</div></div>`;
   }
   if(agg.noise != null) cards += `<div class="stat-card"><h4>采样噪声</h4><div class="big">${agg.noise.toFixed(2)}</div><div class="sub">SEM ${agg.sem ?? '-'} · 样本 ${agg.n_samples ?? '-'}</div></div>`;
-  if(agg.judge_bias != null) cards += `<div class="stat-card"><h4>评委偏差</h4><div class="big" style="color:${agg.judge_bias_warning?'var(--warn)':'var(--text)'}">${agg.judge_bias.toFixed(2)}</div><div class="sub">${agg.judge_bias_warning?'⚠️ 可能放水':'正常'}</div></div>`;
+  if(agg.judge_bias != null) cards += `<div class="stat-card"><h4>评委偏差</h4><div class="big ${agg.judge_bias_warning?'u-warn':'u-text'}">${agg.judge_bias.toFixed(2)}</div><div class="sub">${agg.judge_bias_warning?'⚠️ 可能放水':'正常'}</div></div>`;
   cards += "</div>";
 
   // 评估表
   let evalTable = "";
   if(evals.length){
-    evalTable = `<div class="chart-box" style="margin-top:14px"><h4>逐用例评估</h4><table class="md" style="width:100%"><tr><th>用例</th><th>加权分</th><th>自报分</th><th>评委</th><th>通过</th><th>问题</th></tr>`;
+    evalTable = `<div class="chart-box u-mt14"><h4>逐用例评估</h4><table class="md u-w100"><tr><th>用例</th><th>加权分</th><th>自报分</th><th>评委</th><th>通过</th><th>问题</th></tr>`;
     evals.forEach(e => {
       const issues = (e.issues||[]).length;
       evalTable += `<tr><td>#${e.test_case_index ?? '-'}</td><td><b>${e.weighted_score ?? '-'}</b></td><td>${e.model_reported_score ?? '-'}</td><td>${esc(e.judge||'-')}</td><td>${e.passed?'✓':'✗'}</td><td>${issues?`${issues} 条`:''}</td></tr>`;
@@ -524,7 +536,7 @@ function renderScoreView(r){
     <div class="score-grid">
       <div>
         <div class="chart-box"><h4>维度雷达图（最新评估）</h4><canvas id="radar" width="320" height="320"></canvas></div>
-        <div class="chart-box" style="margin-top:14px"><h4>版本分数曲线</h4><canvas id="curve" width="320" height="200"></canvas></div>
+        <div class="chart-box u-mt14"><h4>版本分数曲线</h4><canvas id="curve" width="320" height="200"></canvas></div>
       </div>
       ${cards}${evalTable}
     </div>`;
@@ -629,8 +641,17 @@ function drawCurve(id, scores){
 // ---- 轻量 Markdown 渲染 ----
 function md2html(md){
   let h = esc(md);
-  // 代码块
-  h = h.replace(/```(\w*)\n([\s\S]*?)```/g, (_,l,c)=>`<pre>${c.replace(/&lt;/g,"<")}</pre>`);
+  // 代码块先抽成占位符，内容**全程保持转义态**。
+  // 历史教训：旧版为"让代码里的 < 显示出来"做了 c.replace(/&lt;/g,"<") 反向还原，
+  // 结果报告正文（含任务原文与模型输出）只要出现在围栏里就能把 <img onerror=...>
+  // 原样送进 innerHTML —— 存储型 XSS：任何能提交任务的人都能给控制台投毒。
+  // 代码块是纯文本展示场景，转义后原样输出才是正确行为，不需要还原。
+  // 抽成占位符还有个副作用收益：围栏里的 ** / ` 不再被当成行内标记二次渲染。
+  const blocks = [];
+  h = h.replace(/```(\w*)\n([\s\S]*?)```/g, (_,l,c)=>{
+    blocks.push(c);
+    return "%%PMCB" + (blocks.length - 1) + "%%";
+  });
   // 表格
   h = h.replace(/((?:^\|.*\|\n?)+)/m, tbl => {
     const rows = tbl.trim().split("\n").map(r=>r.trim());
@@ -647,6 +668,8 @@ function md2html(md){
   h = h.replace(/^\s*[-*] (.*)$/gm, '<li>$1</li>');
   h = h.replace(/(<li>[\s\S]*?<\/li>)/g, m=>`<ul>${m}</ul>`);
   h = h.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  // 还原代码块（仍是转义态，直接进 <pre> 显示为字面文本）
+  h = h.replace(/%%PMCB(\d+)%%/g, (_,i)=>`<pre>${blocks[+i]}</pre>`);
   return h;
 }
 
@@ -678,6 +701,26 @@ $("raceBtn").onclick = async () => {
     }catch(e){ $("ciErr").textContent = "赛马失败：" + e.message; }
   }
 };
+
+// ---- 委托事件 ----
+// CSP 收紧后内联事件属性会被浏览器拦掉（script-src 不再是 'unsafe-inline'），
+// 改由 data-* + 事件委托统一处理。
+// 注意：这里用 addEventListener / el.onclick = fn 属性赋值都没问题 ——
+// 被 CSP 拦的是 HTML 里的事件处理属性，不是 JS 侧的函数绑定。
+document.addEventListener("click", e => {
+  const el = e.target instanceof Element ? e.target : null;
+  if(!el) return;
+  const cp = el.closest("[data-copy]"), rn = el.closest("[data-run]"), rp = el.closest("[data-report]");
+  if(cp){ copyText(cp, cp.dataset.copy); return; }
+  if(rn){ selectRun(rn.dataset.run); return; }
+  if(rp){ loadReport(rp.dataset.report); }
+});
+document.addEventListener("change", e => {
+  const el = e.target instanceof Element ? e.target.closest("[data-pv]") : null;
+  if(!el) return;
+  if(el.dataset.pv === "A") pvA = +el.value; else pvB = +el.value;
+  renderPromptView(runs[activeRid]);
+});
 
 // ---- 事件 ----
 $("sendBtn").onclick = () => submitTask($("chatInput").value);

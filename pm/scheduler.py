@@ -23,13 +23,13 @@ import os
 import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .graph import build_app
 from .llm import usage_scope
 from .state import initial_state
+from .store import MemoryStore, RaceRecord, RecordStore, TaskRecord, make_view
 
 logger = logging.getLogger("pm.scheduler")
 
@@ -44,23 +44,9 @@ def _log_dir() -> Path:
 TERMINAL_STATUS = ("passed", "max_iterations", "failed", "early_stopped")
 
 
-@dataclass
-class TaskRecord:
-    run_id: str
-    status: str = "pending"  # pending | running | finished | failed
-    result: dict[str, Any] | None = None
-    progress: dict[str, Any] | None = None  # 运行中的实时快照（H2）
-    error: str | None = None
-    report_path: Path | None = None
-    future: Future | None = field(default=None, repr=False)
-
-
-@dataclass
-class RaceRecord:
-    race_id: str
-    name: str
-    run_ids: list[str]
-    spec_count: int
+# TaskRecord / RaceRecord 现在住在 pm/store.py：记录的存储方式（进程内 / SQLite）
+# 与调度逻辑解耦后，多 worker 共享状态只需要换一个 store。这里 re-export 保持旧导入可用。
+__all__ = ["RaceRecord", "TaskManager", "TaskRecord"]
 
 
 def _progress_of(state: dict[str, Any]) -> dict[str, Any]:
@@ -148,13 +134,25 @@ class TaskManager:
     """线程池驱动的后台任务调度器。
 
     线程安全，支持单任务优化与批量赛马；任务表有容量上限。
+
+    记录存哪里由 `store` 决定（`pm/store.py`）：默认进程内，设 `PM_TASK_DB` 则落 SQLite ——
+    后者是 `--workers > 1` 的前提。线程池与 Future 始终是进程内的：**谁提交谁执行**，
+    横向扩容靠负载均衡把查询打到任意 worker 都能读到同一份记录。
     """
 
-    def __init__(self, max_workers: int = 4, max_records: int | None = None):
+    def __init__(
+        self,
+        max_workers: int = 4,
+        max_records: int | None = None,
+        store: RecordStore | None = None,
+    ):
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
-        self._tasks: dict[str, TaskRecord] = {}
-        self._races: dict[str, RaceRecord] = {}
+        self.store: RecordStore = store if store is not None else MemoryStore()
+        # 兼容视图：历史代码/测试按 Mapping 访问任务表（tm._tasks[rid] / len(tm._tasks)）
+        self._tasks = make_view(self.store, "task")
+        self._races = make_view(self.store, "race")
         self._lock = threading.Lock()
+        self._futures: dict[str, Future] = {}
         self._max_records = (
             max_records if max_records is not None else _int_env("PM_MAX_TASKS", 200)
         )
@@ -164,22 +162,19 @@ class TaskManager:
     # ------------------------------------------------------------------
     def submit(self, run_id: str, **kwargs: Any) -> str:
         """提交单个优化任务，异步执行。返回 run_id。"""
-        with self._lock:
-            if run_id in self._tasks:
-                raise ValueError(f"run_id {run_id} 已存在")
-            rec = TaskRecord(run_id=run_id, status="pending")
-            self._tasks[run_id] = rec
-            self._evict_locked()
+        if self.store.get_task(run_id) is not None:
+            raise ValueError(f"run_id {run_id} 已存在")
+        self.store.put_task(TaskRecord(run_id=run_id, status="pending"))
+        self.store.evict(self._max_records)
 
         future = self._executor.submit(self._run_task, run_id, kwargs)
         with self._lock:
-            rec.future = future
+            self._futures[run_id] = future
         return run_id
 
     def get_status(self, run_id: str) -> dict[str, Any] | None:
         """查询任务状态。运行中读实时快照，结束后读最终状态（H2）。"""
-        with self._lock:
-            rec = self._tasks.get(run_id)
+        rec = self.store.get_task(run_id)
         if rec is None:
             return None
         if rec.result:
@@ -198,9 +193,13 @@ class TaskManager:
         return {"run_id": run_id, "status": rec.status, "error": rec.error}
 
     def get_report(self, run_id: str) -> str | None:
-        """取交付报告：内存 → 落盘文件。都没有则 None（调用方按 404 处理）。"""
-        with self._lock:
-            rec = self._tasks.get(run_id)
+        """取交付报告：记录 → 落盘文件。都没有则 None（调用方按 404 处理）。
+
+        多 worker 场景下 report_path 可能是**另一个进程**写的路径，但报告产物落在共享的
+        `PM_LOG_DIR` 里，所以这里能正常读到；万一读到的是过期环境变量拼出的路径，
+        还有最后那道 `report_<run_id>.md` 兜底。
+        """
+        rec = self.store.get_task(run_id)
         if rec is not None:
             report = (rec.result or {}).get("final_report") if rec.result else None
             if report:
@@ -227,18 +226,16 @@ class TaskManager:
             prepared.append((rid, spec))
             run_ids.append(rid)
         # 先把名单登记齐，再提交：否则并发查询会看到 total 与 runs 数目不一致
-        with self._lock:
-            self._races[race_id] = RaceRecord(
-                race_id=race_id, name=race_name, run_ids=run_ids, spec_count=len(run_ids)
-            )
-            self._evict_locked()
+        self.store.put_race(
+            RaceRecord(race_id=race_id, name=race_name, run_ids=run_ids, spec_count=len(run_ids))
+        )
+        self.store.evict(self._max_records)
         for rid, spec in prepared:
             self.submit(rid, **spec)
         return race_id
 
     def get_race_status(self, race_id: str) -> dict[str, Any] | None:
-        with self._lock:
-            race = self._races.get(race_id)
+        race = self.store.get_race(race_id)
         if race is None:
             return None
         statuses: dict[str, Any] = {}
@@ -256,8 +253,7 @@ class TaskManager:
         }
 
     def get_race_report(self, race_id: str) -> str | None:
-        with self._lock:
-            race = self._races.get(race_id)
+        race = self.store.get_race(race_id)
         if race is None:
             return None
         ids = list(race.run_ids)
@@ -268,21 +264,10 @@ class TaskManager:
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
-    def _evict_locked(self) -> None:
-        """按插入序淘汰最旧记录（必须在持有 self._lock 时调用）。
-
-        每个 result 都持有完整图状态（全部 prompt 版本 + trace），无上限保留等于内存泄漏（M2）。
-        """
-        limit = max(1, self._max_records)
-        for table in (self._tasks, self._races):
-            while len(table) > limit:
-                table.pop(next(iter(table)), None)
-
     def _run_task(self, run_id: str, kwargs: dict[str, Any]) -> None:
-        with self._lock:
-            rec = self._tasks.get(run_id)
-            if rec:
-                rec.status = "running"
+        # 记录可能已被淘汰（容量上限）或根本不存在；update 对不存在的记录是 no-op，
+        # 任务照跑照落盘 —— 报告仍能从 logs/ 取回。
+        self.store.update_task(run_id, status="running")
 
         # 演示模式：把假后端限定在本次任务的作用域内（ContextVar），不改动任何模块属性（C4）
         scenario = os.getenv("PM_FAKE_BACKEND", "")
@@ -329,28 +314,19 @@ class TaskManager:
                     final = dict(chunk)
                     # token 用量随节点推进实时可见，不用等到任务结束
                     final["llm_usage"] = ledger.snapshot()
-                    with self._lock:
-                        if rec:
-                            rec.progress = _progress_of(final)
-                            # 报告一落地就对外可见：否则存在"/api/status 已说 passed、
-                            # /api/report 还 404"的窗口，控制台会显示"报告未生成"
-                            if chunk.get("final_report"):
-                                rec.result = final
+                    self.store.update_task(run_id, progress=_progress_of(final))
+                    # 报告一落地就对外可见：否则存在"/api/status 已说 passed、
+                    # /api/report 还 404"的窗口，控制台会显示"报告未生成"
+                    if chunk.get("final_report"):
+                        self.store.update_task(run_id, result=final)
                 final["llm_usage"] = ledger.snapshot()
 
             report_path, _ = _save_artifacts(run_id, final)
-            with self._lock:
-                if rec:
-                    rec.result = final
-                    rec.report_path = report_path
-                    rec.status = "finished"
+            self.store.update_task(run_id, result=final, report_path=report_path, status="finished")
             logger.info("任务 %s 完成，状态=%s", run_id, final.get("status"))
         except Exception as e:
             logger.exception("任务 %s 失败", run_id)
-            with self._lock:
-                if rec:
-                    rec.status = "failed"
-                    rec.error = str(e)
+            self.store.update_task(run_id, status="failed", error=str(e))
 
 
 def _int_env(key: str, default: int) -> int:

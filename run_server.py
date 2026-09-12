@@ -10,11 +10,15 @@
 启动后访问 http://127.0.0.1:8080/api/health 验证。
 交互式 API 文档：http://127.0.0.1:8080/docs
 设了环境变量 PM_API_TOKEN 时，POST 需带 `X-API-Key: <token>`。
+
+要跑多 worker（`--workers 4`）必须先设 `PM_TASK_DB` 指向一个 SQLite 文件，
+让各 worker 共享同一份任务记录；否则会强制回退为单 worker（status/report 会 404）。
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -38,15 +42,24 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.workers > 1:
-        # 任务表（TaskManager）与本地缓存都是**进内**单例：多 worker 时任务只存在于
-        # 接到 POST 的那个进内，其他 worker 查 run_id 会 404；多进程各自整文件覆盖
-        # 也会丢缓存更新。所以默认单 worker，需要扩容请改用外部队列/存储。
-        print(
-            "警告：--workers > 1 会把任务状态分散到多个进程（status/report 会随机 404，"
-            "缓存互相覆盖），仅适用于你已把调度器换成共享存储的情况。已强制回退为 1 个 worker。",
-            flush=True,
-        )
-        args.workers = 1
+        # 多 worker 的前提是"记录能被所有进程看到"：任务表默认是进程内字典，
+        # 那样 status/report 会随机 404。设了 PM_TASK_DB 走 SQLite 共享记录才放开。
+        # 仍需注意：本地结果缓存（logs/*_cache.json）按进程各持一份 —— 多 worker 下
+        # 缓存命中率下降（重复调用），但不会给出错误结论，属可接受代价。
+        if not (os.getenv("PM_TASK_DB") or "").strip():
+            print(
+                "警告：--workers > 1 需要共享任务记录。请先设 PM_TASK_DB=<sqlite 路径>"
+                "（各 worker 共享同一份记录），否则 status/report 会随机 404。"
+                "已强制回退为 1 个 worker。",
+                flush=True,
+            )
+            args.workers = 1
+        else:
+            print(
+                f"多 worker 模式：任务记录走 {os.getenv('PM_TASK_DB')}；"
+                "本地缓存按进程各持一份，命中率会下降。",
+                flush=True,
+            )
 
     uvicorn.run(
         "pm.server:app",

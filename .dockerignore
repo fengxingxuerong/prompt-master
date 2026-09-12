@@ -1,0 +1,40 @@
+# 镜像里只需要源码与运行入口（依赖走 pyproject.toml，代码走 COPY）
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.git/
+.github/
+.gitignore
+.gitattributes
+.pre-commit-config.yaml
+
+# 密钥绝不进镜像层（历史层删不掉，必须从一开始就不拷）
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# 运行产物与本地状态
+logs/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# 不该进运行镜像的开发资产
+tests/
+examples/
+judge_calibration/
+prompt_eval/
+qa_report_*.md
+e2e_*.md
+e2e_*.log
+README.md
+docs/
+*.egg-info/
+build/
+dist/
