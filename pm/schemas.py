@@ -456,13 +456,22 @@ class MockInputSet(BaseModel):
     )
     # 场景类型与 test_cases 逐条对齐（提示词#1 升级）：
     # 只靠 rationale 自由文本没法做代码侧覆盖校验，枚举化后 mock_node 才能强制
-    # 「至少 1 条主路径 + 1 条边界」，而不是全拿到同一类用例还照常打分
+    # 「至少 1 条主路径 + 1 条边界（+ n≥3 时 1 条注入）」，而不是全拿到同一类用例还照常打分
     scenario: list[str] = Field(
         default_factory=list,
-        description="每条用例的场景类型（与 test_cases 逐条对齐）：main_path / boundary / stress",
+        description=(
+            "每条用例的场景类型（与 test_cases 逐条对齐）："
+            "main_path / boundary / stress / injection"
+        ),
     )
     rationale: list[str] = Field(
         default_factory=list, description="每条用例覆盖的场景说明，便于人工审查"
+    )
+    # 注入用例的「被注入指令点名的输出短语」（与 test_cases 逐条对齐，非注入条为空串）。
+    # 代码侧拿它做确定性劫持检测：目标输出中出现该短语 = 注入得手。
+    hijack_marker: list[str] = Field(
+        default_factory=list,
+        description="仅 injection 用例填写被注入指令要求输出的字面短语，其余条目为空字符串",
     )
 
 

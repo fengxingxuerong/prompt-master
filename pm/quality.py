@@ -17,6 +17,10 @@
    （标签集与占位符集**从 pm.prompts 自动提取**，不再手写清单 ——
    旧版手写的 `<<task>>` 与真实占位符 `<<task_description>>` 对不上，属于检测不到的死码，见 A8）
 3. 长度下限：过短（< MIN_PROMPT_LENGTH 字符）视为空泛 / 截断
+4. 约束超载（constraint_overload）：[约束]/[关键约束]/[边界处理] 段内编号条目 > CONSTRAINT_LIMIT
+   （2026-09-12 评审新增：OPTIMIZER_SYSTEM 一直要求"总数 ≤10 条"，但只靠模型自检清单执行，
+   真实交付物实测 18 / 15 / 10 / 6 条，前两轮超标且 [关键约束] 与 [约束] 大面积语义重复。
+   「元话语泄漏」上了硬闸，「约束超载」却靠自觉是双标——同一待遇：代码侧确定性校验 + 带 hint 重试）
 
 用法：
 - optimize_node / revise_node 生成后调用，不合格自动带 hint 重试一次
@@ -25,7 +29,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from .prompts import WRAPPER_TAGS
 
@@ -55,6 +61,45 @@ WEAK_COMBO_MIN = 2
 
 # 交付物长度下限（字符）：低于此值视为空泛 / 截断 / 未生成
 MIN_PROMPT_LENGTH = 100
+
+# 约束条目上限：与 OPTIMIZER_SYSTEM 硬性规则 #4 的"总数控制在 10 条以内"同一口径。
+# 模型自检管不住的事，交给代码数数（见模块 docstring 第 4 条）。
+CONSTRAINT_LIMIT = 10
+
+# 约束条目只在「约束语义」的标签段里数：[任务]/[输出格式] 里的编号是交付物清单
+# （如"1. 趋势结论 2. 异常点"），把它们算进来会把合格提示词误杀。
+_SECTION_HEADER_RE = re.compile(r"^\s*\[([^\[\]]{1,8})\]\s*$")
+_CONSTRAINT_SECTION_RE = re.compile(r"约束|边界")
+_NUMBERED_ITEM_RE = re.compile(r"^\s*\d+\s*[.、)）]\s*\S")
+
+
+def count_constraints(prompt: str) -> dict[str, Any]:
+    """统计约束类标签段（[约束]/[关键约束]/[边界处理] 等）内的编号条目数。
+
+    返回 {"total": 总数, "sections": "段名1×a、段名2×b"}；无任何约束段时 total=0。
+    无编号但确有约束段的（用破折号列条目）不做猜测——只数能确定性数出来的。
+    """
+    total = 0
+    parts: list[tuple[str, int]] = []
+    current: str | None = None
+    current_count = 0
+    for line in (prompt or "").splitlines():
+        m = _SECTION_HEADER_RE.match(line)
+        if m:
+            if current is not None and current_count:
+                parts.append((current, current_count))
+            current = m.group(1)
+            current_count = 0
+            continue
+        if current is not None and _CONSTRAINT_SECTION_RE.search(current):
+            if _NUMBERED_ITEM_RE.match(line):
+                current_count += 1
+    if current is not None and current_count:
+        parts.append((current, current_count))
+    total = sum(n for _, n in parts)
+    sections = "、".join(f"[{name}]×{n}" for name, n in parts)
+    return {"total": total, "sections": sections}
+
 
 # 除模板外的其它注入包装器（由 nodes.py / scheduler 运行时拼进上下文，不在 prompts.py 模板里）
 EXTRA_LEAK_MARKERS: list[str] = [
@@ -92,7 +137,7 @@ RETRY_HINT_TEMPLATE = """
 
 @dataclass
 class QualityIssue:
-    code: str  # meta_leak | context_leak | too_short
+    code: str  # meta_leak | context_leak | too_short | constraint_overload
     detail: str
 
     def __str__(self) -> str:
@@ -146,6 +191,18 @@ def check_prompt_quality(prompt: str) -> QualityReport:
         issues.append(
             QualityIssue(
                 "too_short", f"提示词过短（{n} 字符 < {MIN_PROMPT_LENGTH}），疑似空泛或截断"
+            )
+        )
+
+    counted = count_constraints(prompt)
+    if counted["total"] > CONSTRAINT_LIMIT:
+        issues.append(
+            QualityIssue(
+                "constraint_overload",
+                f"约束超载：约束类段共 {counted['total']} 条编号条目"
+                f"（{counted['sections']}），超过上限 {CONSTRAINT_LIMIT} 条——"
+                "约束越多遵循率越低，且互相重复的约束会互相稀释；"
+                "请合并同义条目、删除可有可无的条目后再输出",
             )
         )
 

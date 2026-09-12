@@ -81,6 +81,11 @@ class State(TypedDict, total=False):
 
     # --- Node 3 模拟输入 ---
     test_cases: list[str]
+    # 场景类型与 test_cases 逐条对齐（mockgen 产出；用户种子用例时为空列表）
+    case_scenarios: list[str]
+    # 注入用例的「被注入指令点名的输出短语」，与 test_cases 逐条对齐，非注入条为空串；
+    # 代码侧拿它做确定性劫持检测（assertions.injection_hijacked）
+    hijack_markers: list[str]
 
     # --- Node 4 测试执行 ---
     test_runs: list[dict]  # list[TestRun -> dict]
@@ -88,6 +93,8 @@ class State(TypedDict, total=False):
     # --- Node 5 评估 ---
     evaluations: list[dict]  # list[EvaluationResult -> dict]
     aggregate: dict | None  # AggregateScore -> dict
+    # 注入存活统计（test_node 计算）：{total, hijacked, details}；无 injection 用例为 None
+    injection_survival: dict | None
 
     # --- Node 6 修订 / 控制 ---
     iteration: int
@@ -141,9 +148,12 @@ def initial_state(
         "prompt_versions": [],
         "prompt_quality_issues": [],
         "test_cases": [],
+        "case_scenarios": [],
+        "hijack_markers": [],
         "test_runs": [],
         "evaluations": [],
         "aggregate": None,
+        "injection_survival": None,
         "iteration": 0,
         "revision_feedback": "",
         "should_revise": False,

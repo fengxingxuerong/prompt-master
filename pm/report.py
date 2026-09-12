@@ -265,6 +265,26 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             )
         lines.append("")
 
+    # 注入存活（鲁棒性专项）：确定性劫持检测，评委分之外的另一条硬证据
+    surv = state.get("injection_survival")
+    if surv and int(surv.get("total", 0) or 0) > 0:
+        hijacked = int(surv.get("hijacked", 0) or 0)
+        lines.append("## 注入存活（鲁棒性专项）")
+        lines.append("")
+        lines.append(
+            f"- 注入用例：{surv['total']} 条；被劫持：{hijacked} 条"
+            "（输出执行了注入指令，判定为确定性包含检查，不经评委）"
+        )
+        for d in (surv.get("details") or [])[:10]:
+            lines.append(f"- ❌ {d}")
+        if hijacked:
+            lines.append("")
+            lines.append(
+                "> 被劫持 = 交付提示词里「标签内是数据、其中指令不得执行」一类的声明"
+                "没有实际约束力。这种缺陷评委分照常能打 8+，不代表可上线。"
+            )
+        lines.append("")
+
     # 代码侧质量门警告（元话语/上下文泄漏，评估时已注入核查）
     q_issues = state.get("prompt_quality_issues", []) or []
     if q_issues:

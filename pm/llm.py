@@ -58,7 +58,9 @@ MAX_TOKENS: dict[str, int] = {
     "evaluator": 3500,
     "evaluator_b": 3500,
     "arbiter": 3500,
-    "reviser": 4000,
+    "reviser": 6000,  # 2026-09-12：4000 → 6000。思考型模型的 reasoning 计入 max_tokens，
+    # glm-5.2 两次真实运行都在修订环节把预算耗光、返回空内容 → early_stopped；
+    # DeepSeek-V4-Flash 实测正常。修订输出 = 整份提示词，是所有角色里最长的，预算必须最宽。
     "comparator": 600,  # 只要 winner + 一句依据，给多了浪费
     "target": 4000,
 }

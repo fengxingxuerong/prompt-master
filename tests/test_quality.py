@@ -13,7 +13,8 @@ from __future__ import annotations
 from pm import testing
 from pm.graph import build_app
 from pm.nodes import _generate_prompt_with_gate, optimize_node
-from pm.quality import check_prompt_quality
+from pm.prompts import EVALUATOR_RULES, EVALUATOR_SYSTEM, MOCKGEN_SYSTEM
+from pm.quality import CONSTRAINT_LIMIT, check_prompt_quality, count_constraints
 from pm.state import initial_state
 
 # 合格的领域提示词（不应被误杀）
@@ -81,6 +82,76 @@ def test_same_code_deduped():
     report = check_prompt_quality(META_LEAK_PROMPT)
     meta = [i for i in report.issues if i.code == "meta_leak"]
     assert len(meta) == 1
+
+
+# --------------------------------------------------------------------------
+# 1b. 约束超载（constraint_overload，2026-09-12 评审新增）
+# --------------------------------------------------------------------------
+def _constraint_prompt(n: int) -> str:
+    """[约束] 段带 n 条编号条目 + 其他段的编号干扰项。"""
+    cons = "\n".join(f"{i}. 约束条目{i}：要求X。" for i in range(1, n + 1))
+    return (
+        "[角色] 资深数据分析师，擅长结构化抽取，严格遵守数据完整性规则。\n"
+        "[任务]\n1. 趋势结论\n2. 异常点\n3. 数据说明\n"
+        f"[约束]\n{cons}\n"
+        "[输出格式]\n1. 第一部分\n2. 第二部分\n"
+        "[边界] 数据缺失时显式标注「数据缺失」。"
+    )
+
+
+def test_constraint_overload_detected():
+    report = check_prompt_quality(_constraint_prompt(CONSTRAINT_LIMIT + 1))
+    assert not report.ok
+    assert any(i.code == "constraint_overload" for i in report.issues)
+
+
+def test_constraint_within_limit_passes():
+    report = check_prompt_quality(_constraint_prompt(CONSTRAINT_LIMIT))
+    assert not any(i.code == "constraint_overload" for i in report.issues)
+
+
+def test_constraint_count_ignores_non_constraint_sections():
+    """[任务]/[输出格式] 的编号是交付物清单，不是约束，不许计入。"""
+    counted = count_constraints(_constraint_prompt(4))
+    assert counted["total"] == 4  # 只有 [约束] 段的 4 条
+    assert "[约束]×4" in counted["sections"]
+    assert "任务" not in counted["sections"]
+
+
+def test_constraint_boundary_section_counted():
+    """[边界处理] 也是约束语义段（边界规则会与数量要求冲突，同样受预算管）。"""
+    prompt = "[角色] 分析师\n[边界处理]\n1. 输入完全为空时输出无数据\n2. 模糊金额视为缺失\n"
+    assert count_constraints(prompt)["total"] == 2
+
+
+def test_constraint_unnumbered_bullets_not_guessed():
+    """无编号（破折号列条目）不做猜测性计数：只数能确定性数出来的。"""
+    prompt = (
+        "[角色] 你是资深数据分析师，擅长从非结构化文本中精确抽取结构化字段，"
+        "严格遵守数据完整性规则。\n[约束]\n- 要求A\n- 要求B\n"
+        "[输出格式] 每行一个条目。\n[边界] 数据缺失时显式标注「数据缺失」。"
+    )
+    assert count_constraints(prompt)["total"] == 0
+    assert check_prompt_quality(prompt).ok
+
+
+# --------------------------------------------------------------------------
+# 1c. 元提示词防漂移（评审修复：错别字 / 注入契约）
+# --------------------------------------------------------------------------
+def test_meta_templates_free_of_typos():
+    """错别字会原样发给模型（「拄原文」「琓疵」曾真实发出去过）。"""
+    for tpl in (EVALUATOR_SYSTEM, EVALUATOR_RULES):
+        assert "拄" not in tpl
+        assert "抄原文" in tpl
+    assert "琓疵" not in EVALUATOR_SYSTEM
+    assert "瑕疵" in EVALUATOR_SYSTEM
+
+
+def test_mockgen_template_has_injection_contract():
+    """注入用例 + 劫持标记是 mockgen 的硬性契约，模板删改时测试必须红。"""
+    assert "injection" in MOCKGEN_SYSTEM
+    assert "hijack_marker" in MOCKGEN_SYSTEM
+    assert "混在同一条输入里" in MOCKGEN_SYSTEM  # 禁止单独成条的关键纪律
 
 
 def _fake_meta() -> dict:

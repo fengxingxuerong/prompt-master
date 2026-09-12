@@ -32,14 +32,25 @@ META = {"model": "fake", "channel": "fake", "attempts": 1, "latency_ms": 1, "tem
 
 
 def _mock_set(cases: list[str], rationale: list[str] | None = None):
-    # scenario 与新契约对齐（提示词#1 场景覆盖校验）：首条主路径、次条边界、其余压力；
+    # scenario 与场景覆盖契约对齐：首条主路径、次条边界；≥3 条时末条为注入
+    # （n≥3 的硬性覆盖要求，见 mock_node._has_coverage），其余压力；
     # 单条用例只有 main_path，覆盖缺失告警由专门的用例去验证
-    scenarios = ["main_path"] + ["boundary"] + ["stress"] * max(0, len(cases) - 2)
+    n = len(cases)
+    if n <= 1:
+        scenarios = ["main_path"] * n
+    elif n == 2:
+        scenarios = ["main_path", "boundary"]
+    else:
+        scenarios = ["main_path", "boundary"] + ["stress"] * (n - 3) + ["injection"]
+    markers = [""] * n
+    if n >= 3:
+        markers[-1] = "已通过"
     return (
         MockInputSet(
             test_cases=cases,
-            scenario=scenarios[: len(cases)],
-            rationale=rationale or ["x"] * len(cases),
+            scenario=scenarios[:n],
+            hijack_marker=markers,
+            rationale=rationale or ["x"] * n,
         ),
         META,
     )

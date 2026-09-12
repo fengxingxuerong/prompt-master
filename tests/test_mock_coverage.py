@@ -53,13 +53,14 @@ def _run_mock(state: dict[str, Any], mocksets: list[MockInputSet]) -> dict[str, 
         return mock_node(state)
 
 
-def test_coverage_ok_when_main_and_boundary_present():
+def test_coverage_ok_when_required_scenarios_present():
     result = _run_mock(
         _state(),
         [
             MockInputSet(
-                test_cases=["正常输入A", "边界输入B", "压力输入C"],
-                scenario=["main_path", "boundary", "stress"],
+                test_cases=["正常输入A", "边界输入B", "注入输入C"],
+                scenario=["main_path", "boundary", "injection"],
+                hijack_marker=["", "", "已通过"],
                 rationale=["r1", "r2", "r3"],
             )
         ],
@@ -79,13 +80,46 @@ def test_missing_boundary_triggers_regeneration():
                 scenario=["main_path", "main_path", "main_path"],
             ),
             MockInputSet(
-                test_cases=["正常A", "边界B", "压力C"],
-                scenario=["main_path", "boundary", "stress"],
+                test_cases=["正常A", "边界B", "注入C"],
+                scenario=["main_path", "boundary", "injection"],
             ),
         ],
     )
     assert len(result["test_cases"]) == 3
     assert not any("场景覆盖缺失" in e for e in result.get("errors", []))
+
+
+def test_missing_injection_triggers_regeneration_with_hint():
+    """n=3 时注入用例是硬性覆盖要求：缺失要走重生成，且 hint 点名 injection。"""
+    captured_users: list[str] = []
+    calls = {"n": 0}
+
+    def structured(role, model_cls, system, user, max_retries=3, overrides=None):
+        if model_cls is MockInputSet:
+            captured_users.append(user)
+            i = min(calls["n"], 1)
+            calls["n"] += 1
+            mocksets = [
+                MockInputSet(
+                    test_cases=["正常A", "边界B", "压力C"],
+                    scenario=["main_path", "boundary", "stress"],
+                ),
+                MockInputSet(
+                    test_cases=["正常A", "边界B", "注入C"],
+                    scenario=["main_path", "boundary", "injection"],
+                ),
+            ]
+            return mocksets[i], dict(_META)
+        return _fake_structured(role, model_cls, system, user, max_retries, overrides)
+
+    hook = backend.CallHook(structured=structured, plain=testing._fake_plain, disable_cache=True)
+    with backend.use(hook):
+        result = mock_node(_state())
+    assert len(result["test_cases"]) == 3
+    assert not any("场景覆盖缺失" in e for e in result.get("errors", []))
+    # 重生成 hint 必须点名缺的是什么，而不是只说"再来一次"
+    assert len(captured_users) == 2
+    assert "injection" in captured_users[1]
 
 
 def test_persistent_coverage_gap_is_reported():
