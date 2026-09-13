@@ -75,6 +75,9 @@ MAX_TOKENS: dict[str, int] = {
 
 # 每次重试降温幅度
 TEMPERATURE_DECAY = 0.15
+# 解析/校验失败时**升温**而不是降温（2026-09-13 第 7 轮实测：降温会让模型更确定，
+# 于是把同一份坏 JSON 原样复现，3 次重试全败）。结构性问题要靠多样性突破，不是靠保守。
+TEMPERATURE_BOOST_ON_PARSE = 0.1
 
 
 # --------------------------------------------------------------------------
@@ -735,12 +738,18 @@ def structured_call(
             )
             return validated, meta
         except (ValidationError, ValueError, json.JSONDecodeError) as e:
+            # 解析失败要两条一起改：①把缺哪些顶层键写进下一次提示（模型常是漏字段，不是乱写）
+            # ②升温而不是降温 —— 降温会让模型更确定地复现同一份坏 JSON
+            need = ", ".join(sorted((getattr(model_cls, "model_fields", None) or {}).keys())[:12])
             last_err = f"{type(e).__name__}: {e}"
+            if need:
+                last_err += f"。输出必须包含这些顶层键：{need}"
             logger.warning("[%s] 第 %d/%d 次解析失败：%s", role, attempt, max_retries, last_err)
-            temp = max(0.0, temp - TEMPERATURE_DECAY)
+            temp = min(1.0, temp + TEMPERATURE_BOOST_ON_PARSE)
         except Exception as e:  # noqa: BLE001 - LLM 端点行为不可预期，任何异常都重试降温
             last_err = f"{type(e).__name__}: {e}"
             logger.warning("[%s] 第 %d/%d 次调用异常：%s", role, attempt, max_retries, last_err)
+            # 端点/网络类异常沿用降温：这类失败与采样随机性无关，保守重试即可
             temp = max(0.0, temp - TEMPERATURE_DECAY)
 
     meta.update(channel="failed", attempts=max_retries, latency_ms=int((time.time() - t0) * 1000))

@@ -328,7 +328,7 @@ def test_channel_a_exception_falls_back_to_text(monkeypatch):
     assert meta["channel"] == "json_fallback"
 
 
-def test_text_channel_retries_with_decaying_temperature_then_succeeds(monkeypatch):
+def test_parse_failure_boosts_temperature_and_retries(monkeypatch):
     cls = _model_cls()
     temps: list[float] = []
 
@@ -342,7 +342,8 @@ def test_text_channel_retries_with_decaying_temperature_then_succeeds(monkeypatc
     out, meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
     assert out.value == 4
     assert meta["attempts"] == 2
-    assert len(temps) >= 2 and temps[1] <= temps[0]  # 每次失败降温重试
+    # 每次解析失败升温重试（降温会复现同一份坏 JSON，第 7 轮实测）
+    assert len(temps) >= 2 and temps[1] > temps[0]
 
 
 def test_all_channels_fail_raises_runtime_error(monkeypatch):
@@ -497,3 +498,38 @@ def test_rate_limit_path_also_gets_conn_retry(monkeypatch):
     _patch_llm(monkeypatch, fake)
     resp = L._invoke_with_rate_limit_retry("optimizer", lambda client: client.invoke([]))
     assert resp.content == "ok"
+
+
+# --------------------------------------------------------------------------
+# 11. 解析失败的处理方向（第 7 轮：evaluate#2 重试 3 次全败）
+#     解析失败是"结构问题"，降温会让模型更确定地复现同一份坏 JSON。
+# --------------------------------------------------------------------------
+def test_parse_failure_hint_lists_required_top_level_keys(monkeypatch, caplog):
+    """缺字段是常见成因：下一次重试必须把"必须包含哪些顶层键"写进提示。"""
+    cls = _model_cls()
+    fake = _FakeLLM([RuntimeError("native down"), _Resp("not json"), _Resp('{"value": 6}')])
+    _patch_llm(monkeypatch, fake)
+    with caplog.at_level("WARNING", logger="pm.llm"):
+        L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
+    assert "必须包含这些顶层键" in caplog.text
+    assert "value" in caplog.text  # 至少列出目标模型的字段名
+
+
+def test_endpoint_exception_still_decays_temperature(monkeypatch):
+    """端点/网络类异常与采样随机性无关，沿用降温策略（不要误改成升温）。"""
+    cls = _model_cls()
+    temps: list[float] = []
+
+    class _T(_FakeLLM):
+        def with_config(self, **kw: Any) -> _T:
+            temps.append(kw.get("temperature"))
+            return self
+
+    # 端点异常（连接类）在 _invoke_with_conn_retry 里先重试；这里用非连接类的普通异常
+    fake = _T(
+        [RuntimeError("native down"), RuntimeError("upstream exploded"), _Resp('{"value": 7}')]
+    )
+    _patch_llm(monkeypatch, fake)
+    out, _meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
+    assert out.value == 7
+    assert len(temps) >= 2 and temps[1] <= temps[0]
