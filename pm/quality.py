@@ -62,9 +62,18 @@ WEAK_COMBO_MIN = 2
 # 交付物长度下限（字符）：低于此值视为空泛 / 截断 / 未生成
 MIN_PROMPT_LENGTH = 100
 
-# 约束条目上限：与 OPTIMIZER_SYSTEM 硬性规则 #4 的"总数控制在 10 条以内"同一口径。
-# 模型自检管不住的事，交给代码数数（见模块 docstring 第 4 条）。
-CONSTRAINT_LIMIT = 10
+# 约束条目上限：与 OPTIMIZER_SYSTEM 硬性规则 #4 同一口径。
+# 2026-09-13 实测从 10 收到 8：约束超载的轮次（[约束]×12）被评委点名"模型漏执行"，
+# constraint_compliance 8.38→7.0、task_completion 9.25→7.75 —— 条目越多越执行不到位。
+CONSTRAINT_LIMIT = 8
+
+# 抑制型规则：让输出"少说/不说"的条款（停止处理、不输出结论、固定 token 兜底）。
+# 为什么单列一类：这类规则不违反字面约束，却直接压低 task_completion 与 robustness
+# （实测 8.75→7.88），且与"边界情况必须继续作答"的骨架要求相冲突。
+_SUPPRESSIVE_RULE_RE = re.compile(
+    r"(停止处理|终止处理|不再输出|不输出任何结论|不输出结论|仅输出固定 ?token|"
+    r"固定输出[「\"']?数据缺失|拒绝(?:回答|输出))"
+)
 
 # 约束条目只在「约束语义」的标签段里数：[任务]/[输出格式] 里的编号是交付物清单
 # （如"1. 趋势结论 2. 异常点"），把它们算进来会把合格提示词误杀。
@@ -76,6 +85,35 @@ _NUMBERED_ITEM_RE = re.compile(r"^\s*\d+\s*[.、)）]\s*\S")
 # 目标模型看到两个开标签，分不清哪段才是"数据区"，上一轮评审在 Run A 的最终提示词里就抓到过。
 _OPEN_TAG_RE = re.compile(r"<([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]{0,20})>")
 _CLOSE_TAG_RE = re.compile(r"</([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]{0,20})>")
+
+# 「兜底式缺失」措辞：把缺失当成全局开关（各结论位置一律标注数据缺失），
+# 目标模型会据此把"部分字段缺失"泛化成"整体无数据"，连输入里明摆着的金额一起判缺失。
+# 真实事故（2026-09-12/13 两轮 e2e）：「输入非空但未包含任何可识别的销售数据……在各结论位置
+# 标注「数据缺失」」→ 含 120 万/98 万的用例被整段判缺失，事实断言直接失败。
+_BLANKET_MISSING_RES = (
+    re.compile(
+        r"(各结论位置|全部结论|所有结论|整体标注|一律标注|统一标注|所有字段|一律|统一)"
+        r".{0,12}(数据缺失|缺失)"
+    ),
+    re.compile(r"(数据缺失|缺失).{0,10}(一律|统一|整体|所有字段)"),
+)
+# 限定作用域的正面表述（出现任意一个即视为已区分两种缺失）
+_PER_FIELD_RE = re.compile(r"(已有数据|其余|剩余|照常输出|照常列出|仍须输出|仍要输出)")
+
+
+def blanket_missing_branch(prompt: str) -> bool:
+    """交付物是否把「数据缺失」写成全局兜底（而不是按字段限定作用域）。
+
+    只拦**明确的全局措辞**（如"各结论位置一律标注数据缺失"），不做语义猜测：
+    单说"缺失时标注「数据缺失」"的合格提示词不会被误判。
+    出现全局措辞时，无论是否同时写了逐字段规则都算问题——两者并存本身就是自相矛盾。
+    """
+    text = prompt or ""
+    if not re.search(r"数据缺失|缺失", text):
+        return False
+    if not any(rx.search(text) for rx in _BLANKET_MISSING_RES):
+        return False
+    return True
 
 
 def delimiter_problems(prompt: str) -> list[str]:
@@ -221,6 +259,18 @@ def check_prompt_quality(prompt: str) -> QualityReport:
             )
         )
 
+    if blanket_missing_branch(prompt):
+        issues.append(
+            QualityIssue(
+                "blanket_missing_branch",
+                "「数据缺失」被写成全局兜底（如「各结论位置一律标注数据缺失」）："
+                "目标模型会据此把「部分字段缺失」泛化成「整体无数据」，"
+                "连输入里已有的数值一起判缺失（真实事故，事实断言因此失败）。"
+                "必须拆成两条互斥规则：①输入完全为空/零字符 → 可跳过骨架、整体标注缺失；"
+                "②输入非空但部分字段缺失 → 保留骨架、已有数据照常输出，只对缺失字段标注「数据缺失」",
+            )
+        )
+
     delim = delimiter_problems(prompt)
     if delim:
         issues.append(
@@ -247,9 +297,23 @@ def check_prompt_quality(prompt: str) -> QualityReport:
             QualityIssue(
                 "constraint_overload",
                 f"约束超载：约束类段共 {counted['total']} 条编号条目"
-                f"（{counted['sections']}），超过上限 {CONSTRAINT_LIMIT} 条——"
-                "约束越多遵循率越低，且互相重复的约束会互相稀释；"
-                "请合并同义条目、删除可有可无的条目后再输出",
+                f"（{counted['sections']}），超过上限 {CONSTRAINT_LIMIT} 条。"
+                "实测后果：条目越多执行越差（评委点名「模型漏执行」，"
+                "constraint_compliance 与 task_completion 双双下滑）。"
+                f"请删减到 {CONSTRAINT_LIMIT} 条以内：合并语义重复项、删除可有可无项，"
+                "边界规则单独成段且不超过 4 条",
+            )
+        )
+
+    suppressive = _SUPPRESSIVE_RULE_RE.findall(prompt or "")
+    if suppressive:
+        issues.append(
+            QualityIssue(
+                "suppressive_rule",
+                "含抑制型规则（" + "、".join(dict.fromkeys(suppressive))[:60] + "）："
+                "让目标模型「少说/不说」的条款会压低任务完成度与鲁棒性（实测 8.75→7.88），"
+                "且与'边界情况仍要按骨架作答'相冲突。"
+                "边界处理应写成「标注缺失 + 继续输出其余内容」，而不是停止处理或不输出结论",
             )
         )
 

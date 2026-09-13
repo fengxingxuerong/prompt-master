@@ -16,6 +16,7 @@ from pm.nodes import _generate_prompt_with_gate, optimize_node
 from pm.prompts import EVALUATOR_RULES, EVALUATOR_SYSTEM, MOCKGEN_SYSTEM
 from pm.quality import (
     CONSTRAINT_LIMIT,
+    blanket_missing_branch,
     check_prompt_quality,
     count_constraints,
     delimiter_problems,
@@ -310,3 +311,72 @@ def test_full_loop_with_meta_leak_optimizer(monkeypatch):
     # evaluate_done trace 中带警告信息（注入评估器）
     eval_traces = [t_ for t_ in final["trace"] if t_["node"] == "evaluate"]
     assert eval_traces, "evaluate 应被执行"
+
+
+# --------------------------------------------------------------------------
+# 1d. 「数据缺失」全局兜底（blanket_missing_branch）
+# 真实事故：交付物写「输入非空但未包含可识别数据时，在各结论位置标注「数据缺失」」，
+# 目标模型据此把含 120 万/98 万的用例整段判缺失，事实断言直接失败（两轮 e2e 都复现）。
+# --------------------------------------------------------------------------
+def test_blanket_missing_branch_detected():
+    prompt = (
+        "[角色] 资深数据分析师，擅长结构化抽取，严格遵守数据完整性规则。\n"
+        "[边界处理] 输入非空但未包含任何可识别的数据时，仍按骨架输出，"
+        "并在各结论位置标注「数据缺失」，不得复用空输入分支。\n"
+        "[输出格式] 每行一个条目。\n"
+    )
+    report = check_prompt_quality(prompt)
+    assert any(i.code == "blanket_missing_branch" for i in report.issues)
+
+
+def test_per_field_missing_wording_passes():
+    prompt = (
+        "[角色] 资深数据分析师，擅长结构化抽取，严格遵守数据完整性规则。\n"
+        "[边界处理] 输入非空但部分字段缺失时，保留骨架，已有数据照常输出，"
+        "只对缺失字段标注「数据缺失」；输入完全为空时跳过骨架。\n"
+        "[输出格式] 每行一个条目。\n"
+    )
+    assert blanket_missing_branch(prompt) is False
+    assert not any(i.code == "blanket_missing_branch" for i in check_prompt_quality(prompt).issues)
+
+
+def test_plain_missing_mention_not_flagged():
+    """正常写「缺金额就标数据缺失」不得被误杀（闸只拦全局兜底措辞）。"""
+    prompt = (
+        "[角色] 资深数据分析师，擅长结构化抽取，严格遵守数据完整性规则。\n"
+        "[约束] 若某条记录缺少金额，该字段输出「数据缺失」，其余字段照常输出。\n"
+        "[输出格式] 每行一个条目。\n"
+    )
+    assert blanket_missing_branch(prompt) is False
+
+
+# --------------------------------------------------------------------------
+# 1e. 抑制型规则（suppressive_rule）与收紧后的约束预算
+# 真实事故（2026-09-13 第 1 轮）：交付物写入「停止处理」「不输出任何结论」「仅输出固定 token」，
+# robustness 8.75→7.88、task_completion 9.25→7.75，且与边界必须作答的骨架要求冲突。
+# --------------------------------------------------------------------------
+def test_suppressive_rule_detected():
+    prompt = (
+        "[角色] 资深数据分析师，擅长结构化抽取，严格遵守数据完整性规则。\n"
+        "[边界处理] 输入含矛盾信息时，指出矛盾并停止处理，不输出任何结论。\n"
+        "[输出格式] 每行一个条目。\n"
+    )
+    report = check_prompt_quality(prompt)
+    assert any(i.code == "suppressive_rule" for i in report.issues)
+
+
+def test_normal_boundary_wording_not_flagged_as_suppressive():
+    prompt = (
+        "[角色] 资深数据分析师，擅长结构化抽取，严格遵守数据完整性规则。\n"
+        "[边界处理] 输入非空但部分字段缺失时，保留骨架，已有数据照常输出，"
+        "只对缺失字段标注「数据缺失」；缺失项无法判断趋势时写「无法判断趋势」并继续输出其余部分。\n"
+        "[输出格式] 每行一个条目。\n"
+    )
+    assert not any(i.code == "suppressive_rule" for i in check_prompt_quality(prompt).issues)
+
+
+def test_constraint_budget_is_eight():
+    """预算从 10 收到 8（12 条被评委点名"模型漏执行"）。"""
+    assert CONSTRAINT_LIMIT == 8
+    report = check_prompt_quality(_constraint_prompt(CONSTRAINT_LIMIT + 1))
+    assert any(i.code == "constraint_overload" for i in report.issues)
