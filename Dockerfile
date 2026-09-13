@@ -30,6 +30,8 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY pm/ ./pm/
 RUN pip install . \
+    # 构建残留会留在镜像层里（模拟构建实测：build/ + prompt_master.egg-info），装完即清
+    && rm -rf build ./*.egg-info \
     && useradd --create-home --uid 10001 pmuser \
     && mkdir -p /data/logs \
     && chown -R pmuser /data

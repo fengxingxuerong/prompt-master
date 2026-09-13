@@ -1,0 +1,437 @@
+"""`pm/llm.py` 的限流退避、降级通道与记账分支（覆盖率洼地补齐）。
+
+背景：2026-09-13 生产贴近测试发现 `pm/llm.py` 覆盖率仅 77%，缺口集中在
+**真实故障高发路径**——429 退避与 Key 轮换、退避预算耗尽、通道 A→B 降级、
+端点不兼容记忆、token 记账。这些分支恰恰是"平时不跑、出事时才跑"的代码，
+必须用注入式假 LLM 精确打靶（不联网、不 sleep）。
+
+注入方式：monkeypatch `pm.llm.get_llm` 返回脚本化假客户端；
+`time.sleep` 一并打桩，避免测试真的等 5/10/20 秒。
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import pytest
+from pm import llm as L
+
+# --------------------------------------------------------------------------
+# 假客户端：按脚本依次返回结果或抛异常
+# --------------------------------------------------------------------------
+
+
+class _FakeLLM:
+    def __init__(self, script: list[Any]):
+        self.script = list(script)
+        self.calls: list[Any] = []
+
+    def _pop(self) -> Any:
+        self.calls.append(1)
+        item = self.script.pop(0) if len(self.script) > 1 else self.script[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    def invoke(self, messages: Any) -> Any:
+        return self._pop()
+
+    def with_structured_output(self, model_cls: Any, **kw: Any) -> _FakeLLM:
+        self.so_kwargs = kw
+        self.so_cls = model_cls
+        return self
+
+    def with_config(self, **kw: Any) -> _FakeLLM:
+        self.config_kwargs = kw
+        return self
+
+
+class _Resp:
+    def __init__(self, content: str = "{}", usage: dict | None = None):
+        self.content = content
+        self.usage_metadata = usage or {}
+        self.response_metadata: dict[str, Any] = {}
+
+
+@pytest.fixture(autouse=True)
+def _fast_and_credentialed(monkeypatch):
+    """关掉真实等待、给个假 Key（get_llm 已被打桩，Key 只是让 build_config 有值）。"""
+    monkeypatch.setattr(L.time, "sleep", lambda _s: None)
+    monkeypatch.setenv("PM_API_KEY", "sk-test")
+    monkeypatch.delenv("PM_API_KEYS", raising=False)
+    yield
+
+
+def _patch_llm(monkeypatch, fake: _FakeLLM) -> None:
+    monkeypatch.setattr(L, "get_llm", lambda role, overrides=None: fake)
+
+
+def _rate_limit_exc() -> Exception:
+    e = Exception("Error code: 429 - rate limit exceeded")
+    e.status_code = 429  # type: ignore[attr-defined]
+    return e
+
+
+# --------------------------------------------------------------------------
+# 1. 记账：_tokens_of / _record_usage
+# --------------------------------------------------------------------------
+def test_tokens_of_reads_usage_metadata():
+    assert L._tokens_of(_Resp(usage={"input_tokens": 12, "output_tokens": 7})) == (12, 7)
+
+
+def test_tokens_of_falls_back_to_response_metadata():
+    r = _Resp()
+    r.usage_metadata = None  # 非 dict 才轮到 response_metadata 分支
+    r.response_metadata = {"token_usage": {"prompt_tokens": 5, "completion_tokens": 3}}
+    assert L._tokens_of(r) == (5, 3)
+
+
+def test_tokens_of_survives_hostile_object():
+    """记账绝不影响主流程：属性访问炸了也要返回 (0, 0)。"""
+
+    class Hostile:
+        @property
+        def usage_metadata(self):
+            raise RuntimeError("boom")
+
+    assert L._tokens_of(Hostile()) == (0, 0)
+
+
+def test_record_usage_writes_into_ledger():
+    with L.usage_scope() as ledger:  # type: ignore[attr-defined]
+        L._record_usage("evaluator", _Resp(usage={"input_tokens": 9, "output_tokens": 4}), 120)
+    snap = ledger.snapshot()
+    assert snap["evaluator"]["calls"] == 1
+    assert snap["evaluator"]["input_tokens"] == 9
+    assert snap["evaluator"]["output_tokens"] == 4
+
+
+def test_record_usage_without_ledger_is_noop():
+    L._record_usage("evaluator", _Resp(), 10)  # 不抛即通过
+
+
+# --------------------------------------------------------------------------
+# 2. 环境变量容错与 Key 池
+# --------------------------------------------------------------------------
+def test_int_env_bad_value_falls_back(monkeypatch):
+    monkeypatch.setenv("PM_TEST_INT", "abc")
+    assert L._int_env("PM_TEST_INT", 7) == 7
+    monkeypatch.setenv("PM_TEST_INT", "12.9")  # 小数串要能解析成 12，而不是崩
+    assert L._int_env("PM_TEST_INT", 7) == 12
+
+
+def test_float_env_bad_value_falls_back(monkeypatch):
+    monkeypatch.setenv("PM_TEST_FLOAT", "xx")
+    assert L._float_env("PM_TEST_FLOAT", 1.5) == 1.5
+
+
+def test_key_pool_prefers_role_key(monkeypatch):
+    monkeypatch.setenv("PM_CLARIFIER_API_KEY", "role-key")
+    assert L._key_pool("clarifier") == ["role-key"]
+
+
+def test_key_pool_merges_global_and_pool_without_dupes(monkeypatch):
+    monkeypatch.setenv("PM_API_KEY", "k1")
+    monkeypatch.setenv("PM_API_KEYS", "k1, k2 ,k3")
+    assert L._key_pool("optimizer") == ["k1", "k2", "k3"]
+
+
+def test_next_key_rotates_and_handles_empty_pool(monkeypatch):
+    # 池里只留 PM_API_KEYS：全局 Key 也进池，不清干净就断言不了轮换顺序
+    monkeypatch.setenv("PM_API_KEY", "")
+    monkeypatch.setenv("PM_OPTIMIZER_API_KEY", "")
+    monkeypatch.setenv("PM_API_KEYS", "a,b")
+    keys = [L._next_key("optimizer") for _ in range(3)]
+    assert set(keys[:2]) == {"a", "b"}, keys
+    assert keys[0] != keys[1]  # 连续两次必须换 Key
+    assert keys[2] == keys[0]  # 轮回到第一个
+    monkeypatch.setenv("PM_API_KEYS", "")
+    assert L._next_key("ghost") == ""
+
+
+# --------------------------------------------------------------------------
+# 3. 限流判定（A4 回归：400 + 100429 token 数不能被误判成限流）
+# --------------------------------------------------------------------------
+def test_rate_limit_detection_variants():
+    assert L._is_rate_limit_error(_rate_limit_exc()) is True
+    assert L._is_rate_limit_error(Exception("RateLimitError: slow down")) is True
+    assert L._is_rate_limit_error(Exception("HTTP 429 Too Many Requests")) is True
+    # 关键回归：token 数里含 429 的 400 错误不是限流
+    assert L._is_rate_limit_error(Exception("Error code: 400 - used 100429 tokens")) is False
+    assert L._is_rate_limit_error(ValueError("plain")) is False
+
+
+# --------------------------------------------------------------------------
+# 4. 退避重试：成功、轮换、预算耗尽、非限流直接上抛
+# --------------------------------------------------------------------------
+def test_retry_succeeds_after_rate_limit_and_records_usage(monkeypatch):
+    monkeypatch.setenv("PM_API_KEYS", "k1,k2")
+    fake = _FakeLLM([_rate_limit_exc(), _Resp("ok", usage={"input_tokens": 1, "output_tokens": 2})])
+    _patch_llm(monkeypatch, fake)
+    with L.usage_scope() as ledger:  # type: ignore[attr-defined]
+        resp = L._invoke_with_rate_limit_retry("optimizer", lambda client: client.invoke([]))
+    assert resp.content == "ok"
+    assert len(fake.calls) == 2  # 第一枪 429，第二枪成功
+    assert ledger.snapshot()["optimizer"]["calls"] == 1  # 只记成功那一次
+
+
+def test_retry_budget_exhausted_raises_instead_of_hanging(monkeypatch):
+    """A3：退避预算用尽必须上抛，不能把流水线卡十几分钟。"""
+    monkeypatch.setattr(L, "RATE_LIMIT_MAX_WAIT", 0.0)
+    fake = _FakeLLM([_rate_limit_exc()])
+    _patch_llm(monkeypatch, fake)
+    with pytest.raises(Exception, match="rate limit"):
+        L._invoke_with_rate_limit_retry("optimizer", lambda client: client.invoke([]))
+    assert len(fake.calls) == 1  # 预算为 0：第一次就放弃，不做无谓重试
+
+
+def test_non_rate_limit_error_is_raised_immediately(monkeypatch):
+    fake = _FakeLLM([ValueError("bad request")])
+    _patch_llm(monkeypatch, fake)
+    with pytest.raises(ValueError):
+        L._invoke_with_rate_limit_retry("optimizer", lambda client: client.invoke([]))
+    assert len(fake.calls) == 1
+
+
+def test_single_key_pool_doubles_backoff(monkeypatch):
+    """Key 池只有 1 个 Key 时退避加倍（给上游配额恢复窗口）——只验证不炸且最终成功。"""
+    monkeypatch.delenv("PM_API_KEYS", raising=False)
+    fake = _FakeLLM([_rate_limit_exc(), _Resp("ok")])
+    _patch_llm(monkeypatch, fake)
+    resp = L._invoke_with_rate_limit_retry("optimizer", lambda client: client.invoke([]))
+    assert resp.content == "ok"
+
+
+# --------------------------------------------------------------------------
+# 5. 配置与指纹
+# --------------------------------------------------------------------------
+def test_build_config_overrides_apply_and_ignore_unknown_keys(monkeypatch):
+    cfg = L.build_config("optimizer", {"max_tokens": 123, "nope": 1})
+    assert cfg.max_tokens == 123
+    assert not hasattr(cfg, "nope")
+
+
+def test_call_fingerprint_changes_with_sampling_params(monkeypatch):
+    a = L.call_fingerprint("target")
+    monkeypatch.setenv("PM_TARGET_MAX_TOKENS", "77")
+    assert L.call_fingerprint("target") != a
+
+
+def test_get_llm_requires_api_key(monkeypatch):
+    monkeypatch.setenv("PM_API_KEY", "")
+    monkeypatch.setenv("PM_OPTIMIZER_API_KEY", "")
+    with pytest.raises(RuntimeError, match="缺少 API Key"):
+        L.get_llm("optimizer")
+
+
+def test_get_llm_builds_openai_client():
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("PM_API_KEY", "sk-x")
+    try:
+        client = L.get_llm("optimizer")
+        assert client.__class__.__name__ == "ChatOpenAI"
+    finally:
+        monkeypatch.undo()
+
+
+def test_get_llm_anthropic_without_extra_dependency(monkeypatch):
+    """anthropic 走延迟导入：没装 extras 时应是 ImportError，而不是启动期就崩。"""
+    monkeypatch.setenv("PM_API_KEY", "sk-x")
+    monkeypatch.setenv("PM_OPTIMIZER_PROVIDER", "anthropic")
+    try:
+        import langchain_anthropic  # noqa: F401
+    except ImportError:
+        with pytest.raises(ImportError):
+            L.get_llm("optimizer")
+    else:  # 装了则应当能构造
+        assert L.get_llm("optimizer") is not None
+
+
+def test_structured_method_env_validation(monkeypatch):
+    monkeypatch.setenv("PM_STRUCT_METHOD", "function_calling")
+    assert L._structured_method() == "function_calling"
+    monkeypatch.setenv("PM_STRUCT_METHOD", "bogus")
+    assert L._structured_method() == ""  # 非法值告警并回退默认
+
+
+# --------------------------------------------------------------------------
+# 6. 通道 A 跳过 / 端点不兼容记忆
+# --------------------------------------------------------------------------
+def test_force_json_channel_skips_native(monkeypatch):
+    monkeypatch.setenv("PM_FORCE_JSON_CHANNEL", "1")
+    cfg = L.build_config("optimizer")
+    assert "强制" in (L._skip_channel_a(cfg) or "")
+
+
+def test_remember_unsupported_only_for_deterministic_errors(monkeypatch):
+    cfg = L.build_config("optimizer")
+    key = L._capability_key(cfg)
+    # 网络抖动不能记：否则一次偶发错误永久关掉原生通道
+    L._remember_channel_a_unsupported(cfg, "ReadTimeout: connection timed out")
+    assert L._skip_channel_a(cfg) is None
+    # 确定性的不兼容错语 + 400 才记
+    L._remember_channel_a_unsupported(
+        cfg, "Error code: 400 - this model does not support json_schema response format"
+    )
+    assert key in L._UNSUPPORTED_A
+    assert "此前已报不兼容" in (L._skip_channel_a(cfg) or "")
+    L._UNSUPPORTED_A.discard(key)  # 清理，避免污染其他用例
+
+
+# --------------------------------------------------------------------------
+# 7. structured_call：通道 A 命中 / dict 兜底 / 降级到 B / 全败
+# --------------------------------------------------------------------------
+def _model_cls():
+    from pydantic import BaseModel
+
+    class _M(BaseModel):
+        value: int
+
+    return _M
+
+
+def test_channel_a_returns_instance(monkeypatch):
+    cls = _model_cls()
+    fake = _FakeLLM([cls(value=1)])
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("mockgen", cls, "sys", "user")
+    assert out.value == 1
+    assert meta["channel"] == "structured_output"
+
+
+def test_channel_a_dict_is_validated(monkeypatch):
+    cls = _model_cls()
+    fake = _FakeLLM([{"value": 5}])
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("mockgen", cls, "sys", "user")
+    assert out.value == 5
+    assert meta["channel"] == "structured_output"
+
+
+def test_channel_a_wrong_type_falls_back_to_text(monkeypatch):
+    """端点"支持"结构化却回 None（思考型模型常见）时必须降级并留痕。"""
+    cls = _model_cls()
+    fake = _FakeLLM([None, _Resp(json.dumps({"value": 9}))])
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("mockgen", cls, "sys", "user")
+    assert out.value == 9
+    assert meta["channel"] == "json_fallback"
+
+
+def test_channel_a_exception_falls_back_to_text(monkeypatch):
+    cls = _model_cls()
+    fake = _FakeLLM([RuntimeError("native unavailable"), _Resp('{"value": 3}')])
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("mockgen", cls, "sys", "user")
+    assert out.value == 3
+    assert meta["channel"] == "json_fallback"
+
+
+def test_text_channel_retries_with_decaying_temperature_then_succeeds(monkeypatch):
+    cls = _model_cls()
+    temps: list[float] = []
+
+    class _T(_FakeLLM):
+        def with_config(self, **kw: Any) -> _T:
+            temps.append(kw.get("temperature"))
+            return self
+
+    fake = _T([RuntimeError("native down"), _Resp("not json"), _Resp('{"value": 4}')])
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
+    assert out.value == 4
+    assert meta["attempts"] == 2
+    assert len(temps) >= 2 and temps[1] <= temps[0]  # 每次失败降温重试
+
+
+def test_all_channels_fail_raises_runtime_error(monkeypatch):
+    cls = _model_cls()
+    fake = _FakeLLM([RuntimeError("native down"), _Resp("still not json")])
+    _patch_llm(monkeypatch, fake)
+    with pytest.raises(RuntimeError, match="结构化输出失败"):
+        L.structured_call("mockgen", cls, "sys", "user", max_retries=2)
+
+
+# --------------------------------------------------------------------------
+# 8. JSON 抽取与 plain_call
+# --------------------------------------------------------------------------
+def test_extract_json_object_variants():
+    assert L.extract_json_object("") is None
+    assert L.extract_json_object("no json here") is None
+    assert L.extract_json_object('```json\n{"a": 1}\n```') == {"a": 1}
+    assert L.extract_json_object('前缀 {"a": {"b": [1, 2]}} 后缀') == {"a": {"b": [1, 2]}}
+    # 字符串里含花括号与转义引号，括号配平扫描不能被带偏
+    assert L.extract_json_object('{"s": "}{ \\" }"}') == {"s": '}{ " }'}
+    # 第一个候选非法时继续往后找
+    assert L.extract_json_object('{bad} then {"ok": 1}') == {"ok": 1}
+
+
+def test_plain_call_returns_text_and_meta(monkeypatch):
+    fake = _FakeLLM([_Resp("hello", usage={"input_tokens": 3, "output_tokens": 1})])
+    _patch_llm(monkeypatch, fake)
+    text, meta = L.plain_call("target", "sys", "user")
+    assert text == "hello"
+    assert meta["role"] == "target"
+    assert meta["channel"] == "plain"
+
+
+# --------------------------------------------------------------------------
+# 9. 补边界：坏围栏 / 状态码提示缺失 / 强制文本通道 / 通道 B 泛型异常 / anthropic 分支
+# --------------------------------------------------------------------------
+def test_fenced_json_invalid_falls_through_to_brace_scan():
+    """围栏里的 JSON 非法时不能直接放弃，要继续做括号配平扫描。"""
+    text = '```json\n{bad json}\n```\n{"ok": 1}'
+    assert L.extract_json_object(text) == {"ok": 1}
+
+
+def test_remember_unsupported_requires_status_hint():
+    """只有"不支持"措辞、没有 400/bad request 状态提示的，不记（可能是网络层伪造措辞）。"""
+    cfg = L.build_config("optimizer")
+    key = L._capability_key(cfg)
+    L._UNSUPPORTED_A.discard(key)
+    L._remember_channel_a_unsupported(cfg, "this endpoint does not support json_schema")
+    assert key not in L._UNSUPPORTED_A
+
+
+def test_forced_text_channel_goes_through_skip_branch(monkeypatch):
+    """PM_FORCE_JSON_CHANNEL=1 时应走 _ChannelASkipped 分支，直接进文本通道。"""
+    cls = _model_cls()
+    monkeypatch.setenv("PM_FORCE_JSON_CHANNEL", "1")
+    fake = _FakeLLM([_Resp('{"value": 2}')])
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("mockgen", cls, "sys", "user")
+    assert out.value == 2
+    assert meta["channel"] == "json_fallback"
+
+
+def test_text_channel_generic_exception_retries_with_cooldown(monkeypatch):
+    """通道 B 抛非解析类异常（端点 5xx / 超时）也要降温重试，而不是立刻放弃。"""
+    cls = _model_cls()
+    fake = _FakeLLM(
+        [RuntimeError("native down"), RuntimeError("502 bad gateway"), _Resp('{"value": 8}')]
+    )
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
+    assert out.value == 8
+    assert meta["attempts"] == 2
+
+
+def test_get_llm_anthropic_branch_with_stub_module(monkeypatch):
+    """未装 langchain_anthropic 时用桩模块覆盖 anthropic 构造分支（不联网、不装依赖）。"""
+    import sys
+    import types
+
+    stub = types.ModuleType("langchain_anthropic")
+
+    class _FakeChatAnthropic:
+        def __init__(self, **kw):
+            self.kw = kw
+
+    stub.ChatAnthropic = _FakeChatAnthropic  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langchain_anthropic", stub)
+    monkeypatch.setenv("PM_API_KEY", "sk-x")
+    monkeypatch.setenv("PM_OPTIMIZER_PROVIDER", "anthropic")
+    client = L.get_llm("optimizer")
+    assert isinstance(client, _FakeChatAnthropic)
+    assert client.kw["api_key"] == "sk-x"

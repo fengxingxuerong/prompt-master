@@ -367,7 +367,7 @@ system prompt"（元话语泄漏）而评估器给高分的情况——评估器
 
 | 层次 | 命令 | 证明 | **不**证明 |
 |---|---|---|---|
-| 单元测试 | `pytest tests/ -q`（272 项） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀）、null 容错、演示模式隔离与产物落盘、**服务层限流**（滑动窗口 / 429+Retry-After / 赛马按任务数计费）、**两轮澄清提问语义**、**MockGen 场景覆盖校验**、**用量台账**、**入口编码兜底**、**节点提示词结构契约**、**控制台渲染 XSS 防线与安全响应头**（源码层禁止反向还原 + node 真跑载荷 + nonce 与响应头一致性 + 无内联事件/style 属性）、**任务记录存储层**（内存/SQLite 行为一致 + 跨实例可见 + 并发写不丢账） | 任何与模型能力相关的结论 |
+| 单元测试 | `pytest tests/ -q`（372 项） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀 / 约束超载 / 定界符配平）、null 容错、演示模式隔离与产物落盘、**服务层限流**（滑动窗口 / 429+Retry-After / 赛马按任务数计费）、**两轮澄清提问语义**、**MockGen 场景覆盖校验（含注入用例）**、**用量台账**、**入口编码兜底**、**节点提示词结构契约**、**控制台渲染 XSS 防线与安全响应头**、**任务记录存储层**（内存/SQLite 行为一致 + 跨实例可见 + 并发写不丢账）、**REST API 七个路由与 404/422/401 分支**、**CLI 入参护栏与 `--fast` 快速档**、**LLM 限流退避/降级通道/记账分支**、**缓存落盘与淘汰异常分支** | 任何与模型能力相关的结论 |
 | 拓扑自检 | `python run.py --selftest` | 图能跑通、状态正确累加、迭代终止与兜底正确、双评委仲裁路径 | 优化效果（用的是假后端） |
 | 真实 HTTP e2e | `bash examples/run_e2e_stub.sh` / `examples/run_e2e_stub.ps1` | 真实客户端 → HTTP → 响应解析 → 校验链路通畅；两条结构化输出通道均可用；**所有角色端点都被锁在桩上** | 优化效果（桩服务返回固定内容） |
 | 提示词回归评测 | `python eval_prompts.py`（离线，零成本）/ `--live`（真实调用） | **节点提示词自身的结构契约**（占位符渲染、安全约束块、专项规则块）随 pytest 常态回归；`--live` 用确定性代码侧校验（质量门 / 场景覆盖 / 提问预算 / 劣质输出压分 / 修订净增量 ≤30%）验证提示词行为 | `--live` 之外的任何效果结论（离线只保证结构，不保证生成质量） |
@@ -382,9 +382,21 @@ ruff check pm/ tests/ run.py examples/
 ruff format --check pm/ tests/ run.py examples/
 mypy pm/ run.py
 python -m pytest tests/ -q
+# 覆盖率（pytest-cov 已在 dev 依赖里）
+python -m pytest --cov=pm --cov-report=term-missing     # 当前 94%；pm/llm.py 与 pm/cache.py 均 100%
 ```
 CI（GitHub Actions）在 push / PR 时对 Python 3.11/3.12/3.13 跑以上全部检查；
 本地可选 `pip install pre-commit && pre-commit install` 接入提交钩子。
+
+部署与浏览器运行时验证（2026-09-13 新增，报告见 `docs/deploy_verification_2026-09-13.md`）：
+```bash
+# 无 docker 环境的替代验证：干净 venv 复刻 COPY → pip install . → 起服务 → healthcheck → 任务闭环
+PYTHON="<python3.11+>" bash examples/docker_step_sim.sh
+# 真实 Chromium 运行时校验：CSP 违规计数 / tab 事件委托 / 内联 style 被拦（正向对照）/
+# XSS 转义回归 / JS 错误 / 资源加载（需要 playwright-core + 本地 chromium）
+PM_FAKE_BACKEND=progress python run_server.py --port 8097 &
+node examples/browser_runtime_check.cjs http://127.0.0.1:8097/
+```
 
 ---
 
