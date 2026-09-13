@@ -354,6 +354,13 @@ def main() -> int:
     )
     p.add_argument("--no-pairwise", action="store_true", help="不跑成对盲评")
     p.add_argument("--max-iter", type=int, default=3, help="最大修订轮次（默认 3）")
+    p.add_argument(
+        "--fast",
+        action="store_true",
+        help="快速档：关基线、关盲评、单采样、1 轮修订（约 8-10 次调用 / 数分钟）。"
+        "只回答‘这版能不能用’，不回答‘比不优化好多少’；"
+        "显式传 --samples/--max-iter 时以显式值为准",
+    )
     p.add_argument("--interactive", action="store_true", help="需求不清晰时向用户提问")
     p.add_argument("--checkpoint", default=None, help="SQLite 检查点路径（可选，支持跨进程恢复）")
     p.add_argument("--thread-id", default=None, help="恢复指定线程的会话")
@@ -369,6 +376,13 @@ def main() -> int:
     args = p.parse_args()
 
     # 测量层开关走环境变量：与服务端的配置口径保持一致（API 无 CLI 参数）
+    # 顺序很重要：先落 --fast 的默认，再让显式参数覆盖它（显式优先）
+    if args.fast:
+        os.environ.setdefault("PM_SAMPLES_PER_CASE", "1")
+        os.environ["PM_BASELINE"] = "0"
+        os.environ["PM_PAIRWISE"] = "0"
+        if args.max_iter == p.get_default("max_iter"):
+            args.max_iter = 1
     if args.samples is not None:
         os.environ["PM_SAMPLES_PER_CASE"] = str(args.samples)
     if args.no_baseline:
@@ -407,6 +421,10 @@ def main() -> int:
         task = Path(args.task_file).read_text(encoding="utf-8").strip()
     if not task:
         p.error("需求描述为空")
+    # 与 API 的 OptimizeRequest 同口径（4-8000）：CLI 是另一个烧钱入口，
+    # 没有长度护栏时一次粘贴几万字就能直冲 LLM，成本护栏形同虚设（2026-09-13 测试发现）
+    if len(task) < 4 or len(task) > 8000:
+        p.error(f"需求描述长度需在 4-8000 字之间（当前 {len(task)} 字）")
 
     seed_cases: list[dict] = []
     if args.cases_file:

@@ -295,7 +295,7 @@ def test_single_judge_result_not_cached(monkeypatch, tmp_path: Path, b_fails: bo
             raise RuntimeError("评委 B 超时")
         return _fake_structured(role, model_cls, system, user, max_retries, overrides)
 
-    monkeypatch.setattr("pm.nodes.structured_call", structured)
+    monkeypatch.setattr("pm.llm.structured_call", structured)
     out = evaluate_node(_eval_state(1))  # type: ignore[arg-type]
 
     cache = cache_mod.eval_cache()
@@ -401,9 +401,11 @@ def test_demo_mode_is_isolated_and_persists(tmp_path: Path, monkeypatch):
     st = _wait_terminal(tm, rid)
     assert st and st["status"] != "running", f"任务未正常收尾：{st}"
 
-    # ① 补丁不残留在模块上：假后端只活在任务自己的上下文里（C4）
-    assert nodes.plain_call is llm_mod.plain_call
-    assert nodes.structured_call is llm_mod.structured_call
+    # ① 补丁不残留在模块上：假后端只活在任务自己的上下文里（C4）。
+    #    拆分后节点统一经 pm.llm 动态属性访问网关（pm.nodes 不再持有绑定），
+    #    防回归口径相应变为：网关模块属性是真实实现、未被进程级替身覆盖。
+    assert llm_mod.plain_call is not testing._fake_plain
+    assert llm_mod.structured_call is not testing._fake_structured
     # ② 不靠改 os.environ 关缓存，因此环境没被污染（C4）
     import os
 
@@ -438,13 +440,13 @@ def test_progress_visible_while_running(tmp_path: Path, monkeypatch):
 
     gate = threading.Event()
     monkeypatch.delenv("PM_FAKE_BACKEND", raising=False)
-    monkeypatch.setattr(nodes, "structured_call", testing._fake_structured)
+    monkeypatch.setattr("pm.llm.structured_call", testing._fake_structured)
 
     def slow_plain(role, system, user, overrides=None):
         gate.wait(10)
         return _fake_plain(role, system, user, overrides)
 
-    monkeypatch.setattr(nodes, "plain_call", slow_plain)
+    monkeypatch.setattr("pm.llm.plain_call", slow_plain)
 
     tm = TaskManager(max_workers=1)
     rid = tm.submit("slow-run", task="t", n_test_cases=1, max_iterations=1)
@@ -726,7 +728,7 @@ def test_cli_rejects_oversized_cases_file(tmp_path: Path):
         encoding="utf-8",
     )
     r = subprocess.run(
-        [sys.executable, "run.py", "--task", "测试", "--cases-file", str(cases)],
+        [sys.executable, "run.py", "--task", "让 AI 分析销售数据", "--cases-file", str(cases)],
         capture_output=True,
         text=True,
         encoding="utf-8",

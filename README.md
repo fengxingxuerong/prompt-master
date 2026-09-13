@@ -127,6 +127,16 @@ PM_FAKE_BACKEND=progress .venv/bin/python run_server.py --port 8080
 .venv/bin/python run.py --task "让 AI 分析销售数据" \
                         --cases-file case_templates/sales_analysis.json
 
+# 耗时档位（2026-09-13 实测口径，DeepSeek-V4-Flash / n=3）：
+#   --fast  ≈ 8-10 次调用 / 3-6 分钟   → 只回答"这版能不能用"
+#   默认档  ≈ 25-35 次调用 / 20-30 分钟 → 多出"比不优化好多少"（基线 Δ）
+#   全量档  = 默认档 + 盲评 + 多采样    → 分钟数×2 以上（实测 47 分钟 / 58 次调用）
+# 快速档：关基线、关盲评、单采样、1 轮修订（显式传 --samples/--max-iter 时以显式值为准）
+.venv/bin/python run.py --task "让 AI 抽取销售数据中的城市与金额" --fast
+
+# CLI 入参护栏与 REST 同口径（2026-09-13 补齐）：task 4-8000 字、--cases 1-8、
+# --max-iter 0-10、--assert-mode 白名单；超限在解析阶段就报错，不会烧到一次模型调用
+
 # 评委校准（回答"评委打 8 分可信吗"）：给锚点样本打人工分后对比评委分，
 # 输出 MAE / 系统偏松偏严 / 排序一致性；换评委模型或改评分提示词后跑一次
 .venv/bin/python calibrate_judge.py --write-template   # 生成锚点样本模板
@@ -400,7 +410,15 @@ prompt-master/
 │   ├── llm.py                  LLM 工厂 + 双通道结构化输出 + Key 池轮换 + 环境变量容错
 │   ├── quality.py              提示词质量门（特征句 + 自动推导的标签清单，不误杀领域词）
 │   ├── cache.py                本地结果缓存（键含模型与采样参数指纹，线程安全 + 上限淘汰）
-│   ├── nodes.py                7 个节点（评估含双评委 + 仲裁；测试并发化；用例数不足不判达标）
+│   ├── nodes/                  图节点包（导入面保持 pm.nodes 兼容，按节点族拆分）
+│   │   ├── clarify.py          Node 1/1b 需求澄清 + 向用户提问
+│   │   ├── optimize.py         Node 2 提示词优化（生成质量门，revise 复用）
+│   │   ├── execute.py          Node 3/4 模拟输入生成 + 测试执行（并发/缓存/断言）
+│   │   ├── judge.py            Node 5 评估（双评委 + 仲裁 + 聚合；用例数不足不判达标）
+│   │   ├── revise.py           Node 6 定向修订
+│   │   ├── baseline.py         Node 6b/6c 基线对照 + 成对盲评
+│   │   ├── report.py           Node 7 交付报告
+│   │   └── common / profiles   节点公共设施 + 目标模型家族档案
 │   ├── graph.py                图装配与路由（生成失败短路到 report，不空转计费）
 │   ├── scheduler.py            后台任务调度器（实时进度 + 赛马编排 + 产物落盘 + 有界任务表）
 │   ├── store.py                任务/赛马记录存储（内存 / SQLite；后者是多 worker 的前提）
@@ -412,7 +430,7 @@ prompt-master/
 │   ├── run_e2e_stub.sh          双通道本地 e2e（Linux / macOS）
 │   ├── run_e2e_stub.ps1         同上，Windows 版（额外做端口避让、缓存隔离与端点自检）
 │   └── run_multiworker_check.py 跨进程共享记录验证（两个服务进程，一个提交一个查询）
-├── tests/                      回归测试（pytest 272 项，口径见第七节）
+├── tests/                      回归测试（pytest 291 项，口径见第七节）
 ├── Dockerfile / .dockerignore  服务镜像（只装运行时依赖，非 root，/data 挂载点）
 ├── .github/workflows/ci.yml    CI：ruff + mypy + pytest × 3 个 Python 版本
 └── pyproject.toml              ruff / mypy / pytest 配置
@@ -475,7 +493,7 @@ prompt-master/
 | C2 | 修订返回空→静默回退上一版并被当成“修订版”重新打分 | 空修订不再追加重复版本，直接 `early_stopped` + 写明原因 |
 | C3 | 质量门把领域词「输出契约」误杀成泄漏 | 强特征用长句（命中即判），领域词降为弱特征（≥ 2 个组合命中才判） |
 | C4 | 演示模式 monkeypatch 残留 → 整个进程此后都吐假数据 | 新增 `pm/backend.py`（ContextVar 注入），不再修改任何模块属性；缓存开关也不再改 `os.environ` |
-| C5 | 线程池不继承 ContextVar → 并发分支绕过假后端 | `_run_matrix` 用 `backend.carry_context()` 包装提交任务；无 Key 的干净检出现在能跑通 `--selftest` 与全量单测（A/B 实测见 `qa_report_2026-09-08.md`） |
+| C5 | 线程池不继承 ContextVar → 并发分支绕过假后端 | `_run_matrix` 用 `backend.carry_context()` 包装提交任务；无 Key 的干净检出现在能跑通 `--selftest` 与全量单测（A/B 实测见 `docs/qa_report_2026-09-08.md`） |
 | H1 | 改模型/温度后仍命中旧缓存（参数被冻结） | 缓存键加 `call_fingerprint(role)`；评估键加 task/context/质量警告；空输出不入缓存 |
 | H2 | `/api/status` 运行期恒为零进度 | 改用 `app.stream(stream_mode="values")` 逐节点刷新 `rec.progress` |
 | H3 | 入参无上限 + 无鉴权 + `CORS:*` + `0.0.0.0` | `task` 长度 4-8000；`PM_API_TOKEN` 可选鉴权；CORS 默认关闭；默认只监听 127.0.0.1 |
@@ -489,7 +507,7 @@ prompt-master/
 | A2 | `PM_TIMEOUT=` 空值直接让流水线/服务起不来 | `_int_env` / `_float_env` 容错回退并告警 |
 | A4 | `"429" in text` 把“100429 tokens”当限流 | 先查 `status_code`，再匹配带上下文的限流短语 |
 | A5 | CLI `--cases/--max-iter` 无边界（先烧钱再 `GraphRecursionError`） | 按 API 同款区间钗制，`recursion_limit` 随迭代上限计算 |
-| A6/A7/A8/A9/A11/A12 | 除零 / 遗留问题不清 / 标签清单漂移 / trace 不记通道 / 桩调不到修订分支 / 控制台轮询叠加 | 均已修，详见 `qa_report_2026-09-08.md` |
+| A6/A7/A8/A9/A11/A12 | 除零 / 遗留问题不清 / 标签清单漂移 / trace 不记通道 / 桩调不到修订分支 / 控制台轮询叠加 | 均已修，详见 `docs/qa_report_2026-09-08.md` |
 | A10 | 桩服务的 function-calling 分支是死码（langchain-openai 默认 `json_schema`，请求体不带 tools） | 新增 `PM_STRUCT_METHOD`：可显式指定 `function_calling`，`channel` 如实标注；两个桩 e2e 脚本新增场景 3 覆盖该通道 |
 | L4/L6 | 报告 best 版本序号与 clarify 的 meta 用下标取值，上游缺字段即崩节点 | 统一改 `.get` 容错 |
 | L7 | 同一 `thread_id` 重复提交时，trace 由 reducer 跨轮累加（历史记录混进新报告） | `trace` 改自定义 reducer：`initial_state` 自带重置标记，新一轮运行从零计数 |

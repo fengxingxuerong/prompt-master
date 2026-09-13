@@ -72,6 +72,41 @@ _SECTION_HEADER_RE = re.compile(r"^\s*\[([^\[\]]{1,8})\]\s*$")
 _CONSTRAINT_SECTION_RE = re.compile(r"约束|边界")
 _NUMBERED_ITEM_RE = re.compile(r"^\s*\d+\s*[.、)）]\s*\S")
 
+# 定界符配平：<输入>…<输入>（重复开标签）这类畸形会在真实调用里放大注入面 ——
+# 目标模型看到两个开标签，分不清哪段才是"数据区"，上一轮评审在 Run A 的最终提示词里就抓到过。
+_OPEN_TAG_RE = re.compile(r"<([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]{0,20})>")
+_CLOSE_TAG_RE = re.compile(r"</([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]{0,20})>")
+
+
+def delimiter_problems(prompt: str) -> list[str]:
+    """检查交付物里的标签是否配平。
+
+    只报两类**确定性结构错误**，不报"结尾未闭合"：
+    提示词正文里提到 `<输入> 标签内的数据` 这种散文引用非常常见（优化器模板自己就这么写），
+    把它判成"未闭合"会误杀合格交付物，误杀比重蹈更贵（会触发无谓重写）。
+    真正会出事的是**同一个标签开了两次**（Run A 实测事故）——
+    目标模型看到两个开标签，分不清哪段才是数据区，注入面被放大。
+    """
+    problems: list[str] = []
+    stack: list[str] = []
+    for line in (prompt or "").splitlines():
+        for name in _OPEN_TAG_RE.findall(line):
+            if name in stack:
+                problems.append(f"<{name}> 重复开标签（上一个还没闭合）")
+            else:
+                stack.append(name)
+        for name in _CLOSE_TAG_RE.findall(line):
+            if name in stack:
+                stack.pop()
+            else:
+                problems.append(f"</{name}> 没有对应的开标签")
+    # 同一类问题只报一次，避免刷屏
+    deduped: list[str] = []
+    for p in problems:
+        if p not in deduped:
+            deduped.append(p)
+    return deduped
+
 
 def count_constraints(prompt: str) -> dict[str, Any]:
     """统计约束类标签段（[约束]/[关键约束]/[边界处理] 等）内的编号条目数。
@@ -137,7 +172,7 @@ RETRY_HINT_TEMPLATE = """
 
 @dataclass
 class QualityIssue:
-    code: str  # meta_leak | context_leak | too_short | constraint_overload
+    code: str  # meta_leak | context_leak | too_short | constraint_overload | delimiter_unbalanced
     detail: str
 
     def __str__(self) -> str:
@@ -183,6 +218,18 @@ def check_prompt_quality(prompt: str) -> QualityReport:
             QualityIssue(
                 "context_leak",
                 f"疑似任务上下文泄漏：命中注入标签/占位符「{', '.join(leaked[:3])}」",
+            )
+        )
+
+    delim = delimiter_problems(prompt)
+    if delim:
+        issues.append(
+            QualityIssue(
+                "delimiter_unbalanced",
+                "定界符不配平："
+                + "；".join(delim[:3])
+                + "——畸形的 <输入> 类标签会让目标模型分不清数据区边界，放大注入面；"
+                "请保证每个开标签都有且只有一个对应的闭合标签",
             )
         )
 

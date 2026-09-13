@@ -53,6 +53,46 @@ def _state(**over):
     return base
 
 
+def test_verdict_conflict_is_surfaced_when_signals_disagree():
+    """均分说变好（Δ>0）但盲评说基线胜 → 必须显式提示冲突，不能让读者自己猜。"""
+    state = _state(
+        aggregate=_agg(avg_score=8.67, min_score=7.45),
+        baseline_aggregate=_agg(avg_score=7.54, min_score=3.35),
+        pairwise={
+            "verdict": "worse",
+            "votes": {"better": 0, "worse": 4, "tie": 0},
+            "n_compared": 4,
+        },
+    )
+    text, _ = render_report(state)
+    assert "结论冲突" in text
+    assert "人工裁定" in text
+    assert "Δ=+1.13" in text
+    assert "事实断言" in text  # 建议动作里必须指向硬证据
+
+
+def test_verdict_conflict_reverse_direction():
+    """均分没提升（Δ≤0）但盲评说优化版胜 → 同样要提示。"""
+    state = _state(
+        aggregate=_agg(avg_score=6.0, min_score=5.0),
+        baseline_aggregate=_agg(avg_score=7.0, min_score=6.0),
+        pairwise={"verdict": "better", "votes": {"better": 3, "worse": 1}, "n_compared": 4},
+    )
+    text, _ = render_report(state)
+    assert "结论冲突" in text
+
+
+def test_no_conflict_when_signals_agree():
+    """两个信号一致时不要虚报冲突（否则冲突提示会变成噪声）。"""
+    state = _state(
+        aggregate=_agg(avg_score=8.67, min_score=7.45),
+        baseline_aggregate=_agg(avg_score=7.54, min_score=3.35),
+        pairwise={"verdict": "better", "votes": {"better": 4, "worse": 0}, "n_compared": 4},
+    )
+    text, _ = render_report(state)
+    assert "结论冲突" not in text
+
+
 def test_judgement_uses_ci_lower_not_point_estimate():
     text, _ = render_report(_state())
     assert "均分保守下界：**6.5**（判定看这个而不是看点估计 7.0）" in text

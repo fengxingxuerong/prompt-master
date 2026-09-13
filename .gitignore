@@ -18,6 +18,11 @@ logs/
 *.db
 *.log
 
+# 覆盖率产物
+.coverage
+coverage.xml
+htmlcov/
+
 # 验收 / e2e 脚本跑出来的临时报告（不属于源码，但 .sh/.ps1 脚本本身要入库）
 e2e_report*.md
 e2e_*_report.md

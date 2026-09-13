@@ -25,12 +25,14 @@ dependencies = [
 # 使用 Anthropic 作为 Provider 时才需要
 anthropic = ["langchain-anthropic>=0.3.0"]
 # 开发与门禁（pytest/ruff/mypy 已在 requirements.txt 里钉住）
-dev = ["pytest==9.1.1", "ruff==0.16.6", "mypy==2.3.1"]
+# pytest-cov/coverage：覆盖率统计（2026-09-13 测试时发现原本没装，补进 dev 组，
+# 避免下次还得临时 pip install 才能出覆盖率数字）
+dev = ["pytest==9.1.1", "ruff==0.16.6", "mypy==2.3.1", "pytest-cov>=6.0", "coverage>=7.6"]
 
 [tool.setuptools]
 # 平铺布局下 setuptools 自动发现会把 run.py / run_server.py 当成顶层模块，
-# 这里只安装 pm 包；两个入口脚本依旧用 `python run.py ...` 从仓根跑。
-packages = ["pm"]
+# 这里只安装 pm 包（含 pm.nodes 子包）；两个入口脚本依旧用 `python run.py ...` 从仓根跑。
+packages = ["pm", "pm.nodes"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -22,6 +22,29 @@ BASELINE_DISCRIMINATION_FLOOR = 8.0
 ReportState = Mapping[str, Any]
 
 
+def _verdict_conflict(d_avg: float | None, pw: dict[str, Any]) -> str | None:
+    """均分口径（Δ）与成对盲评结论是否打架。
+
+    真实运行里出现过：均分 8.67 > 基线 7.54（Δ=+1.13），盲评却是优化版 0 胜 / 基线 4 胜。
+    两段结论并排展示、不提示冲突，等于让读者自己猜——与"证明变好了"的设计目标直接矛盾。
+    这里只**报告**冲突，不改判定：自动裁定一个自己都说不清的结果比如实说明更危险。
+    """
+    if d_avg is None or not pw:
+        return None
+    verdict = str(pw.get("verdict") or "")
+    if d_avg > 0 and verdict == "worse":
+        return (
+            f"均分口径说优化版更好（Δ={d_avg:+.2f}），"
+            "但成对盲评多数判**基线胜出**——相对偏好与绝对评分给出相反结论。"
+        )
+    if d_avg <= 0 and verdict == "better":
+        return (
+            f"均分口径说没有正向提升（Δ={d_avg:+.2f}），"
+            "但成对盲评多数判**优化版胜出**——相对偏好与绝对评分给出相反结论。"
+        )
+    return None
+
+
 def _cases_short_note(agg: dict[str, Any]) -> str:
     """用例数不足时在报告里显式标注（C1）：避免“分数很高”被当成“结论可靠”。"""
     if agg.get("cases_complete", True):
@@ -113,6 +136,7 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     # ---- 基线对比：没有参照点，“分数很高”本身不构成结论 ----
     base = state.get("baseline_aggregate") or {}
     pw = state.get("pairwise") or {}
+    d_avg: float | None = None
     if base:
         d_avg = round(
             float(agg.get("avg_score", 0.0) or 0.0) - float(base.get("avg_score", 0.0) or 0.0), 2
@@ -175,6 +199,28 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             lines.append(
                 f"  - case#{d.get('test_case_index')}：{d.get('reason') or '（未给依据）'}"
             )
+        lines.append("")
+
+    # ---- 结论冲突仲裁：两个信号打架时必须说出来，不能让读者自己猜 ----
+    conflict = _verdict_conflict(d_avg, pw)
+    if conflict:
+        lines.append("## ⚠️ 结论冲突（需人工裁定）")
+        lines.append("")
+        lines.append(f"- 冲突：{conflict}")
+        lines.append("")
+        lines.append(
+            "- 为什么两个信号会打架：均分是**绝对尺度**（评委按锚点打分，受评委松紧影响），"
+            "成对盲评是**相对偏好**（同一输入二选一，不受绝对尺度漂移影响）。"
+            "两者不一致通常意味着评委尺度偏松/偏紧，或两份输出各有长短（格式好 vs 事实准）。"
+        )
+        lines.append("- 建议动作（按成本从低到高）：")
+        lines.append("  1. 先看**事实断言**表：断言失败的一方无论分数高低都不应采用；")
+        lines.append(
+            "  2. 提高 `PM_SAMPLES_PER_CASE` 后重跑（单采样的噪声足以让两个信号分道扬镳）；"
+        )
+        lines.append("  3. 人工比对上面对盲评列出的逐例依据，再决定是否采用本版提示词。")
+        lines.append("")
+        lines.append("> 本系统不自动裁定冲突：错误的自动裁定比「如实说不知道」更危险。")
         lines.append("")
 
     if len(versions) > 1:
