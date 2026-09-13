@@ -86,12 +86,27 @@ def analyze(state: dict) -> dict:
                 )
 
     prompt = _final_prompt(state)
-    # 4b 代理指标：交付物是否明确要求「已有数据照常输出、只标注缺失字段」。
-    # 只看"完全为空/非空"两个词不够 —— 历史失败轮 prompt 里两个词都有，模型照样整体判缺失；
-    # 真正缺的是"部分数据仍要输出"这半句。
-    per_field = bool(
+    # 4b 代理指标：缺失口径是否**逐字段限定**（而不是整体兜底）。
+    # 三种可接受的表述都算通过：
+    #   ①「已有数据/其余字段照常输出」；②「完全没有 X 时，X 字段填『未提供』」这类逐字段回退；
+    #   ③ 只要不出现整体兜底措辞（blanket）且确实写了缺失口径。
+    # 教训（第 5 轮）：抽取类任务的合法写法是"逐字段填『未提供』"，只认「已有数据照常输出」
+    # 会把合格交付物判成不合格 —— 判据要跟着任务形态走，不能绑死一种措辞。
+    has_missing = bool(re.search(r"(缺失|未提供)", prompt))
+    per_field_fallback = bool(
+        re.search(
+            # 窗口给到 24 字：字段名占位（如「订单号，order_id 填」）本身就能吃掉十几个字符
+            r"(完全没有|不存在|若缺失|缺失时|缺失则|缺省时).{0,24}(填|输出|标注|标为|记为|写作)",
+            prompt,
+        )
+    )
+    loose_field_style = bool(
         re.search(r"(已有数据|其余|剩余|照常输出|照常列出|仍须输出|仍要输出)", prompt)
-    ) and bool(re.search(r"(缺失|数据缺失)", prompt))
+    )
+    # 只认**正面**的逐字段写法：要么写明"已有数据照常输出"，要么写明"缺 X 时 X 字段填『未提供』"。
+    # 不要加"只要不是整体兜底就算过"这种兜底分支 —— 那会让判据几乎恒真（第 5 轮试过，会把
+    # 历史失败轮也判成通过）。
+    per_field = has_missing and (loose_field_style or per_field_fallback)
 
     verdict = str(pw.get("verdict") or "") if pw else ""
     conflict = None
@@ -110,7 +125,7 @@ def analyze(state: dict) -> dict:
         "2. 达标（status=passed）": state.get("status") == "passed",
         "3. 无边界过度泛化": not over_generalized,
         "4a. Δ 与盲评一致，或冲突已在报告中标注": conflict is None or flagged,
-        "4b. 提示词要求已有数据照常输出（只标缺失字段）": per_field,
+        "4b. 缺失口径逐字段限定（非整体兜底）": per_field,
     }
 
     return {

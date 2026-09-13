@@ -104,7 +104,7 @@ def test_per_field_clause_detection():
             }
         ]
     )
-    assert _mod.analyze(st)["checks"]["4b. 提示词要求已有数据照常输出（只标缺失字段）"] is False
+    assert _mod.analyze(st)["checks"]["4b. 缺失口径逐字段限定（非整体兜底）"] is False
 
     st2 = _state(
         prompt_versions=[
@@ -115,7 +115,7 @@ def test_per_field_clause_detection():
             }
         ]
     )
-    assert _mod.analyze(st2)["checks"]["4b. 提示词要求已有数据照常输出（只标缺失字段）"] is True
+    assert _mod.analyze(st2)["checks"]["4b. 缺失口径逐字段限定（非整体兜底）"] is True
 
 
 def test_hard_failure_excludes_advisory():
@@ -150,3 +150,34 @@ def test_hard_failure_blocks_when_contains_fails():
     rep = _mod.analyze(st)
     assert rep["checks"]["1. 断言全通过"] is False
     assert rep["hard_failed"][0]["expected"] == "华东"
+
+
+def test_per_field_proxy_accepts_extraction_style_wording():
+    """第 5 轮实测：抽取类任务的合法写法是「完全没有 X 时，X 字段填『未提供』」，
+    判据不能只认「已有数据照常输出」，否则把合格交付物判成不合格。"""
+    st = _state(
+        prompt_versions=[
+            {
+                "iteration": 0,
+                "prompt": (
+                    "若对话中完全没有订单号，order_id 填「未提供」；"
+                    "若完全没有问题类型，issue_type 填「未提供」。"
+                ),
+                "avg_score": 9.5,
+            }
+        ]
+    )
+    assert _mod.analyze(st)["checks"]["4b. 缺失口径逐字段限定（非整体兜底）"] is True
+
+
+def test_per_field_proxy_still_rejects_blanket_wording():
+    st = _state(
+        prompt_versions=[
+            {
+                "iteration": 0,
+                "prompt": "输入非空但无可识别数据时，在各结论位置标注「数据缺失」。",
+                "avg_score": 5.0,
+            }
+        ]
+    )
+    assert _mod.analyze(st)["checks"]["4b. 缺失口径逐字段限定（非整体兜底）"] is False
