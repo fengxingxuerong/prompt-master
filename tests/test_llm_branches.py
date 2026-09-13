@@ -409,7 +409,7 @@ def test_text_channel_generic_exception_retries_with_cooldown(monkeypatch):
     """通道 B 抛非解析类异常（端点 5xx / 超时）也要降温重试，而不是立刻放弃。"""
     cls = _model_cls()
     fake = _FakeLLM(
-        [RuntimeError("native down"), RuntimeError("502 bad gateway"), _Resp('{"value": 8}')]
+        [RuntimeError("native down"), RuntimeError("upstream exploded"), _Resp('{"value": 8}')]
     )
     _patch_llm(monkeypatch, fake)
     out, meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
@@ -435,3 +435,65 @@ def test_get_llm_anthropic_branch_with_stub_module(monkeypatch):
     client = L.get_llm("optimizer")
     assert isinstance(client, _FakeChatAnthropic)
     assert client.kw["api_key"] == "sk-x"
+
+
+# --------------------------------------------------------------------------
+# 10. 瞬时连接故障重试（第 6 轮真实事故：48 分钟一轮里 4 次盲评 + 多次评估
+#     全部因 OpenAIConnectionError 丢失，只因重试策略只覆盖 429）
+# --------------------------------------------------------------------------
+def test_transient_conn_error_classification():
+    assert L._is_transient_conn_error(Exception("OpenAIConnectionError: Connection error.")) is True
+    assert L._is_transient_conn_error(Exception("ReadTimeout: read timeout")) is True
+    assert L._is_transient_conn_error(Exception("502 Bad Gateway")) is True
+    # 请求本身有问题 / 限流 都不属于"连接抖动"，不能靠原地重试解决
+    assert L._is_transient_conn_error(ValueError("bad schema")) is False
+    assert L._is_transient_conn_error(Exception("Error code: 429")) is False
+
+
+def test_conn_retry_recovers_after_blip(monkeypatch):
+    """一次连接抖动后恢复：不应把整次调用判死。"""
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectionError("Connection error.")
+        return "ok"
+
+    assert L._invoke_with_conn_retry("evaluator", flaky) == "ok"
+    assert calls["n"] == 2
+
+
+def test_conn_retry_gives_up_after_budget(monkeypatch):
+    monkeypatch.setattr(L, "TRANSIENT_CONN_RETRIES", 2)
+    calls = {"n": 0}
+
+    def always_down():
+        calls["n"] += 1
+        raise ConnectionError("Connection error.")
+
+    with pytest.raises(ConnectionError):
+        L._invoke_with_conn_retry("evaluator", always_down)
+    assert calls["n"] == 3  # 首次 + 2 次重试，之后放弃
+
+
+def test_conn_retry_does_not_swallow_real_errors():
+    def bad_request():
+        raise ValueError("dimension_scores Field required")
+
+    with pytest.raises(ValueError):
+        L._invoke_with_conn_retry("evaluator", bad_request)
+
+
+def test_rate_limit_path_also_gets_conn_retry(monkeypatch):
+    """限流重试循环里也应享受连接重试：429 → 连接抖动 → 成功。"""
+    fake = _FakeLLM(
+        [
+            _rate_limit_exc(),
+            ConnectionError("Connection error."),
+            _Resp("ok", usage={"input_tokens": 1, "output_tokens": 1}),
+        ]
+    )
+    _patch_llm(monkeypatch, fake)
+    resp = L._invoke_with_rate_limit_retry("optimizer", lambda client: client.invoke([]))
+    assert resp.content == "ok"

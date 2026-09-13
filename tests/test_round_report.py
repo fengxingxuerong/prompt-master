@@ -181,3 +181,27 @@ def test_per_field_proxy_still_rejects_blanket_wording():
         ]
     )
     assert _mod.analyze(st)["checks"]["4b. 缺失口径逐字段限定（非整体兜底）"] is False
+
+
+def test_network_failures_are_flagged_and_block_conclusion():
+    """第 6 轮真实事故：endpoint 连接抖动打掉全部盲评，该轮 status=failed 与低分
+    属于基础设施问题，判据必须显式拦住，避免把它当成产品缺陷去改产品。"""
+    st = _state(
+        status="failed",
+        errors=[
+            "compare#0: [comparator] 最后错误：OpenAIConnectionError: Connection error.",
+            "compare#0: [comparator] 最后错误：OpenAIConnectionError: Connection error.",
+            "compare#1: [comparator] 最后错误：OpenAIConnectionError: Connection error.",
+            "evaluate#2[evaluator]: ValidationError: 3 validation errors for EvaluationResult",
+        ],
+    )
+    rep = _mod.analyze(st)
+    assert rep["checks"]["5. 无网关/网络失败（否则本轮不可作为产品结论）"] is False
+    # 同一行重复出现只留一条；不同调用点的失败各算一条
+    assert len(rep["net_signatures"]) == 2
+
+
+def test_no_network_failure_when_errors_are_schema_only():
+    st = _state(errors=["evaluate#2[evaluator]: ValidationError: dimension_scores Field required"])
+    rep = _mod.analyze(st)
+    assert rep["checks"]["5. 无网关/网络失败（否则本轮不可作为产品结论）"] is True

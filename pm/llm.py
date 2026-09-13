@@ -282,6 +282,54 @@ def _is_rate_limit_error(e: Exception) -> bool:
     )
 
 
+# 瞬时连接故障（网关抖动 / 连接被重置 / 读超时 / 5xx 网关错误）与 429 是两类问题：
+# 429 是配额，换 Key 有意义；连接故障换 Key 无用，但**短退避原地重试往往就能过**。
+# 2026-09-13 第 6 轮实测：一次 48 分钟运行里 4 次盲评全灭 + 多次评估失败，
+# 错误签名全是 OpenAIConnectionError: Connection error. —— 只重试 429 的策略白丢了一整轮。
+_TRANSIENT_CONN_HINTS = (
+    "connection error",
+    "connection reset",
+    "connection aborted",
+    "connecterror",
+    "readtimeout",
+    "read timeout",
+    "remotedisconnected",
+    "server disconnected",
+    "502 bad gateway",
+    "503 service",
+    "504 gateway",
+)
+TRANSIENT_CONN_RETRIES = _int_env("PM_CONN_RETRIES", 2)
+TRANSIENT_CONN_BASE_SLEEP = _float_env("PM_CONN_BASE_SLEEP", 1.5)
+
+
+def _is_transient_conn_error(e: Exception) -> bool:
+    """连接类瞬时故障（可原地重试），与限流、与"请求本身有问题"都区分开。"""
+    text = f"{type(e).__name__}: {e}".lower()
+    return any(k in text for k in _TRANSIENT_CONN_HINTS)
+
+
+def _invoke_with_conn_retry(role: str, call: Any) -> Any:
+    """执行一次调用；瞬时连接故障按 1.5s/3s 短退避重试（默认 2 次），其余异常直接上抛。"""
+    for i in range(TRANSIENT_CONN_RETRIES + 1):
+        try:
+            return call()
+        except Exception as e:
+            if not _is_transient_conn_error(e) or i >= TRANSIENT_CONN_RETRIES:
+                raise
+            sleep_s = TRANSIENT_CONN_BASE_SLEEP * (2**i)
+            logger.warning(
+                "[%s] 瞬时连接故障（%s），%.1fs 后重试 %d/%d",
+                role,
+                type(e).__name__,
+                sleep_s,
+                i + 1,
+                TRANSIENT_CONN_RETRIES,
+            )
+            time.sleep(sleep_s)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 def _invoke_with_rate_limit_retry(
     role: str,
     invoke_fn,  # Callable[[BaseChatModel], Any]：接收 llm 实例执行一次调用
@@ -294,6 +342,7 @@ def _invoke_with_rate_limit_retry(
     非限流异常直接上抛，不吞错。
 
     退避总时长受 `PM_RATE_LIMIT_MAX_WAIT` 约束（A3）：预算用尽就不再死等，直接上抛最后错误。
+    连接类瞬时故障单独处理：原地短退避重试（`PM_CONN_RETRIES` / `PM_CONN_BASE_SLEEP`）。
     """
     last_exc: Exception | None = None
     wait_deadline = time.monotonic() + max(0.0, RATE_LIMIT_MAX_WAIT)
@@ -332,7 +381,8 @@ def _invoke_with_rate_limit_retry(
             llm = get_llm(role, overrides)
         try:
             t0 = time.time()
-            resp = invoke_fn(llm)
+            # 默认参数绑定当前轮的 llm，避免闭包捕获循环变量（B023）
+            resp = _invoke_with_conn_retry(role, lambda _llm=llm: invoke_fn(_llm))
             # 记账只记真实成功的调用（429 退避后的重试、双通道各自的真实请求都覆盖；
             # 演示/测试钩子在 structured_call/plain_call 入口就返回，不会到这里）
             _record_usage(role, resp, int((time.time() - t0) * 1000))

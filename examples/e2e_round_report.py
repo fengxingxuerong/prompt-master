@@ -116,6 +116,28 @@ def analyze(state: dict) -> dict:
         elif d_avg <= 0 and verdict == "better":
             conflict = f"Δ={d_avg:+} 但盲评判优化版胜"
 
+    # 网关/网络类失败单独归类：第 6 轮实测 endpoint 抖动把 4 次盲评 + 多次评估打光，
+    # 该轮的低分与 failed 是基础设施问题，不能当成产品结论（否则会误改产品）。
+    net_sigs: list[str] = []
+    for e in state.get("errors") or []:
+        low = str(e).lower()
+        if any(
+            k in low
+            for k in (
+                "connection error",
+                "connection reset",
+                "readtimeout",
+                "read timeout",
+                "connecterror",
+                "502 bad gateway",
+                "503 service",
+                "504 gateway",
+            )
+        ):
+            sig = re.sub(r"\s+", " ", str(e))[:90]
+            if sig not in net_sigs:
+                net_sigs.append(sig)
+
     hard_failed = [a for a in assertions if not a["passed"] and not a["advisory"]]
     # 冲突被报告显式标注（渲染出的「结论冲突」段）→ 视为已处理：判据要的是"不许瞒着读者"，
     # 不是"必须没有冲突"（真实运行中两个信号确实会打架，见 2026-09-13 第 3 轮）。
@@ -126,6 +148,7 @@ def analyze(state: dict) -> dict:
         "3. 无边界过度泛化": not over_generalized,
         "4a. Δ 与盲评一致，或冲突已在报告中标注": conflict is None or flagged,
         "4b. 缺失口径逐字段限定（非整体兜底）": per_field,
+        "5. 无网关/网络失败（否则本轮不可作为产品结论）": not net_sigs,
     }
 
     return {
@@ -147,6 +170,7 @@ def analyze(state: dict) -> dict:
         "injection_survival": state.get("injection_survival"),
         "quality_issues": state.get("prompt_quality_issues"),
         "checks": checks,
+        "net_signatures": net_sigs,
     }
 
 
@@ -182,6 +206,16 @@ def render(path: Path, rep: dict) -> str:
             L.append(f"- case#{o['case']} 输入：{o['input']}")
             L.append(f"  输出：{o['output']}")
         L.append("")
+    if rep.get("net_signatures"):
+        L.append("## 网关/网络失败（本轮结论受限）")
+        for sig in rep["net_signatures"][:5]:
+            L.append(f"- `{sig}`")
+        L.append("")
+        L.append(
+            "> 上列失败来自端点连接层，与提示词质量无关：本轮的分数与 status **不作为产品结论**。"
+        )
+        L.append("")
+
     if rep["quality_issues"]:
         L.append("## 质量门警告")
         for q in rep["quality_issues"]:

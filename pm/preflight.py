@@ -23,10 +23,12 @@ from __future__ import annotations
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from .llm import _env, build_config, plain_call
+from .backend import carry_context
+from .llm import _env, _float_env, _int_env, build_config, plain_call
 
 logger = logging.getLogger("pm.preflight")
 
@@ -145,41 +147,62 @@ def preflight_roles() -> list[str]:
     return roles
 
 
+# 预检单角色的超时预算（秒）。为什么单独设：全局 PM_TIMEOUT 默认 120s，
+# 而预检是"廉价冒烟"——一个角色挂住就能把整轮预检拖到几分钟，
+# 2026-09-13 实测端点抖动时 --preflight 直接超掉了测试里 90s 的子进程预算。
+PREFLIGHT_ROLE_TIMEOUT = _float_env("PM_PREFLIGHT_TIMEOUT", 20.0)
+# 预检并发度：角色之间互不依赖，串行跑纯粹是白等（8 角色 × 慢端点可达分钟级）
+PREFLIGHT_CONCURRENCY = _int_env("PM_PREFLIGHT_CONCURRENCY", 8)
+
+
+def _preflight_one(role: str, smoke_prompt: str, max_tokens: int) -> RoleReport:
+    """单角色冒烟（线程池 worker）。异常一律转成报告行，绝不外抛。"""
+    cfg = build_config(role)
+    rr = RoleReport(
+        role=role,
+        model=cfg.model,
+        base_url=cfg.base_url or "(provider 默认)",
+        key_tail=_mask_key(cfg.api_key),
+    )
+    if not cfg.api_key:
+        rr.error = "缺少 API Key"
+        rr.error_kind = "auth"
+        rr.advice = f"设置 PM_API_KEY 或 PM_{role.upper()}_API_KEY"
+        return rr
+    t0 = time.time()
+    try:
+        _text, meta = plain_call(
+            role,
+            "你是连通性探测器。只输出两个字：OK",
+            smoke_prompt,
+            overrides={"max_tokens": max_tokens, "timeout": PREFLIGHT_ROLE_TIMEOUT},
+        )
+        rr.ok = True
+        rr.latency_ms = int((time.time() - t0) * 1000) or meta.get("latency_ms")
+    except Exception as e:  # noqa: BLE001 - 预检就是来接住一切错误的
+        rr.error = f"{type(e).__name__}: {e}"
+        rr.error_kind, rr.advice = _classify_error(str(e))
+        logger.info("[%s] 预检失败：%s", role, rr.error)
+    return rr
+
+
 def run_preflight(smoke_prompt: str = "回复：OK", max_tokens: int = 64) -> PreflightReport:
-    """逐角色执行最小冒烟调用。64 token 足够确认端点活着，成本可忽略。
+    """角色并发执行最小冒烟调用。64 token 足够确认端点活着，成本可忽略。
 
     走 plain_call：演示/测试的 CallHook 钩子自动生效（离线测试不碰真实端点）。
+    并发必须包 carry_context —— ThreadPoolExecutor 不继承 ContextVar，
+    不包就会在并发分支上绕过注入的假后端（并发路径踩过同一个坑）。
     """
     report = PreflightReport()
-    for role in preflight_roles():
-        cfg = build_config(role)
-        rr = RoleReport(
-            role=role,
-            model=cfg.model,
-            base_url=cfg.base_url or "(provider 默认)",
-            key_tail=_mask_key(cfg.api_key),
-        )
-        if not cfg.api_key:
-            rr.error = "缺少 API Key"
-            rr.error_kind = "auth"
-            rr.advice = f"设置 PM_API_KEY 或 PM_{role.upper()}_API_KEY"
-            report.roles.append(rr)
-            continue
-        t0 = time.time()
-        try:
-            _text, meta = plain_call(
-                role,
-                "你是连通性探测器。只输出两个字：OK",
-                smoke_prompt,
-                overrides={"max_tokens": max_tokens},
+    roles = list(preflight_roles())
+    if PREFLIGHT_CONCURRENCY > 1 and len(roles) > 1:
+        with ThreadPoolExecutor(max_workers=min(PREFLIGHT_CONCURRENCY, len(roles))) as ex:
+            results = list(
+                ex.map(carry_context(lambda r: _preflight_one(r, smoke_prompt, max_tokens)), roles)
             )
-            rr.ok = True
-            rr.latency_ms = int((time.time() - t0) * 1000) or meta.get("latency_ms")
-        except Exception as e:  # noqa: BLE001 - 预检就是来接住一切错误的
-            rr.error = f"{type(e).__name__}: {e}"
-            rr.error_kind, rr.advice = _classify_error(str(e))
-            logger.info("[%s] 预检失败：%s", role, rr.error)
-        report.roles.append(rr)
+    else:
+        results = [_preflight_one(r, smoke_prompt, max_tokens) for r in roles]
+    report.roles.extend(results)
     return report
 
 
