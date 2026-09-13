@@ -168,8 +168,8 @@ def test_evaluate_node_cache_hit_skips_llm(tmp_path, monkeypatch):
         calls["n"] += 1
         return testing._fake_structured(role, model_cls, system, user, max_retries, overrides)
 
-    monkeypatch.setattr("pm.nodes.structured_call", fake_structured)
-    monkeypatch.setattr("pm.nodes.plain_call", testing._fake_plain)
+    monkeypatch.setattr("pm.llm.structured_call", fake_structured)
+    monkeypatch.setattr("pm.llm.plain_call", testing._fake_plain)
 
     base = _eval_state()
     patch1 = evaluate_node(dict(base))
@@ -199,8 +199,8 @@ def test_evaluate_node_cache_misses_on_changed_output(tmp_path, monkeypatch):
         calls["n"] += 1
         return testing._fake_structured(role, model_cls, system, user, max_retries, overrides)
 
-    monkeypatch.setattr("pm.nodes.structured_call", fake_structured)
-    monkeypatch.setattr("pm.nodes.plain_call", testing._fake_plain)
+    monkeypatch.setattr("pm.llm.structured_call", fake_structured)
+    monkeypatch.setattr("pm.llm.plain_call", testing._fake_plain)
 
     base = _eval_state()
     evaluate_node(dict(base))

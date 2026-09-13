@@ -69,8 +69,11 @@ def test_dev_extras_cover_ci_tools():
 def test_installable_package_layout_declared():
     """平铺布局必须显式声明 packages，否则 setuptools 自动发现会直接报错。"""
     cfg = _pyproject().get("tool", {}).get("setuptools", {})
-    assert cfg.get("packages") == ["pm"], "应只安装 pm 包（run.py / run_server.py 是仓库入口脚本）"
+    assert cfg.get("packages") == ["pm", "pm.nodes"], (
+        "应只安装 pm 包与 pm.nodes 子包（run.py / run_server.py 是仓库入口脚本）"
+    )
     assert (ROOT / "pm" / "__init__.py").exists()
+    assert (ROOT / "pm" / "nodes" / "__init__.py").exists()
     assert _pyproject().get("build-system", {}).get("requires"), (
         "缺 build-system 时 pip install . 用的是猜测的默认值"
     )

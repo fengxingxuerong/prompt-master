@@ -527,7 +527,7 @@ def test_evaluate_one_passes_rules_to_the_judge(monkeypatch):
         ).finalize()
         return ev, {"channel": "fake"}
 
-    monkeypatch.setattr(N, "_call_evaluator", fake_call)
+    monkeypatch.setattr("pm.nodes.judge._call_evaluator", fake_call)
     run = {"test_case_index": 0, "test_input": "输入", "output": "输出"}
     dumped, calls, _hit = N._evaluate_one(
         run,
