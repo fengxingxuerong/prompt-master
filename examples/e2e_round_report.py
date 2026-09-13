@@ -70,10 +70,13 @@ def analyze(state: dict) -> dict:
                 }
             )
         inp, out = r.get("test_input") or "", r.get("output") or ""
-        # 输入里有明确金额、输出却整体判缺失 → 记为过度泛化（除非输出同时给了具体数字）
+        # 输入里有明确金额、输出却整体判缺失 → 记为过度泛化（除非输出同时给了具体数字）。
+        # 比较前先去掉空白：输入写「98 万」、输出写「98万」是同一笔数，不做归一化会误判
+        # （2026-09-13 第 3 轮踩过：正确输出被判成过度泛化）。
         if _AMOUNT_RE.search(inp) and _MISSING_RE.search(out):
-            nums_in_inp = set(_AMOUNT_RE.findall(inp))
-            if not any(n in out for n in nums_in_inp):
+            nums_in_inp = [re.sub(r"\s+", "", n) for n in _AMOUNT_RE.findall(inp)]
+            flat_out = re.sub(r"\s+", "", out)
+            if not any(n in flat_out for n in nums_in_inp):
                 over_generalized.append(
                     {
                         "case": r.get("test_case_index"),
@@ -99,11 +102,14 @@ def analyze(state: dict) -> dict:
             conflict = f"Δ={d_avg:+} 但盲评判优化版胜"
 
     hard_failed = [a for a in assertions if not a["passed"] and not a["advisory"]]
+    # 冲突被报告显式标注（渲染出的「结论冲突」段）→ 视为已处理：判据要的是"不许瞒着读者"，
+    # 不是"必须没有冲突"（真实运行中两个信号确实会打架，见 2026-09-13 第 3 轮）。
+    flagged = "结论冲突" in (state.get("final_report") or "")
     checks = {
         "1. 断言全通过": not hard_failed,
         "2. 达标（status=passed）": state.get("status") == "passed",
         "3. 无边界过度泛化": not over_generalized,
-        "4a. Δ 与盲评一致": conflict is None,
+        "4a. Δ 与盲评一致，或冲突已在报告中标注": conflict is None or flagged,
         "4b. 提示词要求已有数据照常输出（只标缺失字段）": per_field,
     }
 

@@ -70,10 +70,27 @@ def test_over_generalization_not_flagged_when_amounts_echoed():
     assert rep["checks"]["3. 无边界过度泛化"] is True
 
 
-def test_conflict_flagged_when_delta_positive_but_pairwise_says_worse():
-    st = _state(pairwise={"verdict": "worse", "votes": {"worse": 4}})
+def test_conflict_not_ok_when_report_does_not_flag_it():
+    """冲突且报告没写出来 → 判据不过（不许瞒着读者）。"""
+    st = _state(pairwise={"verdict": "worse", "votes": {"worse": 4}}, final_report="（无冲突段）")
     rep = _mod.analyze(st)
-    assert rep["checks"]["4a. Δ 与盲评一致"] is False
+    assert rep["checks"]["4a. Δ 与盲评一致，或冲突已在报告中标注"] is False
+
+
+def test_conflict_ok_when_explicitly_flagged_in_report():
+    """冲突但报告已显式标注（含建议动作）→ 判据通过：判据要的是"不隐瞒"，不是"没冲突"。"""
+    st = _state(
+        pairwise={"verdict": "worse", "votes": {"worse": 4}},
+        final_report="## ⚠️ 结论冲突（需人工裁定）\n- 冲突：均分说更好但盲评判基线胜",
+    )
+    rep = _mod.analyze(st)
+    assert rep["checks"]["4a. Δ 与盲评一致，或冲突已在报告中标注"] is True
+
+
+def test_no_conflict_when_signals_agree():
+    st = _state(pairwise={"verdict": "better", "votes": {"better": 4}})
+    rep = _mod.analyze(st)
+    assert rep["checks"]["4a. Δ 与盲评一致，或冲突已在报告中标注"] is True
 
 
 def test_per_field_clause_detection():

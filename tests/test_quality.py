@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import pytest
 from pm import testing
 from pm.graph import build_app
 from pm.nodes import _generate_prompt_with_gate, optimize_node
@@ -380,3 +381,34 @@ def test_constraint_budget_is_eight():
     assert CONSTRAINT_LIMIT == 8
     report = check_prompt_quality(_constraint_prompt(CONSTRAINT_LIMIT + 1))
     assert any(i.code == "constraint_overload" for i in report.issues)
+
+
+# --------------------------------------------------------------------------
+# 1f. blanket 闸的精度（正负样本全部来自真实运行，防误杀回归）
+# 第 2 轮实测教训：误杀会触发无谓重写 —— v0 5.78 → v1 4.76 且提前终止。
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "line",
+    [
+        # 真实误杀样本 1：限定作用域的逐字段规则
+        "相对日期（如“下周五”“月底”）一律视为无明确日期，标注「数据缺失」。",
+        # 真实误杀样本 2：业务词「整体」+ 后文偶发「缺失」
+        "识别整体销售趋势（上升、下降、平稳），并给出关键时间点或区间。",
+        # 真实误杀样本 3：否定句（数据完整时禁止标缺失）
+        "若输入数据完整（所有字段均有值），不得标注「数据缺失」，所有结论必须基于实际数据。",
+        # 常规逐字段写法
+        "若某条记录缺少金额，该字段输出「数据缺失」，其余字段照常输出。",
+    ],
+)
+def test_blanket_gate_precision_on_real_samples(line):
+    assert blanket_missing_branch(line) is False
+
+
+def test_blanket_gate_true_positive_still_fires():
+    """历史事故原句必须仍然命中（修精度不能把真阳性一起修没了）。"""
+    assert (
+        blanket_missing_branch(
+            "输入非空但未包含任何可识别的数据时，在各结论位置标注「数据缺失」，不得复用空输入分支。"
+        )
+        is True
+    )
