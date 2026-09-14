@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import time
 import types
 from typing import Any
 
@@ -795,3 +796,49 @@ def test_non_length_error_produces_no_budget_warning(caplog):
     with caplog.at_level("WARNING", logger="pm.llm"):
         L._warn_if_token_budget_exhausted("evaluator", RuntimeError("boom"), cfg)
     assert "MAX_TOKENS" not in caplog.text
+
+
+# --------------------------------------------------------------------------
+# 12. ③ 解耦：限流预算与解析重试预算分离（2026-09-15）
+#     旧版通道 B 的每次解析重试各自满额退避（最坏 4×60s），且限流上抛被
+#     except 大兜底当成"解析失败"消耗一次重试名额 —— 429 吃掉重试预算。
+# --------------------------------------------------------------------------
+def test_channel_b_rate_limit_raises_without_consuming_retries(monkeypatch):
+    """限流预算耗尽：立即上抛原始 429，不把 3 次解析重试名额烧完。"""
+    calls = {"invoke": 0}
+
+    def fake_rate_limited(role, fn, overrides=None, deadline=None):
+        calls["invoke"] += 1
+        raise RuntimeError("Error code: 429 - rate limit exceeded")
+
+    monkeypatch.setattr(L, "_invoke_with_rate_limit_retry", fake_rate_limited)
+    cls = _model_cls()
+    with pytest.raises(RuntimeError, match="429"):
+        L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
+    # 通道 A 1 次 + 通道 B 第 1 次即终止；旧行为会烧满 A1 + B3 = 4 次
+    assert calls["invoke"] == 2
+
+
+def test_rate_limit_deadline_trims_wait(monkeypatch):
+    """外层共享 deadline 早于单调用预算时，等待被裁剪：一次退避都不该发生。"""
+    sleeps: list[float] = []
+    monkeypatch.setattr(L, "RATE_LIMIT_RETRIES", 5)
+    monkeypatch.setattr(L, "RATE_LIMIT_MAX_WAIT", 60.0)
+    monkeypatch.setattr(L, "RATE_LIMIT_BASE_SLEEP", 100.0)
+    monkeypatch.setattr(L, "_key_pool", lambda role: ["only-key"])
+    monkeypatch.setattr(L.time, "sleep", lambda s: sleeps.append(s))
+
+    def always_429(_llm):
+        raise RuntimeError("Error code: 429 - tpm exhausted")
+
+    with pytest.raises(RuntimeError, match="429"):
+        L._invoke_with_rate_limit_retry(
+            "evaluator", always_429, deadline=time.monotonic() + 10.0
+        )
+    # 首次退避想等 100s（单 Key 加倍 200s），剩余预算仅 ~10s → 一次都不睡
+    assert sleeps == []
+
+
+def test_total_wait_budget_covers_max_wait():
+    """总预算必须不小于单调用预算，否则通道 B 拿不到任何等待窗口。"""
+    assert L.RATE_LIMIT_TOTAL_WAIT >= L.RATE_LIMIT_MAX_WAIT

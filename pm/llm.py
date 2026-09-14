@@ -277,6 +277,11 @@ RATE_LIMIT_BASE_SLEEP = _float_env("PM_RATE_LIMIT_BASE_SLEEP", 5.0)
 # 而通道 A 耗尽后还有通道 B 的 3 次重试各自再跑一轮退避，最坏能阻塞十几分钟。
 # 现在给每个调用点一个硬预算，超了就上抛，宁叫失败不叫卡死。
 RATE_LIMIT_MAX_WAIT = _float_env("PM_RATE_LIMIT_MAX_WAIT", 60.0)
+# ③ 解耦：一次 structured_call（通道 A + 通道 B 全部解析重试）共享的限流总预算。
+# 旧版通道 B 的每次解析重试各自从满额 MAX_WAIT 退避（最坏 4×60s），且限流上抛
+# 会被 except 大兜底当成"解析失败"消耗一次重试名额 —— 429 吃掉重试预算（成因③）。
+# 现在整个调用共享一个 wall-clock 预算：解析重试次数（质量层）与限流等待（传输层）独立计数。
+RATE_LIMIT_TOTAL_WAIT = _float_env("PM_RATE_LIMIT_TOTAL_WAIT", 120.0)
 
 
 def _is_rate_limit_error(e: Exception) -> bool:
@@ -364,6 +369,7 @@ def _invoke_with_rate_limit_retry(
     role: str,
     invoke_fn,  # Callable[[BaseChatModel], Any]：接收 llm 实例执行一次调用
     overrides: dict[str, Any] | None = None,
+    deadline: float | None = None,
 ):
     """带 429 退避与 Key 轮换的调用封装。
 
@@ -373,9 +379,14 @@ def _invoke_with_rate_limit_retry(
 
     退避总时长受 `PM_RATE_LIMIT_MAX_WAIT` 约束（A3）：预算用尽就不再死等，直接上抛最后错误。
     连接类瞬时故障单独处理：原地短退避重试（`PM_CONN_RETRIES` / `PM_CONN_BASE_SLEEP`）。
+
+    `deadline`（monotonic 绝对时刻）是可选的外层共享预算：结构化调用在通道 A/B 之间
+    共享一个总限流预算（③ 解耦），取两者更早者生效；不传时行为与旧版完全一致。
     """
     last_exc: Exception | None = None
     wait_deadline = time.monotonic() + max(0.0, RATE_LIMIT_MAX_WAIT)
+    if deadline is not None:
+        wait_deadline = min(wait_deadline, deadline)
     for attempt in range(RATE_LIMIT_RETRIES + 1):
         if attempt > 0:
             sleep_s = RATE_LIMIT_BASE_SLEEP * (2 ** (attempt - 1))
@@ -384,9 +395,9 @@ def _invoke_with_rate_limit_retry(
                 sleep_s *= 2
             if time.monotonic() + sleep_s > wait_deadline:
                 logger.warning(
-                    "[%s] 限流退避预算已用完（%.0fs，本次还需等 %.0fs），停止重试并上抛最后错误",
+                    "[%s] 限流退避预算已用完（还剩 %.0fs，本次还需等 %.0fs），停止重试并上抛最后错误",
                     role,
-                    RATE_LIMIT_MAX_WAIT,
+                    max(0.0, wait_deadline - time.monotonic()),
                     sleep_s,
                 )
                 break
@@ -893,6 +904,12 @@ def structured_call(
     t0 = time.time()
     last_err: str | None = None
 
+    # ③ 解耦：整个 structured_call（通道 A + 通道 B 的全部解析重试）共享一个限流总预算。
+    # 旧版 B 的每次解析重试各自从满额 MAX_WAIT 退避（最坏 4×60s），且限流上抛会被
+    # except 大兜底当成"解析失败"消耗一次重试名额。现在解析重试次数（质量层）与
+    # 限流等待（传输层）独立计数，总阻塞时长有硬上限。
+    limit_deadline = time.monotonic() + max(0.0, RATE_LIMIT_TOTAL_WAIT)
+
     # ---- 通道 A ----
     # method 只有在显式配置时才传：不同 provider 的 with_structured_output
     # 签名不一致（如 ChatAnthropic 没有 method 形参），默认路径不能多传参。
@@ -911,6 +928,7 @@ def structured_call(
                 [SystemMessage(content=system), HumanMessage(content=user)]
             ),
             overrides,
+            deadline=limit_deadline,
         )
         if isinstance(result, model_cls):
             meta.update(channel=channel_a, attempts=1, latency_ms=int((time.time() - t0) * 1000))
@@ -962,6 +980,7 @@ def structured_call(
                     temperature=max(_t, 0.0)
                 ).invoke(_msgs),
                 overrides,
+                deadline=limit_deadline,
             )
             raw = resp.content if isinstance(resp.content, str) else str(resp.content)
             data = extract_json_object(raw)
@@ -993,7 +1012,13 @@ def structured_call(
                 )
             logger.warning("[%s] 第 %d/%d 次解析失败：%s", role, attempt, max_retries, last_err)
             temp = max(0.0, min(1.0, temp - TEMPERATURE_DECAY + TEMPERATURE_BOOST_ON_PARSE))
-        except Exception as e:  # noqa: BLE001 - LLM 端点行为不可预期，任何异常都重试降温
+        except Exception as e:
+            # ③ 解耦：限流与解析失败是两类问题。限流在 _invoke_with_rate_limit_retry
+            # 内部消化（退避 + Key 轮换，共享 deadline 预算）；总预算耗尽上抛到这里时，
+            # 继续循环只会立刻再 429 —— 立即终止并上抛，**不消耗解析重试名额**，
+            # 也不把「RateLimitError」写进 retry_hint 去误导下一次提示。
+            if _is_rate_limit_error(e):
+                raise
             last_err = f"{type(e).__name__}: {e}"
             logger.warning("[%s] 第 %d/%d 次调用异常：%s", role, attempt, max_retries, last_err)
             # 端点/网络类异常沿用降温：这类失败与采样随机性无关，保守重试即可
