@@ -304,6 +304,40 @@ def test_unestimable_noise_widens_the_regression_margin():
     assert "回退" in str(early_stop_reason([8.5, 7.9], noise=None)), "真掉下去还是要停"
 
 
+def test_estimable_noise_widens_regression_margin_k2():
+    """k=2 实测噪声（第 12 轮真实运行 noise=0.39）下回退余量放宽到 2×noise。
+
+    "看起来掉了 0.3"在余量 0.78 内 → 继续修订；真掉 1.0 → 仍要停。
+    """
+    from pm.schemas import early_stop_reason
+
+    assert early_stop_reason([9.2, 8.9], noise=0.39) is None, (
+        "0.3 的落差在 2×noise 余量内，是噪声不是回退"
+    )
+    assert early_stop_reason([9.2, 8.9], noise=None) is None
+    assert "回退" in str(early_stop_reason([9.2, 8.2], noise=0.39)), (
+        "1.0 的落差超过放宽后的余量，是真回退"
+    )
+
+
+def test_estimable_noise_keeps_plateau_enabled_k2():
+    """k=2 平台期保持启用，k=1 关闭：同一轨迹不同噪声估计给出相反决策。
+
+    轨迹 [9.2, 8.6, 8.7]：历史最佳 9.2 的门槛放宽到 9.98，连续两轮未超过 → 停；
+    k=1 时平台期整体关闭且回退在余量内 → 继续。M4 的完整语义就是这一对对比。
+    """
+    from pm.schemas import early_stop_reason
+
+    traj = [9.2, 8.6, 8.7]
+    est = early_stop_reason(traj, noise=0.39)
+    assert est is not None and "平台期" in est, (
+        "k=2 下连续两轮未超过历史最佳（含余量）应判平台期"
+    )
+    assert early_stop_reason(traj, noise=None) is None, (
+        "k=1 平台期规则关闭，且 8.6→8.7 在回升，应继续修订"
+    )
+
+
 def test_noise_margin_floors_and_defaults():
     from pm import schemas
     from pm.schemas import noise_margin
