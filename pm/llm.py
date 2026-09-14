@@ -52,23 +52,26 @@ TEMPERATURES: dict[str, float] = {
 }
 
 MAX_TOKENS: dict[str, int] = {
-    "clarifier": 1500,
-    "optimizer": 4000,
-    "mockgen": 2000,
-    # 2026-09-14：3500 → 6000。第 9 轮实测 evaluator 的主要失败模式是
-    # **空返回（len=0）**（scripts/nojson_probe.py：3/6），不是散文/围栏/截断。
-    # 根因同源：思考型模型（这里 deepseek-v4-pro）的 reasoning 计入 max_tokens，
-    # 3500 被推理吃掉大半 → 正文为空。与 ADR 里 glm-5.2 reviser 4000→6000 是同一类问题。
-    # 注：本项**缺直接 A/B 对照**（验证时 key 限流耗尽），依据是空返回 + 预算不对称
-    # （.env 已给 evaluator_b/arbiter 配 8000，main 评委却停在 3500）+ 同源案例。
-    # 若将来能跑对照，应复核 6000 是否足够（必要时对齐 .env 的 8000）。
-    "evaluator": 6000,
-    "evaluator_b": 6000,
-    "arbiter": 6000,
+    # 2026-09-14 全部上调：**思考型模型把 reasoning 计入 max_tokens**，
+    # 实测 reasoning 消耗约为 prompt 长度的 1.1~1.5 倍（第 11 轮 evaluator 实测
+    # prompt≈3.5k → reasoning 5477~6000），正文额度极易归零 → 空返回或 LengthFinish。
+    #
+    # 直接对照（第 11 轮，同模型/同端点/同任务/同调用次数 15 vs 15）：
+    #     evaluator   max_tokens=6000 → 额度耗尽 **5 次**（33%）    ← 本轮代码默认值
+    #     evaluator_b max_tokens=8000 → 额度耗尽 **0 次**（0%）     ← 来自 .env
+    #   → evaluator 由 6000 提到 8000（与 evaluator_b 对齐）。
+    # 其余角色按同一口径推算（reasoning ≈ prompt × 1.5 + 正文余量），**无逐角色对照**，
+    # 标注为推算值；后续任一轮日志发现某角色仍告警，按该值再调。
+    "clarifier": 3000,  # 原 1500：实测 reasoning=1500 恰好吃满，正文 0
+    "optimizer": 6000,  # 原 4000：与 reviser 同级（整份提示词）
+    "mockgen": 4000,  # 原 2000：n 上限 8 时用例 + rationale，需留推理余量
+    "evaluator": 8000,  # 有对照：6000 → 33% 额度耗尽；8000 → 0%
+    "evaluator_b": 8000,  # 对齐 evaluator（.env 里本就是 8000）
+    "arbiter": 8000,  # 同 evaluator 类角色
     "reviser": 6000,  # 2026-09-12：4000 → 6000。思考型模型的 reasoning 计入 max_tokens，
     # glm-5.2 两次真实运行都在修订环节把预算耗光、返回空内容 → early_stopped；
     # DeepSeek-V4-Flash 实测正常。修订输出 = 整份提示词，是所有角色里最长的，预算必须最宽。
-    "comparator": 600,  # 只要 winner + 一句依据，给多了浪费
+    "comparator": 2500,  # 原 600：连一次推理都不够（第 11 轮 comparator 从未走通原生通道）
     "target": 4000,
 }
 # 说明：思考型模型（如 glm-5.2 / deepseek 系列 reasoning 模式）的推理 token
@@ -79,8 +82,11 @@ MAX_TOKENS: dict[str, int] = {
 # - evaluator/evaluator_b/arbiter 2500 → 3500：issues/suggestions 是列表字段，
 #   面对长输出 + 多问题时 2500 会截断，后果是评估器悄悄少报问题（评估失真）；
 # - mockgen 1600 → 2000：n_test_cases 上限 8 时用例 + rationale 的 JSON 余量。
-# - evaluator/evaluator_b/arbiter 3500 → 6000（2026-09-14）：实测空返回是首要失败模式，
-#   见上方 evaluator 条目注释。
+# 2026-09-14 再调（**以上文字按"非推理模型"标定，换推理模型后全部失效**）：
+# - 全部角色 3500/1500/2000/600 → 8000/3000/4000/2500 等，详见各条注释。
+#   根因是 reasoning 与 prompt 同量级，预算必须"够推理 + 够正文"。
+# - 同时新增 `_warn_if_token_budget_exhausted`：额度耗尽时按 usage 直接告警并给出
+#   建议值 —— 这类失败此前伪装成普通降级，在日志里躺了 9 轮才被挖出来。
 
 # 每次重试降温幅度
 TEMPERATURE_DECAY = 0.15
@@ -594,6 +600,95 @@ def _model_required_fields(model: type[BaseModel]) -> list[str]:
     return sorted(required)
 
 
+def _is_length_finish_error(e: Exception) -> bool:
+    """是否因触达 max_tokens 而被截断（不是普通降级）。"""
+    if type(e).__name__ == "LengthFinishReasonError":
+        return True
+    text = f"{type(e).__name__}: {e}".lower()
+    return "length limit was reached" in text or ("max_tokens" in text and "reached" in text)
+
+
+def _warn_if_token_budget_exhausted(role: str, e: Exception, cfg: Any) -> None:
+    """额度耗尽时给出**可执行建议**：区分"推理吃掉预算"与"输出真的太长"。
+
+    为什么必须单独诊断：思考型模型把 reasoning 计入 max_tokens，
+    于是 completion_tokens 里绝大部分是 reasoning_tokens、正文几乎没有额度。
+    这个失败伪装成普通的"结构化输出不可用"，在日志里与普通降级毫无区别 ——
+    第 9 轮 13 次、第 11 轮 5 次都被这一行掩盖，直到专门查 usage 才暴露。
+
+    对照组（第 11 轮，同模型/同端点/同任务/同样 15 次调用）：
+        evaluator   max_tokens=6000 → 5 次额度耗尽（reasoning 5477~6000）
+        evaluator_b max_tokens=8000 → 0 次（配置来自 .env）
+    """
+    if not _is_length_finish_error(e):
+        return
+
+    budget = getattr(cfg, "max_tokens", 0) or 0
+    # langchain 的 LengthFinishReasonError 把 usage 写在 message 里；
+    # 端点也可能把 usage 挂在 response 上，两种都取一遍。
+    completion = _usage_int(e, "completion_tokens")
+    reasoning = _usage_int(e, "reasoning_tokens")
+
+    if completion and budget and completion >= budget * 0.98:
+        if reasoning and reasoning >= completion * 0.8:
+            logger.warning(
+                "[%s] ⚠️ 额度被**推理**耗尽：reasoning_tokens=%d / completion_tokens=%d "
+                "（max_tokens=%d）。思考型模型把推理计入预算，正文已无额度 → "
+                "请调大 PM_%s_MAX_TOKENS（参考：第 11 轮对照，同条件下 6000 失败率 33%%，"
+                "8000 为 0%%）",
+                role,
+                reasoning,
+                completion,
+                budget,
+                role.upper(),
+            )
+        else:
+            logger.warning(
+                "[%s] ⚠️ 输出**本身**触达额度：completion_tokens=%d = max_tokens=%d"
+                "（reasoning=%d）。要么输出确实很长，要么 %s 的输出契约需要收敛。",
+                role,
+                completion,
+                budget,
+                reasoning or 0,
+                role,
+            )
+    else:
+        logger.warning(
+            "[%s] 触达 token 额度上限（max_tokens=%d, completion=%s, reasoning=%s）；"
+            "若反复出现请调大 PM_%s_MAX_TOKENS",
+            role,
+            budget,
+            completion or "?",
+            reasoning or "?",
+            role.upper(),
+        )
+
+
+def _usage_int(e: Exception, key: str) -> int | None:
+    """从异常里尽力取出 usage 字段（不同端点挂的位置不同，取不到就 None）。"""
+    for obj in (getattr(e, "completion", None), getattr(e, "llm_output", None), e):
+        usage = getattr(obj, "usage", None) or getattr(obj, "token_usage", None)
+        if usage is None and isinstance(obj, dict):
+            usage = obj.get("usage") or obj.get("token_usage")
+        if usage is None:
+            continue
+        for container in (usage, getattr(usage, "completion_tokens_details", None)):
+            if container is None:
+                continue
+            val = (
+                container.get(key) if isinstance(container, dict) else getattr(container, key, None)
+            )
+            if isinstance(val, int):
+                return val
+    text = str(e)
+    for token in text.split(","):
+        if f"{key}=" in token:
+            digits = "".join(c for c in token.split("=")[-1] if c.isdigit())
+            if digits:
+                return int(digits)
+    return None
+
+
 def _repair_shape(model: type[BaseModel], data: dict[str, Any]) -> dict[str, Any]:
     """修"形状误解"类 schema 失败（不修内容错误）。
 
@@ -837,6 +932,11 @@ def structured_call(
     except Exception as e:  # noqa: BLE001
         last_err = f"{type(e).__name__}: {e}"
         logger.warning("[%s] 原生结构化输出不可用，降级为 JSON 文本解析：%s", role, last_err)
+        # 2026-09-14：LengthFinishReasonError（额度耗尽）必须**单独诊断**，不能只当普通降级。
+        # 它被当成噪声瞒了 9 轮 —— 第 9 轮 13 次、第 11 轮 5 次都躺在同一行警告里，
+        # 直到把「25% 成功率」当作谜题才挖出来。真正的成因是思考型模型把 reasoning
+        # 全部计入 max_tokens，正文额度归零。这里按 usage 给出可直接执行的建议。
+        _warn_if_token_budget_exhausted(role, e, cfg)
         _remember_channel_a_unsupported(cfg, last_err)
 
     # ---- 通道 B：注入 Schema + 解析重试 ----

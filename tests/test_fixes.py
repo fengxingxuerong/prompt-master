@@ -677,14 +677,16 @@ def test_judge_b_untouched_when_differently_configured(monkeypatch):
 
 
 def test_role_token_budgets_survive_reasoning_models():
-    """角色 token 预算要为思考型模型的推理 token 留余量，防止结构化输出被截断/空返回。"""
-    assert llm_mod.MAX_TOKENS["clarifier"] >= 1500
-    # 2026-09-14：3500 → 6000。实测评委的首要失败模式是**空返回**（len=0，3/6），
-    # 根因是思考型模型的 reasoning 吃掉预算（scripts/nojson_probe.py 有证据）。
+    """角色 token 预算要为思考型模型的推理 token 留余量，防止截断/空返回。"""
+    assert llm_mod.MAX_TOKENS["clarifier"] >= 3000
+    # 2026-09-14：3500 → 6000 → **8000**。第 11 轮有了直接对照
+    # （同模型/同端点/同任务、调用次数同为 15）：6000 → 额度耗尽 5 次，
+    # 8000（来自 .env 的 evaluator_b）→ 0 次；reasoning 实测 5477~6000。
     for role in ("evaluator", "evaluator_b", "arbiter"):
-        assert llm_mod.MAX_TOKENS[role] >= 6000
+        assert llm_mod.MAX_TOKENS[role] >= 8000
     assert llm_mod.MAX_TOKENS["reviser"] >= 6000
-    assert llm_mod.MAX_TOKENS["mockgen"] >= 2000
+    assert llm_mod.MAX_TOKENS["mockgen"] >= 4000
+    assert llm_mod.MAX_TOKENS["comparator"] >= 2500
 
 
 # --------------------------------------------------------------------------

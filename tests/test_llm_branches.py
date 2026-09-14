@@ -12,10 +12,17 @@
 from __future__ import annotations
 
 import json
+import types
 from typing import Any
 
 import pytest
 from pm import llm as L
+
+
+def _Cfg(**kw: Any) -> Any:
+    """minimal stand-in for LLMConfig（预算告警只需要 max_tokens）。"""
+    return types.SimpleNamespace(**kw)
+
 
 # --------------------------------------------------------------------------
 # 假客户端：按脚本依次返回结果或抛异常
@@ -709,3 +716,82 @@ def test_retry_hint_mentions_nested_requirement(monkeypatch, caplog):
             L.structured_call("evaluator", cls, "sys", "user", max_retries=2)
     assert "嵌套对象" in caplog.text
     assert "不要" in caplog.text and "平铺" in caplog.text
+
+
+# --------------------------------------------------------------------------
+# 13. token 预算被推理耗尽（第 11 轮发现，此前沿着 9 轮都没看出来）
+#     思考型模型把 reasoning 计入 max_tokens → 正文额度归零 → 空返回/LengthFinish。
+# --------------------------------------------------------------------------
+def test_role_token_budgets_leave_room_for_reasoning():
+    """预算必须覆盖「推理 + 正文」。
+
+    第 11 轮直接对照（同模型/同端点/同任务，调用次数同为 15）：
+        evaluator   max_tokens=6000 → 额度耗尽 **5 次**（reasoning 实测 5477~6000）
+        evaluator_b max_tokens=8000 → **0 次**
+    """
+    for role in ("evaluator", "evaluator_b", "arbiter"):
+        assert L.MAX_TOKENS[role] >= 8000  # 有对照证据
+    # 以下为按同一口径推算（reasoning ≈ prompt × 1.5 + 正文余量），无逐角色对照
+    assert L.MAX_TOKENS["clarifier"] >= 3000  # 实测 reasoning=1500 恰好吃满旧值
+    assert L.MAX_TOKENS["comparator"] >= 2500  # 旧值 600 连一次推理都不够
+    assert L.MAX_TOKENS["mockgen"] >= 4000
+    assert L.MAX_TOKENS["optimizer"] >= 6000
+    assert L.MAX_TOKENS["reviser"] >= 6000
+
+
+def test_length_finish_error_is_detected_and_usage_parsed():
+    """额度耗尽要被识别，且能解出 usage —— 否则告警给不出建议值。"""
+    msg = (
+        "LengthFinishReasonError: Could not parse response content as the length limit "
+        "was reached - CompletionUsage(completion_tokens=6000, prompt_tokens=3551, "
+        "total_tokens=9551, completion_tokens_details=CompletionTokensDetails("
+        "accepted_prediction_tokens=None, audio_tokens=None, reasoning_tokens=6000))"
+    )
+    exc = RuntimeError(msg)
+    assert L._is_length_finish_error(exc)
+    assert L._usage_int(exc, "completion_tokens") == 6000
+    assert L._usage_int(exc, "reasoning_tokens") == 6000
+    assert L._usage_int(exc, "prompt_tokens") == 3551
+    # 连接类错误不能被误判（否则会给出错误的调参建议）
+    assert not L._is_length_finish_error(RuntimeError("OpenAIConnectionError: Connection error."))
+
+
+def test_token_exhaustion_warning_mentions_reasoning_and_setting(caplog):
+    """额度耗尽时告警必须点名「推理」并给出该改哪个环境变量。
+
+    这类失败此前伪装成普通的"结构化输出不可用"，在日志里瞒了 9 轮 ——
+    所以告警的**可操作性**本身就是要被测的行为。
+    """
+    cfg = _Cfg(max_tokens=6000)
+    exc = RuntimeError(
+        "LengthFinishReasonError: Could not parse response content as the "
+        "length limit was reached - CompletionUsage(completion_tokens=6000, "
+        "prompt_tokens=3551, total_tokens=9551, reasoning_tokens=6000)"
+    )
+    with caplog.at_level("WARNING", logger="pm.llm"):
+        L._warn_if_token_budget_exhausted("evaluator", exc, cfg)
+    assert "推理" in caplog.text
+    assert "reasoning_tokens=6000" in caplog.text
+    assert "PM_EVALUATOR_MAX_TOKENS" in caplog.text
+
+
+def test_token_exhaustion_without_reasoning_says_output_is_long(caplog):
+    """几乎无 reasoning 的耗尽 → 诊断成"输出本身太长"，别误导用户去调预算。"""
+    cfg = _Cfg(max_tokens=6000)
+    exc = RuntimeError(
+        "LengthFinishReasonError: Could not parse response content as the "
+        "length limit was reached - CompletionUsage(completion_tokens=6000, "
+        "prompt_tokens=3551, total_tokens=9551, reasoning_tokens=300)"
+    )
+    with caplog.at_level("WARNING", logger="pm.llm"):
+        L._warn_if_token_budget_exhausted("evaluator", exc, cfg)
+    assert "输出" in caplog.text and "长" in caplog.text
+    assert "推理" not in caplog.text
+
+
+def test_non_length_error_produces_no_budget_warning(caplog):
+    """非额度类异常不应触发预算告警（避免把连接抖动误报成配置问题）。"""
+    cfg = _Cfg(max_tokens=6000)
+    with caplog.at_level("WARNING", logger="pm.llm"):
+        L._warn_if_token_budget_exhausted("evaluator", RuntimeError("boom"), cfg)
+    assert "MAX_TOKENS" not in caplog.text

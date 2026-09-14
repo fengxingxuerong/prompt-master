@@ -545,6 +545,73 @@ python examples/e2e_round_report.py logs/run_<id>.json
 未取得 3500 vs 8000 的对照数据）。依据链是：空返回实证 + 预算不对称（3500 vs 8000）
 + 同源 ADR 案例。**将来额度恢复后应补做对照**，据此决定 6000 是否足够或该对齐 8000。
 
+### 发现 4：预算不足是**系统性**的，不止评委（第 11 轮运行中的实锤）
+
+第 11 轮开局第一条日志就给出了比第 10 轮更硬的证据 ——
+`clarifier` 的原生结构化输出直接因长度上限失败：
+
+```
+[clarifier] 原生结构化输出不可用，降级为 JSON 文本解析：
+LengthFinishReasonError: ... CompletionUsage(
+    completion_tokens=1500, reasoning_tokens=1500, prompt_tokens=1298)
+```
+
+**`completion_tokens=1500` 全部是 `reasoning_tokens=1500`，正文 0 token** ——
+推理一次就把 1500 的额度吃干净，正文一个字都没写。
+`clarifier` 的 `MAX_TOKENS` 恰好就是 **1500** → **用 `deepseek-v4-pro` 时必然失败**。
+
+按同一逻辑排查全部角色的预算（推理型模型下）：
+
+| 角色 | 预算 | 风险 |
+|---|---|---|
+| `comparator` | **600** | ❌ **几乎必然失败**（600 连一次推理都不够） |
+| `clarifier` | **1500** | ❌ **必然失败**（第 11 轮已实证） |
+| `mockgen` | 2000 | ⚠️ 偏小 |
+| `optimizer` / `target` | 4000 | ⚠️ 偏小 |
+| `evaluator` / `evaluator_b` / `arbiter` / `reviser` | 6000 | 第 10 轮已调 |
+
+**结论**：预算配置是**按"非推理模型"标定的**（旧端点 `DeepSeek-V4-Flash` 不产生
+reasoning token，所以历史上从未暴露）。换成推理型模型（`deepseek-v4-pro`）后，
+`comparator(600)` / `clarifier(1500)` 直接落在"不可能成功"区间 ——
+这不是"偶发失败"，而是**确定性的配置缺陷**，且它伪装成"解析失败"/"连接失败"，
+极难从文件名和错误签名上看出来。
+
+> 这条同时修正了第 10 轮的判断：发现 2 当时写成"evaluator 的预算偏小"，
+> 实际范围更大 —— **凡是会产生 reasoning token 的角色都受影响**，
+> 且越小的预算越致命（comparator 600 最严重）。
+
+#### 补充：第 9 轮日志里其实一直有对照，只是被误读了
+
+回查第 9 轮 `logs/iter9_stdout.log`，`LengthFinishReasonError` 共 **19 次**，
+分布如下（这正是"直接对照"）：
+
+| 角色 | 事件数 | 预算 | 实测 reasoning_tokens |
+|---|---|---|---|
+| `evaluator` | **13** | 3500 | **3500（满额耗尽）** |
+| `comparator` | 4 | 600 | 满额（推定） |
+| `evaluator_b` | 2 | 3500 | 满额（推定） |
+
+样本（`evaluator`）：
+```
+completion_tokens=3500, prompt_tokens=3953, ...
+  reasoning_tokens=3500
+completion_tokens=3500, prompt_tokens=3478, ...
+  reasoning_tokens=3257
+```
+
+`completion_tokens` 与 `reasoning_tokens` **几乎相等** —— 额度 100% 花在推理上，正文为空。
+
+**这修正了第 9 轮和第 10 轮的归因**：
+- 第 9 轮把 25% 归因于"schema 遵循度"，实际主因是**预算耗尽**（19 次 length 失败）；
+- 第 10 轮虽已把"空返回"列为首要失败模式、并调了 evaluator 预算到 6000，
+  但仍写成"缺直接对照" —— **第 9 轮日志本身就是对照，就在眼前，只是当时被
+  "25% 是 schema 问题"这个先入判断挡住了**。
+
+**教训（新增）**：日志里的**用量字段**（`completion_tokens` / `reasoning_tokens` /
+`finish_reason`）是高价值证据，但极易被忽略 —— 报错行前面的 `LengthFinishReasonError`
+看起来像噪声，实际它精确指出了"额度耗尽"。诊断时**应当专门 grep 用量/结束原因**，
+而不只看异常类型。
+
 ### 发现 3：端点限流放大了前两者
 
 `sensenova` 端点有明确的 **429 tpm/rpm 限流**。A 组日志：`疑似限流` 4 次退避 + 1 次打满：
