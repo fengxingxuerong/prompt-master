@@ -9,6 +9,11 @@
 #   PM_BASE_URL=https://token.sensenova.cn/v1 PM_MODEL=deepseek-v4-pro PM_API_KEY=sk-xxx \
 #     bash scripts/run_round.sh 9
 #
+# ⚠️ 换端点时**不要**叠加 PM_FORCE_JSON_CHANNEL=1（第 9 轮踩坑）：
+#   强制文本 JSON 通道是给"不支持原生结构化输出"的端点用的降级路径；
+#   对支持原生 structured output 的端点（如 sensenova）反而更差 ——
+#   第 9 轮首次尝试就这么崩的（clarify 3 次解析全败），见 logs/iter9_attempt1_stdout.log。
+#
 # ⚠️ 长跑进程存活（第 6/7/8 轮各踩一次）：
 #   Agent 会话结束时，该轮启动的后台进程会被宿主回收。可行方式只有两种：
 #     ① 用户自己在终端里跑本脚本（最稳）；
