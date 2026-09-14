@@ -55,9 +55,16 @@ MAX_TOKENS: dict[str, int] = {
     "clarifier": 1500,
     "optimizer": 4000,
     "mockgen": 2000,
-    "evaluator": 3500,
-    "evaluator_b": 3500,
-    "arbiter": 3500,
+    # 2026-09-14：3500 → 6000。第 9 轮实测 evaluator 的主要失败模式是
+    # **空返回（len=0）**（scripts/nojson_probe.py：3/6），不是散文/围栏/截断。
+    # 根因同源：思考型模型（这里 deepseek-v4-pro）的 reasoning 计入 max_tokens，
+    # 3500 被推理吃掉大半 → 正文为空。与 ADR 里 glm-5.2 reviser 4000→6000 是同一类问题。
+    # 注：本项**缺直接 A/B 对照**（验证时 key 限流耗尽），依据是空返回 + 预算不对称
+    # （.env 已给 evaluator_b/arbiter 配 8000，main 评委却停在 3500）+ 同源案例。
+    # 若将来能跑对照，应复核 6000 是否足够（必要时对齐 .env 的 8000）。
+    "evaluator": 6000,
+    "evaluator_b": 6000,
+    "arbiter": 6000,
     "reviser": 6000,  # 2026-09-12：4000 → 6000。思考型模型的 reasoning 计入 max_tokens，
     # glm-5.2 两次真实运行都在修订环节把预算耗光、返回空内容 → early_stopped；
     # DeepSeek-V4-Flash 实测正常。修订输出 = 整份提示词，是所有角色里最长的，预算必须最宽。
@@ -72,6 +79,8 @@ MAX_TOKENS: dict[str, int] = {
 # - evaluator/evaluator_b/arbiter 2500 → 3500：issues/suggestions 是列表字段，
 #   面对长输出 + 多问题时 2500 会截断，后果是评估器悄悄少报问题（评估失真）；
 # - mockgen 1600 → 2000：n_test_cases 上限 8 时用例 + rationale 的 JSON 余量。
+# - evaluator/evaluator_b/arbiter 3500 → 6000（2026-09-14）：实测空返回是首要失败模式，
+#   见上方 evaluator 条目注释。
 
 # 每次重试降温幅度
 TEMPERATURE_DECAY = 0.15
@@ -569,6 +578,126 @@ def _schema_hint(model: type[BaseModel]) -> str:
     return json.dumps(schema, ensure_ascii=False, indent=2)
 
 
+def _model_required_fields(model: type[BaseModel]) -> list[str]:
+    """模型必须自己输出的顶层键（排除代码侧派生字段）。
+
+    为什么要区分：`EvaluationResult` 里混着两类字段 ——
+      ① 模型必须填的（`dimension_scores` / `model_reported_score` / `should_revise` …），
+      ② 代码侧派生或采样式元信息（`weighted_score` / `judge` / `sample_*` / `cache_hit` …），
+         它们有 `default`，**本就不该出现在提示里**。
+    第 9 轮实测：旧的 `need` 把 12 个键全列（含 5~6 个派生字段），既噪声大又误导模型。
+    """
+    required: list[str] = []
+    for name, fld in (getattr(model, "model_fields", None) or {}).items():
+        if fld.is_required():
+            required.append(name)
+    return sorted(required)
+
+
+def _repair_shape(model: type[BaseModel], data: dict[str, Any]) -> dict[str, Any]:
+    """修"形状误解"类 schema 失败（不修内容错误）。
+
+    已知真实形态（第 9 轮 3 次实测）：
+        {"task_completion": 5, "format_adherence": 6, ..., "quality": 9}
+    模型把嵌套字段 `dimension_scores` 的**子键平铺到了顶层**，于是
+    `dimension_scores` / `model_reported_score` / `should_revise` 全部 missing。
+
+    只做**有唯一确定答案**的修复：若某个嵌套模型的全部必填子键都平铺在顶层，
+    就收拢成嵌套对象。歧义情况（部分子键、顶层已有同名字段）一律不动 ——
+    这类"半形状"应该让模型重写，靠代码猜只会把错误埋得更深。
+    """
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    for name, fld in (getattr(model, "model_fields", None) or {}).items():
+        anno = fld.annotation
+        if not (isinstance(anno, type) and issubclass(anno, BaseModel)):
+            continue
+        if name in out:
+            continue
+        inner_required = _model_required_fields(anno)
+        if not inner_required:
+            continue
+        # 全部必填子键都在顶层平铺着 → 唯一确定的收拢
+        if all(k in out for k in inner_required):
+            nested: dict[str, Any] = {}
+            for k in inner_required:
+                nested[k] = out.pop(k)
+            out[name] = nested
+            logger.info("[schema] 形状修复：把平铺的子键收拢进嵌套字段 %s", name)
+    return out
+
+
+def _nested_field_names(model: type[BaseModel]) -> str:
+    """列出模型里**必填的嵌套对象字段**（用于重试提示点名"别平铺"）。
+
+    返回形如 "dimension_scores 的 task_completion/format_adherence/…"，
+    没有嵌套必填字段时返回空串（此时不往提示里加噪声）。
+    """
+    parts: list[str] = []
+    for name, fld in (getattr(model, "model_fields", None) or {}).items():
+        if not fld.is_required():
+            continue
+        anno = fld.annotation
+        if isinstance(anno, type) and issubclass(anno, BaseModel):
+            kids = "/".join(_model_required_fields(anno))
+            if kids:
+                parts.append(f"{name} 的 {kids}")
+    return "、".join(parts)
+
+
+def _schema_skeleton(model: type[BaseModel], indent: int = 0) -> str:
+    """生成**可照抄的 JSON 骨架**（只含必填键，给出占位值）。
+
+    第 9 轮根因：模型把 `dimension_scores` 的 5 个维度**直接平铺到顶层**
+    （顶层出现 task_completion/quality… 而 dimension_scores 缺失）→ 3 个字段 missing。
+    这类"扁平 vs 嵌套"的形状误解，靠机器生成的 JSON Schema（$defs / $ref）表达不直观；
+    给一个照抄实例是最直接的解药。故意不做通用递归渲染 —— 只展开一层嵌套对象，
+    足够覆盖本项目的 schema，且不会引入难以维护的泛型逻辑。
+    """
+    pad = " " * indent
+    child_pad = " " * (indent + 2)
+    lines: list[str] = []
+    for name in _model_required_fields(model):
+        fld = model.model_fields[name]
+        anno = fld.annotation
+        origin = getattr(anno, "__origin__", None)
+        if origin in (list, tuple):
+            lines.append(f'{child_pad}"{name}": []')
+        elif isinstance(anno, type) and issubclass(anno, BaseModel):
+            inner = _schema_skeleton(anno, indent + 2)
+            lines.append(f'{child_pad}"{name}": {inner}')
+        elif anno is bool:
+            lines.append(f'{child_pad}"{name}": false')
+        elif anno is int:
+            lines.append(f'{child_pad}"{name}": 0')
+        elif anno is float:
+            lines.append(f'{child_pad}"{name}": 0')
+        else:
+            lines.append(f'{child_pad}"{name}": ""')
+    body = ",\n".join(lines)
+    return "{\n" + body + "\n" + pad + "}"
+
+
+def _schema_hint_block(model: type[BaseModel]) -> str:
+    """注入给模型的 schema 说明：**可照抄骨架**在前，完整 JSON Schema 在后。
+
+    顺序有意为之：模型对"照抄示例"的遵循度显著高于对"读 $defs/$ref"的遵循度，
+    完整 schema 留给它查细节（约束范围如 1~10）。
+    """
+    skeleton = _schema_skeleton(model)
+    return (
+        "\n\n<json_schema>\n"
+        "你必须严格输出一个符合以下 JSON Schema 的 JSON 对象，且只输出该 JSON 对象，"
+        "不要任何解释、不要 Markdown 围栏：\n"
+        "先按下面的骨架把字段填满（键名必须完全一致，尤其注意嵌套对象**不要平铺到顶层**）：\n"
+        f"{skeleton}\n\n"
+        "完整 JSON Schema（用于查约束范围）：\n"
+        f"{_schema_hint(model)}\n"
+        "</json_schema>"
+    )
+
+
 class _ChannelASkipped(RuntimeError):
     """主动跳过原生结构化输出通道（不是故障，不走告警日志）。"""
 
@@ -711,13 +840,7 @@ def structured_call(
         _remember_channel_a_unsupported(cfg, last_err)
 
     # ---- 通道 B：注入 Schema + 解析重试 ----
-    schema_block = (
-        "\n\n<json_schema>\n"
-        "你必须严格输出一个符合以下 JSON Schema 的 JSON 对象，且只输出该 JSON 对象，"
-        "不要任何解释、不要 Markdown 围栏：\n"
-        f"{_schema_hint(model_cls)}\n"
-        "</json_schema>"
-    )
+    schema_block = _schema_hint_block(model_cls)
     temp = cfg.temperature
 
     for attempt in range(1, max_retries + 1):
@@ -744,18 +867,30 @@ def structured_call(
             data = extract_json_object(raw)
             if data is None:
                 raise ValueError("未在输出中找到合法 JSON 对象")
+            # 先修"形状误解"（平铺 → 嵌套），再校验；修不了就照旧抛 ValidationError
+            data = _repair_shape(model_cls, data)
             validated = model_cls.model_validate(data)
             meta.update(
                 channel="json_fallback", attempts=attempt, latency_ms=int((time.time() - t0) * 1000)
             )
             return validated, meta
         except (ValidationError, ValueError, json.JSONDecodeError) as e:
-            # ①把缺哪些顶层键写进下一次提示（模型常是漏字段，不是乱写）——与温度无关，保留。
+            # ①把缺哪些**必填**顶层键写进下一次提示 —— 与温度无关，保留。
+            #   只列必填键：把 judge/sample_*/cache_hit 这类代码侧派生字段列进去
+            #   既噪声大，还会诱导模型去编造它们（第 9 轮实测的 12 键提示）。
+            # ①b 若上次是"平铺子键"形状误解，额外点明嵌套要求（比泛泛列键有效得多）。
             # ②温度：默认沿用降温。升温已被对照实验证伪（见 TEMPERATURE_BOOST_ON_PARSE 注释）。
-            need = ", ".join(sorted((getattr(model_cls, "model_fields", None) or {}).keys())[:12])
+            need = ", ".join(_model_required_fields(model_cls))
             last_err = f"{type(e).__name__}: {e}"
             if need:
-                last_err += f"。输出必须包含这些顶层键：{need}"
+                last_err += f"。输出必须包含这些顶层键（缺一不可）：{need}"
+            nested_hint = _nested_field_names(model_cls)
+            if nested_hint:
+                last_err += (
+                    f"。注意 {nested_hint} 是**嵌套对象**，"
+                    '必须写成 {"' + nested_hint.split(" 的 ")[0] + '": {...}} 的形式，'
+                    "不要把它的子键平铺到顶层"
+                )
             logger.warning("[%s] 第 %d/%d 次解析失败：%s", role, attempt, max_retries, last_err)
             temp = max(0.0, min(1.0, temp - TEMPERATURE_DECAY + TEMPERATURE_BOOST_ON_PARSE))
         except Exception as e:  # noqa: BLE001 - LLM 端点行为不可预期，任何异常都重试降温

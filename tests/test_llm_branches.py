@@ -391,6 +391,31 @@ def test_extract_json_object_variants():
     assert L.extract_json_object('{"s": "}{ \\" }"}') == {"s": '}{ " }'}
     # 第一个候选非法时继续往后找
     assert L.extract_json_object('{bad} then {"ok": 1}') == {"ok": 1}
+    # 空/纯空白内容必须判为"无 JSON"——这是第 9 轮的首要失败模式（len=0），
+    # 必须触发重试，绝不能静默通过
+    assert L.extract_json_object("   \n\t  ") is None
+
+
+def test_empty_response_triggers_retry_not_silent_pass(monkeypatch):
+    """空返回（len=0）是思考型模型把 token 预算耗在 reasoning 上的典型症状。
+
+    第 9 轮实测 3/6 空返回是评委的首要失败模式（scripts/nojson_probe.py）。
+    这里锁住行为：空返回 → 走重试，且重试时温度按默认降温。
+    """
+    cls = _model_cls()
+    temps: list[float] = []
+
+    class _T(_FakeLLM):
+        def with_config(self, **kw: Any) -> _T:
+            temps.append(kw.get("temperature"))
+            return self
+
+    fake = _T([RuntimeError("native down"), _Resp(""), _Resp('{"value": 8}')])
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
+    assert out.value == 8
+    assert meta["attempts"] == 2  # 空返回被当作失败重试，而非直接通过
+    assert len(temps) >= 2 and temps[1] <= temps[0]
 
 
 def test_plain_call_returns_text_and_meta(monkeypatch):
@@ -558,3 +583,129 @@ def test_endpoint_exception_still_decays_temperature(monkeypatch):
     out, _meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
     assert out.value == 7
     assert len(temps) >= 2 and temps[1] <= temps[0]
+
+
+# --------------------------------------------------------------------------
+# 12. schema 形状误解的修复（第 9 轮：evaluate 过 schema 仅 25%，根因是"平铺 vs 嵌套"）
+#     实测形态：模型把嵌套字段的子键直接平铺到顶层，导致 dimension_scores 等 missing。
+# --------------------------------------------------------------------------
+def _eval_cls() -> type[Any]:
+    """真实的 EvaluationResult（本项目里嵌套最深的 schema，正是出事的那一个）。"""
+    from pm.schemas import EvaluationResult
+
+    return EvaluationResult
+
+
+def test_schema_skeleton_lists_only_required_keys_and_is_valid_json():
+    """骨架必须只含**必填**键（不含 judge/sample_*/weighted_score 等派生字段），且是合法 JSON。
+
+    第 9 轮的旧提示把 12 个顶层键全列（含 5~6 个派生字段）→ 噪声大且诱导编造。
+    """
+    import json
+
+    cls = _eval_cls()
+    skeleton = L._schema_skeleton(cls)
+    parsed = json.loads(skeleton)
+    assert set(parsed) == set(L._model_required_fields(cls))
+    assert parsed["dimension_scores"] == dict.fromkeys(
+        L._model_required_fields(cls.model_fields["dimension_scores"].annotation), 0
+    )
+    # 派生字段一个都不该出现
+    for derived in ("weighted_score", "judge", "passed", "sample_scores", "cache_hit"):
+        assert derived not in skeleton
+    # 嵌套必须保持嵌套（这正是模型最容易搞错的地方）
+    assert isinstance(parsed["dimension_scores"], dict)
+
+
+def test_model_required_fields_excludes_derived():
+    """必填字段判定：只认 is_required()，派生字段（有 default）必须被排除。"""
+    cls = _eval_cls()
+    required = L._model_required_fields(cls)
+    assert "dimension_scores" in required
+    assert "model_reported_score" in required
+    assert "should_revise" in required
+    for derived in ("issues", "suggestions", "judge", "weighted_score", "n_samples"):
+        assert derived not in required
+
+
+def test_repair_shape_collapses_flat_subkeys_into_nested():
+    """核心修复：全子键平铺到顶层时，唯一确定地收拢成嵌套对象。"""
+    cls = _eval_cls()
+    flat = {
+        "task_completion": 5,
+        "format_adherence": 6,
+        "constraint_compliance": 5,
+        "robustness": 6,
+        "quality": 9,
+        "model_reported_score": 6,
+        "should_revise": True,
+    }
+    fixed = L._repair_shape(cls, flat)
+    assert fixed["dimension_scores"] == {
+        "task_completion": 5,
+        "format_adherence": 6,
+        "constraint_compliance": 5,
+        "robustness": 6,
+        "quality": 9,
+    }
+    # 已收拢的子键不该在顶层残留
+    assert "task_completion" not in fixed
+    # 收拢后的数据必须真能过 schema
+    assert cls.model_validate(fixed).dimension_scores.quality == 9
+
+
+def test_repair_shape_leaves_ambiguous_input_alone():
+    """部分子键 / 顶层已有同名字段 → 不动（歧义交给模型重写，不靠代码猜）。"""
+    cls = _eval_cls()
+    partial = {"task_completion": 5, "quality": 9}
+    assert L._repair_shape(cls, partial) == partial
+    both = {"dimension_scores": {"task_completion": 1}, "task_completion": 5}
+    assert L._repair_shape(cls, both) == both
+    # 非 dict 原样返回（防御性）
+    assert L._repair_shape(cls, [1, 2]) == [1, 2]  # type: ignore[arg-type]
+
+
+def test_repair_shape_enables_one_shot_recovery_in_structured_call(monkeypatch):
+    """端到端含义：模型给出"平铺"的坏 JSON 时，**第一次就能修好**，无需再重试。
+
+    这是第 9 轮 25% 成功率的主要成因（3 个字段 missing 全因平铺）——
+    修好后该形态不再消耗重试次数。
+    """
+    cls = _eval_cls()
+    flat = json.dumps(
+        {
+            "task_completion": 5,
+            "format_adherence": 6,
+            "constraint_compliance": 5,
+            "robustness": 6,
+            "quality": 9,
+            "model_reported_score": 6,
+            "should_revise": True,
+        }
+    )
+    fake = _FakeLLM([RuntimeError("native down"), _Resp(flat)])
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("evaluator", cls, "sys", "user", max_retries=3)
+    assert meta["attempts"] == 1  # 一次命中，没有浪费重试
+    assert out.dimension_scores.quality == 9
+    assert out.model_reported_score == 6
+
+
+def test_nested_field_names_lists_nested_required_fields():
+    """重试提示要能点名嵌套字段（"别平铺"比泛泛列键有效）。"""
+    cls = _eval_cls()
+    hint = L._nested_field_names(cls)
+    assert "dimension_scores" in hint
+    assert "task_completion" in hint
+
+
+def test_retry_hint_mentions_nested_requirement(monkeypatch, caplog):
+    """重试提示里必须出现"嵌套/别平铺"的明确要求，而不只是列键名。"""
+    cls = _eval_cls()
+    fake = _FakeLLM([RuntimeError("native down"), _Resp("not json"), _Resp("still bad")])
+    _patch_llm(monkeypatch, fake)
+    with caplog.at_level("WARNING", logger="pm.llm"):
+        with pytest.raises(RuntimeError):
+            L.structured_call("evaluator", cls, "sys", "user", max_retries=2)
+    assert "嵌套对象" in caplog.text
+    assert "不要" in caplog.text and "平铺" in caplog.text
