@@ -75,9 +75,8 @@ MAX_TOKENS: dict[str, int] = {
 
 # 每次重试降温幅度
 TEMPERATURE_DECAY = 0.15
-# 解析/校验失败时**升温**而不是降温（2026-09-13 第 7 轮实测：降温会让模型更确定，
-# 于是把同一份坏 JSON 原样复现，3 次重试全败）。结构性问题要靠多样性突破，不是靠保守。
-TEMPERATURE_BOOST_ON_PARSE = 0.1
+# 注：解析失败时的温度附加调整量 TEMPERATURE_BOOST_ON_PARSE 定义在文件后段
+# （它依赖 _float_env()，模块级赋值必须晚于该函数定义）。
 
 
 # --------------------------------------------------------------------------
@@ -304,6 +303,19 @@ _TRANSIENT_CONN_HINTS = (
 )
 TRANSIENT_CONN_RETRIES = _int_env("PM_CONN_RETRIES", 2)
 TRANSIENT_CONN_BASE_SLEEP = _float_env("PM_CONN_BASE_SLEEP", 1.5)
+
+# 解析/校验失败时的温度**附加调整量**（默认 0 = 沿用降温 TEMPERATURE_DECAY）。
+#
+# 2026-09-13 曾据此改为升温（+0.1），理由是"降温会让模型更确定地复现同一份坏 JSON"。
+# 2026-09-14 用对照实验证伪了这个推断（scripts/temp_policy_probe.py：同输入、同提示词、
+# case#3 × 4 次 × 温度 0.0/0.1/0.2/0.3）：
+#     temp 0.0 / 0.1 / 0.2 → 过 schema 均 1/4
+#     temp 0.3             → 0/4
+#   → 升温无收益、且有恶化迹象；而 temp=0.0 时基础成功率也只有 25%，
+#     说明**瓶颈在 schema/提示词本身，不在温度**（第 7 轮"3 次全败"在 25% 基础率下
+#     只是 ~42% 概率的常见事件，并非降温所致）。
+#   故默认回到降温；确需升温时显式设 PM_TEMP_BOOST_ON_PARSE>0。
+TEMPERATURE_BOOST_ON_PARSE = _float_env("PM_TEMP_BOOST_ON_PARSE", 0.0)
 
 
 def _is_transient_conn_error(e: Exception) -> bool:
@@ -738,14 +750,14 @@ def structured_call(
             )
             return validated, meta
         except (ValidationError, ValueError, json.JSONDecodeError) as e:
-            # 解析失败要两条一起改：①把缺哪些顶层键写进下一次提示（模型常是漏字段，不是乱写）
-            # ②升温而不是降温 —— 降温会让模型更确定地复现同一份坏 JSON
+            # ①把缺哪些顶层键写进下一次提示（模型常是漏字段，不是乱写）——与温度无关，保留。
+            # ②温度：默认沿用降温。升温已被对照实验证伪（见 TEMPERATURE_BOOST_ON_PARSE 注释）。
             need = ", ".join(sorted((getattr(model_cls, "model_fields", None) or {}).keys())[:12])
             last_err = f"{type(e).__name__}: {e}"
             if need:
                 last_err += f"。输出必须包含这些顶层键：{need}"
             logger.warning("[%s] 第 %d/%d 次解析失败：%s", role, attempt, max_retries, last_err)
-            temp = min(1.0, temp + TEMPERATURE_BOOST_ON_PARSE)
+            temp = max(0.0, min(1.0, temp - TEMPERATURE_DECAY + TEMPERATURE_BOOST_ON_PARSE))
         except Exception as e:  # noqa: BLE001 - LLM 端点行为不可预期，任何异常都重试降温
             last_err = f"{type(e).__name__}: {e}"
             logger.warning("[%s] 第 %d/%d 次调用异常：%s", role, attempt, max_retries, last_err)

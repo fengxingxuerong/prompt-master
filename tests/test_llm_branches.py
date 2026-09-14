@@ -328,7 +328,13 @@ def test_channel_a_exception_falls_back_to_text(monkeypatch):
     assert meta["channel"] == "json_fallback"
 
 
-def test_parse_failure_boosts_temperature_and_retries(monkeypatch):
+def test_parse_failure_retries_with_decay_by_default(monkeypatch):
+    """解析失败默认沿用**降温**。
+
+    2026-09-14 对照实验（scripts/temp_policy_probe.py）证明升温无收益：
+    温度 0.0/0.1/0.2 过 schema 均 1/4，0.3 为 0/4；且 temp=0.0 基础成功率仅 25%
+    → 瓶颈在 schema/提示词本身，不在温度。故默认不升温（PM_TEMP_BOOST_ON_PARSE=0）。
+    """
     cls = _model_cls()
     temps: list[float] = []
 
@@ -342,7 +348,26 @@ def test_parse_failure_boosts_temperature_and_retries(monkeypatch):
     out, meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
     assert out.value == 4
     assert meta["attempts"] == 2
-    # 每次解析失败升温重试（降温会复现同一份坏 JSON，第 7 轮实测）
+    # 默认降温（不是升温）
+    assert len(temps) >= 2 and temps[1] <= temps[0]
+
+
+def test_parse_failure_boost_is_opt_in(monkeypatch):
+    """PM_TEMP_BOOST_ON_PARSE>0 时才升温（保留开关，便于将来用更大样本复核）。"""
+    cls = _model_cls()
+    temps: list[float] = []
+    monkeypatch.setattr(L, "TEMPERATURE_BOOST_ON_PARSE", 0.2)
+
+    class _T(_FakeLLM):
+        def with_config(self, **kw: Any) -> _T:
+            temps.append(kw.get("temperature"))
+            return self
+
+    fake = _T([RuntimeError("native down"), _Resp("not json"), _Resp('{"value": 5}')])
+    _patch_llm(monkeypatch, fake)
+    out, _meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
+    assert out.value == 5
+    # 0.2(boost) - 0.15(decay) = 净 +0.05 → 略升
     assert len(temps) >= 2 and temps[1] > temps[0]
 
 
