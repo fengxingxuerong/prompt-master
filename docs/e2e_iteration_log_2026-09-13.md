@@ -267,7 +267,9 @@ python examples/e2e_round_report.py logs/run_<id>.json
      可考虑把限流退避预算与"解析失败重试"解耦，或对评委调用降并发。
    - 附带修掉根因识别缺口：`LengthFinishReasonError` 此前伪装成普通降级、
      在日志里瞒了 9 轮 → 新增 `_warn_if_token_budget_exhausted` 主动告警并给出建议值。
-   *下一步：任一轮跑完请复核 ② 的推算值是否够（看有无新的预算告警）；评估 ③。*
+   *状态（2026-09-15 更新）：② 已闭环 —— 8000 有对照；
+   clarifier/comparator/mockgen 的推算值已用 `multi_role_budget_probe` 复核通过（3/3 零告警），
+   不再需要"待复核"标注。仅剩 ③ 限流为环境侧待决策。*
 3. **基线波动**：九轮基线分 7.46–8.75（第 9 轮 8.75），Δ 有 ±0.5 量级抖动，单轮 Δ 不足以支撑"变好了"。
 4. **注入存活样本仍少**：仅第 5 轮覆盖到（1 条注入用例，0 劫持）。
 5. **仍未覆盖**：多 worker 并发的真实长跑、以及 `--samples 2` 下的早停平台期规则
@@ -657,6 +659,18 @@ completion_tokens=6000, prompt_tokens=3556, reasoning_tokens=5477
 
 → 全部角色按「reasoning ≈ prompt × 1.5 + 正文余量」统一上调；除 evaluator 类有对照外，
 其余标注为**推算值**，待后续轮次日志复核。
+
+**推算值复核结果（2026-09-15，`scripts/multi_role_budget_probe.py`，每角色 × 3 次）**：
+
+| 角色 | 预算 | 成功 | 原生通道 `structured_output` |
+|---|---|---|---|
+| `clarifier` | 3000 | 3/3 | **3/3** |
+| `mockgen` | 4000 | 3/3 | 2/3（1 次降级到文本通道，但一次即成功 → 端点瞬时行为，非额度问题） |
+| `comparator` | 2500 | 3/3 | **3/3** |
+
+**零额度耗尽、零预算告警**。对照修复前：`clarifier` 1500 时 `reasoning=1500` 恰好吃满；
+`comparator` 600 从未走通原生通道 —— 均已解决。**推算值判定为够用，不再调整。**
+（`optimizer` 未单独复核：它与 `reviser` 同为 6000，而 reviser 在 6000 下历史运行正常。）
 
 #### 真正的缺口是告警：这类失败瞒了 9 轮
 
