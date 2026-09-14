@@ -5,6 +5,9 @@
     # 1) 无 API Key 也能跑：验证图拓扑与控制流（不验证效果）
     python run.py --selftest
 
+    # 1b) 无 Key 走假后端跑完整流程（演示模式，与 server 的 PM_FAKE_BACKEND 一致）
+    PM_FAKE_BACKEND=progress python run.py --task "让 AI 分析销售数据"
+
     # 2) 真实运行
     export PM_API_KEY=sk-xxx
     python run.py --task "让 AI 分析销售数据" --target-model "deepseek-v3"
@@ -19,12 +22,14 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -143,7 +148,23 @@ def run_pipeline(args, init: dict) -> dict:
         "recursion_limit": recursion_budget(args.max_iter),
     }
 
-    with usage_scope() as ledger:
+    # 演示模式（与 server/scheduler 同一机制）：PM_FAKE_BACKEND 有效时，
+    # 把假后端限定在本次运行的作用域内（ContextVar，不改动任何模块属性，C4）。
+    # CLI 之前不支持该变量——无 Key 演示只能走 server；对齐后 CLI 也能跑。
+    scenario = os.getenv("PM_FAKE_BACKEND", "").strip()
+    hook_cm: Any = contextlib.nullcontext()
+    if scenario:
+        from pm import testing
+
+        if scenario in testing.SCENARIOS:
+            hook_cm = testing.scope(scenario)
+        else:
+            print(
+                f"⚠️ PM_FAKE_BACKEND={scenario!r} 不是可用场景"
+                f"（{'|'.join(testing.SCENARIOS)}），本次按真实后端执行"
+            )
+
+    with hook_cm, usage_scope() as ledger:
         app.invoke(init, config)
 
         if not args.interactive:
