@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 from typing import Any
 
 from .. import llm
@@ -110,6 +111,62 @@ def _ab_flip(run_id: Any, idx: int) -> bool:
     return random.Random(f"{run_id}:{idx}").random() < 0.5
 
 
+# 保守枚举标记：出现越多，输出越接近「逐项枚举缺失/无法分析」的保守风格
+# （历史真实运行发现 comparator 偏好这类输出，与 pointwise 偏好具体产出冲突）
+_CONSERVATIVE_MARKERS = (
+    "数据缺失",
+    "未提供",
+    "无法确定",
+    "无法判断",
+    "信息不足",
+    "无法解析",
+    "不足以支持",
+)
+# 具体数值引用：带计量单位的数字（万/千/亿/百分比），是「按目标产出具体结论」的风格信号
+_DATA_POINT_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:万|千|亿|%|％)")
+
+
+def _style_stats(text: str) -> dict[str, int]:
+    """对单份输出做确定性风格统计。零 LLM、可单测。"""
+    return {
+        "chars": len(text),
+        "conservative_markers": sum(text.count(m) for m in _CONSERVATIVE_MARKERS),
+        "data_points": len(_DATA_POINT_RE.findall(text)),
+    }
+
+
+def _conflict_attribution(
+    base: dict[int, dict[str, Any]], cur: dict[int, dict[str, Any]]
+) -> dict[str, Any]:
+    """对冲突双方的代表输出做风格统计，并给出归因假设（供人工裁定参考，不自动裁定）。"""
+    b_txt = "\n".join(str(r.get("output", "")) for r in base.values())
+    c_txt = "\n".join(str(r.get("output", "")) for r in cur.values())
+    b, c = _style_stats(b_txt), _style_stats(c_txt)
+
+    if c["conservative_markers"] > b["conservative_markers"]:
+        hypothesis = (
+            "优化版比基线**更保守**（枚举缺失标记更多）——冲突可能是真实质量回退的信号，"
+            "建议优先人工核查优化版输出是否过度回避任务"
+        )
+    elif (
+        b["conservative_markers"] > c["conservative_markers"]
+        and c["data_points"] >= b["data_points"]
+    ):
+        hypothesis = (
+            "与「评委偏好保守逐项枚举」假设一致：基线更保守（枚举缺失多），"
+            "优化版更具体（数值引用多）——盲评偏好前者不代表优化版更差，"
+            "建议人工以产出价值优先裁定"
+        )
+    else:
+        hypothesis = "风格统计无法区分两侧（枚举/数值信号持平或方向不明），建议人工逐例比对盲评依据"
+
+    return {
+        "base": b,
+        "cur": c,
+        "hypothesis": hypothesis,
+    }
+
+
 def compare_node(state: State) -> dict:
     """成对盲评：把优化版与基线版的输出随机标成 A/B，让评委选边。
 
@@ -206,6 +263,11 @@ def compare_node(state: State) -> dict:
     elif not agg.get("passed") and verdict == "better":
         conflict = "pointwise 未达标，但成对盲评多数认为优化版更好 —— 可能是阈值/噪声问题而非无提升"
 
+    # 冲突自动归因（确定性统计，不经评委）：历史真实运行发现 comparator 偏好
+    # 「保守、逐项枚举缺失」的输出，而优化版按目标产出具体结论——两个信号打架时
+    # 先用风格统计验证这个假设，给人工裁定一个起点而不是一句"自己比吧"。
+    attribution = _conflict_attribution(base, cur) if conflict else None
+
     logger.info(
         "成对盲评：优化版胜 %d / 基线胜 %d / 持平 %d → %s%s",
         votes["better"],
@@ -214,17 +276,20 @@ def compare_node(state: State) -> dict:
         verdict,
         f"（冲突：{conflict}）" if conflict else "",
     )
+    pairwise: dict[str, Any] = {
+        "verdict": verdict,
+        "votes": votes,
+        "n_compared": len(details),
+        "conflict": conflict,
+        "details": details,
+    }
+    if attribution is not None:
+        pairwise["attribution"] = attribution
     return _apply(
         state,
         node,
         {
-            "pairwise": {
-                "verdict": verdict,
-                "votes": votes,
-                "n_compared": len(details),
-                "conflict": conflict,
-                "details": details,
-            },
+            "pairwise": pairwise,
             "llm_calls": state.get("llm_calls", 0) + n_calls,
             **({"errors": errors} if errors else {}),
         },

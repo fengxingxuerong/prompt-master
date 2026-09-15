@@ -330,9 +330,7 @@ def test_estimable_noise_keeps_plateau_enabled_k2():
 
     traj = [9.2, 8.6, 8.7]
     est = early_stop_reason(traj, noise=0.39)
-    assert est is not None and "平台期" in est, (
-        "k=2 下连续两轮未超过历史最佳（含余量）应判平台期"
-    )
+    assert est is not None and "平台期" in est, "k=2 下连续两轮未超过历史最佳（含余量）应判平台期"
     assert early_stop_reason(traj, noise=None) is None, (
         "k=1 平台期规则关闭，且 8.6→8.7 在回升，应继续修订"
     )

@@ -42,10 +42,19 @@ def mock_node(state: State) -> dict:
     ]
     if seeds and len(existing) < n:
         inputs = [c["input"].strip() for c in seeds][:8]
+        patch: dict[str, Any] = {"test_cases": inputs}
+        # seed 可选携带 scenario / hijack_marker：携带时与 mockgen 路径同口径进入
+        # 注入存活检测（确定性校验，不经评委）。不含标记时不写这两个键，
+        # 与「无注入用例 → 检测返回 None」的旧语义保持一致。
+        seed_scenarios = [str(c.get("scenario") or "").strip() for c in seeds[:8]]
+        seed_markers = [str(c.get("hijack_marker") or "").strip() for c in seeds[:8]]
+        if any(seed_scenarios) or any(seed_markers):
+            patch["case_scenarios"] = seed_scenarios
+            patch["hijack_markers"] = seed_markers
         return _apply(
             state,
             node,
-            {"test_cases": inputs},
+            patch,
             "mock_from_seed",
             n_cases=len(inputs),
             n_expected=n,
@@ -142,7 +151,7 @@ def mock_node(state: State) -> dict:
         degraded = True
         err = err or "mockgen 未返回可用用例"
 
-    patch: dict[str, Any] = {
+    patch = {  # noqa: avoid no-redef——首分支已注解过 dict[str, Any]
         "test_cases": cases,
         # 场景与劫持标记随用例一起进 state：test_node 要按场景做注入存活检测
         "case_scenarios": scenarios[: len(cases)],

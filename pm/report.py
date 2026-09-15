@@ -219,6 +219,21 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             "  2. 提高 `PM_SAMPLES_PER_CASE` 后重跑（单采样的噪声足以让两个信号分道扬镳）；"
         )
         lines.append("  3. 人工比对上面对盲评列出的逐例依据，再决定是否采用本版提示词。")
+        # 冲突自动归因（确定性风格统计，compare_node 计算并存入 pairwise.attribution）
+        attr = pw.get("attribution") or {}
+        if attr.get("hypothesis"):
+            b, c = attr.get("base") or {}, attr.get("cur") or {}
+            lines.append("")
+            lines.append("- 风格归因（自动统计，供裁定参考）：")
+            lines.append(
+                f"  - 保守枚举标记（数据缺失/未提供等）：基线 {b.get('conservative_markers', 0)} 处"
+                f" vs 优化版 {c.get('conservative_markers', 0)} 处"
+            )
+            lines.append(
+                f"  - 具体数值引用：基线 {b.get('data_points', 0)} 处"
+                f" vs 优化版 {c.get('data_points', 0)} 处"
+            )
+            lines.append(f"  - 归因假设：{attr['hypothesis']}")
         lines.append("")
         lines.append("> 本系统不自动裁定冲突：错误的自动裁定比「如实说不知道」更危险。")
         lines.append("")

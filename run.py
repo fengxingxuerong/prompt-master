@@ -464,15 +464,19 @@ def main() -> int:
                 # 不能默默丢掉多余用例：n_test_cases 按声明条数做完整性校验（C1），
                 # 静默截断会让本轮永远无法判达标，且原因藏在报告角落里
                 p.error(f"--cases-file 最多 8 条用例，当前 {len(raw)} 条；请筛选后再跑")
-            seed_cases.append(
-                {
-                    "input": str(item["input"]),
-                    "expected": str(item.get("expected") or ""),
-                    # 每条可自带 mode（"mode" 或 "assert_mode"），没写就用全局 --assert-mode：
-                    # 一份用例集里混着写字面片段与需求规则才是常态
-                    "mode": _resolve_case_mode(item, args.assert_mode, i, p),
-                }
-            )
+            case: dict[str, Any] = {
+                "input": str(item["input"]),
+                "expected": str(item.get("expected") or ""),
+                # 每条可自带 mode（"mode" 或 "assert_mode"），没写就用全局 --assert-mode：
+                # 一份用例集里混着写字面片段与需求规则才是常态
+                "mode": _resolve_case_mode(item, args.assert_mode, i, p),
+            }
+            # 注入存活专项（确定性校验，不经评委）的可选字段：seed 携带时透传给
+            # mock_node → case_scenarios / hijack_markers，与 mockgen 路径同口径
+            for _opt in ("scenario", "hijack_marker"):
+                if str(item.get(_opt) or "").strip():
+                    case[_opt] = str(item[_opt]).strip()
+            seed_cases.append(case)
         # 用例数以用户提供为准（断言按序号与 expected 对齐）
         args.cases = len(seed_cases)
 

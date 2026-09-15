@@ -832,9 +832,7 @@ def test_rate_limit_deadline_trims_wait(monkeypatch):
         raise RuntimeError("Error code: 429 - tpm exhausted")
 
     with pytest.raises(RuntimeError, match="429"):
-        L._invoke_with_rate_limit_retry(
-            "evaluator", always_429, deadline=time.monotonic() + 10.0
-        )
+        L._invoke_with_rate_limit_retry("evaluator", always_429, deadline=time.monotonic() + 10.0)
     # 首次退避想等 100s（单 Key 加倍 200s），剩余预算仅 ~10s → 一次都不睡
     assert sleeps == []
 

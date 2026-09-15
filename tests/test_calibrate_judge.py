@@ -39,8 +39,15 @@ def _ev_with_score(score: float) -> EvaluationResult:
 # --------------------------------------------------------------------------
 def test_load_samples_from_example():
     samples = cj.load_samples(cj.EXAMPLE_SAMPLES)
-    assert len(samples) == 3
-    assert {s["id"] for s in samples} == {"demo-good", "demo-hallucinated", "demo-vague"}
+    assert len(samples) == 6
+    assert {s["id"] for s in samples} == {
+        "demo-good",
+        "demo-hallucinated",
+        "demo-vague",
+        "anchor-fab-trend",
+        "anchor-fab-attribution",
+        "anchor-mixed",
+    }
 
 
 def test_load_samples_skips_comment_entries(tmp_path: Path):
@@ -166,17 +173,20 @@ def test_render_report_flags_small_sample():
 def test_calibrate_with_fake_judge():
     samples = cj.load_samples(cj.EXAMPLE_SAMPLES)
     calls = {"n": 0}
+    # 6 锚点的假评委分：前 3 条与示例参考分接近，后 3 条编造变体刻意给偏松分
+    fake_scores = [9.0, 6.0, 4.0, 5.5, 5.0, 6.0]
 
     def structured(role, model_cls, system, user, max_retries=3, overrides=None):
         calls["n"] += 1
-        return _ev_with_score([9.0, 6.0, 4.0][calls["n"] - 1]), {"role": role}
+        return _ev_with_score(fake_scores[calls["n"] - 1]), {"role": role}
 
     hook = backend.CallHook(structured=structured, plain=None, disable_cache=True)
     with backend.use(hook):
         analysis, errors = cj.calibrate(samples, "evaluator")
     assert not errors
-    assert analysis["n"] == 3
-    assert analysis["flags"] == ["demo-hallucinated"]
+    assert analysis["n"] == 6
+    # demo-hallucinated(3→6) 与 anchor-fab-trend(2.5→5.5) 均超 2.0 大偏差线
+    assert analysis["flags"] == ["demo-hallucinated", "anchor-fab-trend"]
     assert analysis["r"] is not None
 
 
@@ -195,7 +205,7 @@ def test_calibrate_skips_failing_samples_but_reports():
         analysis, errors = cj.calibrate(samples, "evaluator_b")
     assert len(errors) == 1
     assert "429" in errors[0][1]
-    assert analysis["n"] == 2  # 失败锚点被排除，不污染一致性指标
+    assert analysis["n"] == 5  # 失败锚点被排除，不污染一致性指标
 
 
 # --------------------------------------------------------------------------
@@ -207,4 +217,4 @@ def test_cli_write_template_and_idempotent(tmp_path: Path):
         sys.argv = ["calibrate_judge.py", "--samples", str(target), "--write-template"]
         assert cj.main() == 0
     assert target.exists()
-    assert len(cj.load_samples(target)) == 3
+    assert len(cj.load_samples(target)) == 6
