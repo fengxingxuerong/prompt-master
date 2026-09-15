@@ -72,7 +72,13 @@ MAX_TOKENS: dict[str, int] = {
     # glm-5.2 两次真实运行都在修订环节把预算耗光、返回空内容 → early_stopped；
     # DeepSeek-V4-Flash 实测正常。修订输出 = 整份提示词，是所有角色里最长的，预算必须最宽。
     "comparator": 2500,  # 原 600：连一次推理都不够（第 11 轮 comparator 从未走通原生通道）
-    "target": 4000,
+    # 2026-09-16：4000 → 8000。上一轮复核时**漏了这个角色**。
+    # 矩阵 A（客服分诊）暴露：基线 8 条里 4 条 output 为空（len=0），
+    # error=None + latency 58~71s = reasoning 吃满预算的空返回。
+    # 直接对照（scripts/target_budget_probe.py，同输入 × 3）：
+    #     4000 → 非空 **0/3**；8000 → 非空 **3/3**（930/1162/933 字符）
+    # 影响：空输出被当低分 → **基线被系统性低估**，Δ 被夸大（矩阵 A 的 +6.02 即含此偏差）。
+    "target": 8000,
 }
 # 说明：思考型模型（如 glm-5.2 / deepseek 系列 reasoning 模式）的推理 token
 # 也计入 max_tokens，实测简单请求就可能消耗 600+ 推理 token。

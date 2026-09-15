@@ -371,11 +371,7 @@ class AggregateScore(BaseModel):
                 # 模式选对了（rule），交评委判语义：通过的与未满足的措辞必须区分——
                 # 真实 e2e（triage run 32f34dc5473e）里"1 条规则全部满足"被冠以
                 # "未满足"前缀，语义自相矛盾误导读者
-                prefix = (
-                    "评委判定规则未满足"
-                    if not a.get("passed")
-                    else "规则核验通过"
-                )
+                prefix = "评委判定规则未满足" if not a.get("passed") else "规则核验通过"
                 issues.append(
                     f"[规则核验] case#{k} {prefix}："
                     f"{str(a.get('detail') or '').strip()}"

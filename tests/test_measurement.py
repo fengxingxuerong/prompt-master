@@ -12,6 +12,7 @@ from pm.nodes import (
     _collapse_samples,
     _collect_assertions,
     _feature_enabled,
+    _is_empty_output_eval,
     _model_profile,
     _samples_per_case,
 )
@@ -85,6 +86,45 @@ def test_collapse_samples_uses_median_and_spread():
     assert c0["sample_scores"] == [9.0, 5.0, 7.0]
     assert c0["passed"] is False, "中位数 7.0 < 阈值，一次走运的高分样本救不回来"
     assert out[1]["score_spread"] == 0.0, "单样本没有极差"
+
+
+def test_collapse_samples_drops_empty_output_samples():
+    """空输出（推理耗尽预算、未抛异常）是无效样本，不能拉低均值。
+
+    2026-09-16 矩阵 A（客服分诊）实测：基线 8 条里 4 条 output 为空（error=None、
+    latency 58~71s），却被当 1.0 分计入 → **基线被系统性低估、Δ 被夸大**。
+    只要该用例还有有效采样，就只聚合有效样本。
+    """
+    evals = [
+        {"test_case_index": 0, "weighted_score": 9.0, "issues": []},
+        {"test_case_index": 0, "weighted_score": 1.0, "issues": ["目标模型调用失败：empty_output"]},
+        {"test_case_index": 0, "weighted_score": 8.0, "issues": []},
+    ]
+    out = _collapse_samples(evals)
+    c0 = out[0]
+    assert c0["n_samples"] == 2, "空输出那条应被剔除"
+    assert c0["weighted_score"] == 8.5, "只取有效样本 9.0/8.0 的中位数，而不是被 1.0 拖到 8.0"
+    assert c0["sample_scores"] == [9.0, 8.0]
+
+
+def test_collapse_samples_keeps_case_when_all_samples_empty():
+    """该用例全部采样都空 → 保留（宁可报低分，也不能让用例凭空消失）。"""
+    evals = [
+        {"test_case_index": 0, "weighted_score": 1.0, "issues": ["目标模型调用失败：empty_output"]},
+        {"test_case_index": 0, "weighted_score": 1.0, "issues": ["目标模型调用失败：empty_output"]},
+    ]
+    out = _collapse_samples(evals)
+    assert len(out) == 1, "全空时用例仍需出现（否则报告会少一条，更危险）"
+    assert out[0]["n_samples"] == 2
+    assert out[0]["weighted_score"] == 1.0
+
+
+def test_is_empty_output_eval_detection():
+    """空输出标记靠 issues 里的 empty_output 识别（由 execute 节点写入 error）。"""
+    assert _is_empty_output_eval({"issues": ["目标模型调用失败：empty_output"]})
+    assert not _is_empty_output_eval({"issues": ["普通问题"]})
+    assert not _is_empty_output_eval({})
+    assert not _is_empty_output_eval({"issues": []})
 
 
 def test_ci_lower_and_unstable_cases_gate_the_verdict():
@@ -391,3 +431,30 @@ def test_single_sample_loop_is_not_stopped_by_unmeasurable_noise(monkeypatch):
     )
     assert not final.get("early_stop_reason"), "单次采样仍被提前判停了"
     assert final.get("status") == "max_iterations", final.get("status")
+
+
+def test_empty_target_output_is_marked_not_silently_scored(monkeypatch):
+    """target 返回空内容时必须标记 error，不能当成"1 分的真实结果"。
+
+    实测特征（矩阵 A）：不抛异常、latency 58~71s、len=0，
+    根因是 reasoning 吃满 max_tokens（对照：4000 → 0/3 非空，8000 → 3/3）。
+    """
+    import pm.llm as L
+    import pm.nodes.execute as EX
+
+    # 让 plain_call 返回空内容（不抛异常，正是真实故障形态）
+    monkeypatch.setattr(L, "plain_call", lambda *a, **k: ("", {"model": "m", "latency_ms": 60000}))
+    monkeypatch.setattr(EX.llm, "plain_call", L.plain_call)
+    monkeypatch.setattr(EX, "target_cache", lambda: None)
+
+    run = EX._run_one_target(
+        idx=0,
+        case="测试输入",
+        prompt="测试提示词",
+        target_model="m",
+        expected="",
+        assert_mode="",
+        sample=0,
+    )
+    assert run.output == ""
+    assert run.error == "empty_output", "空输出必须被标记，否则会被静默计入均分"

@@ -399,6 +399,15 @@ def _evaluate_runs(
     return _collapse_samples(raw), errors, n_cache_hit, n_llm_calls
 
 
+def _is_empty_output_eval(evaluation: dict[str, Any]) -> bool:
+    """该评估结果是否来自"目标模型返回空内容"（无效样本，非真实低分）。
+
+    标记由 `pm/nodes/execute.py` 写入：空输出时给 TestRun.error="empty_output"，
+    评分层沿用"调用失败"分支，把原因写进 issues。
+    """
+    return any("empty_output" in str(i) for i in (evaluation.get("issues") or []))
+
+
 def _collapse_samples(evaluations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """同一用例的 k 次采样 → 一条结果：加权分取中位数，极差当噪声估计。
 
@@ -412,6 +421,13 @@ def _collapse_samples(evaluations: list[dict[str, Any]]) -> list[dict[str, Any]]
     out: list[dict[str, Any]] = []
     for idx in sorted(by_case):
         group: list[dict[str, Any]] = by_case[idx]
+        # 2026-09-16：空输出（推理耗尽预算，未抛异常）不是"1 分的真实结果"，
+        # 它是**无效样本**。此前这类样本被计入均值，把基线系统性压低 → Δ 被夸大
+        # （矩阵 A 实测：基线 8 条里 4 条空输出，Δ=+6.02 含此偏差）。
+        # 只要该用例还有有效采样，就只聚合有效样本；全为空时才保留（否则用例会凭空消失）。
+        valid = [g for g in group if not _is_empty_output_eval(g)]
+        if valid:
+            group = valid
         scores = [float(g.get("weighted_score", 0.0) or 0.0) for g in group]
         ordered = sorted(scores)
         mid = ordered[len(ordered) // 2]

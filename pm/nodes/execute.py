@@ -290,6 +290,18 @@ def _run_one_target(
     t0 = time.time()
     try:
         output, meta = llm.plain_call("target", prompt, case)
+        # 2026-09-16：**空输出必须显式标记为不可用**，不能当成"得 1 分的真实结果"。
+        # 实测（矩阵 A，客服分诊）：target 在推理型模型下 reasoning 吃满 max_tokens 时
+        # **不抛异常、只返回空内容**（error=None、latency 58~71s、len=0），基线 8 条里占了 4 条。
+        # 这些空输出此前被正常送进评分器判 1.00 分 → **基线被系统性低估、Δ 被夸大**。
+        # 这里给 error 打上标记，让评分/报告层能识别并剔除（口径与"调用失败"对齐）。
+        if not output.strip():
+            logger.warning(
+                "用例 #%d 第 %d 次采样：目标模型返回空内容（未抛异常）——"
+                "通常是 reasoning 耗尽 max_tokens，请调大 PM_TARGET_MAX_TOKENS",
+                idx,
+                sample,
+            )
         run = TestRun(
             test_case_index=idx,
             sample_index=sample,
@@ -298,6 +310,7 @@ def _run_one_target(
             output=output,
             target_model=meta.get("model", target_model),
             latency_ms=meta.get("latency_ms"),
+            error="empty_output" if not output.strip() else None,
         )
     except Exception as e:  # noqa: BLE001 - 目标模型调用失败按用例记录，不炸图
         logger.warning("用例 #%d 第 %d 次采样调用目标模型失败：%s", idx, sample, e)
