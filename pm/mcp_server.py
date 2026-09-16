@@ -37,7 +37,12 @@ _TERMINAL = {"passed", "max_iterations", "failed", "early_stopped", "needs_clari
 
 
 def _run_cli_json(args: list[str], timeout: float = 60.0) -> Any:
-    """subprocess 调 `run.py ... --json`，返回 stdout 解析后的 JSON。"""
+    """subprocess 调 `run.py ... --json`，返回 stdout 解析后的 JSON。
+
+    stdin 必须显式接 DEVNULL：否则子进程继承 MCP server 的 stdio 管道，
+    run.py 的 ensure_utf8_stdio 一触碰继承来的空管道就永久阻塞（实测 60s 超时，
+    而同一命令直接在 shell 里跑只要 0.9s）。
+    """
     proc = subprocess.run(
         [sys.executable, str(ROOT / "run.py"), *args],
         capture_output=True,
@@ -46,6 +51,7 @@ def _run_cli_json(args: list[str], timeout: float = 60.0) -> Any:
         errors="replace",
         timeout=timeout,
         cwd=str(ROOT),
+        stdin=subprocess.DEVNULL,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     if proc.returncode not in (0, 1, 2, 3):

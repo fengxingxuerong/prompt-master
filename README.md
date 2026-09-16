@@ -260,6 +260,24 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 - `library`：记忆层的读侧——所有终态运行的最佳提示词都可按关键词检索、`--export` 导出复用；
   写侧（跨任务经验自动沉淀）规划中
 
+### 三之二·附二：MCP 接入（智能体标准协议）
+
+`python -m pm.mcp_server`（stdio 传输）暴露 9 个 MCP 工具，OpenClaw / Claude Code / Cursor /
+任何 MCP 客户端可直接挂载：
+
+```json
+{"command": "python", "args": ["-m", "pm.mcp_server"], "cwd": "<仓库根>"}
+```
+
+| 工具 | 类型 | 说明 |
+|---|---|---|
+| `estimate_cost` | 本地计算 | 提交前预算闸门（调用数区间） |
+| `run_history` / `library_recommend` / `library_export` / `calibrate_judge` | subprocess 调 CLI | 与 `run.py --json` 单一口径，永不出现两套行为 |
+| `optimize_submit` / `optimize_status` / `optimize_wait` / `optimize_report` | 转发常驻 server | 10~30 分钟的长任务必须外置到 server（stdio 进程随客户端会话生死） |
+
+依赖钉 `mcp==1.30.0`（**必须 <2**：mcp 2.x 会把 starlette 顶到与 fastapi 0.115 冲突的版本，
+实测装完 pm.server 直接 import 失败）。
+
 ## 四、REST API 服务（P2 新增）
 
 `pm/server.py` + `pm/scheduler.py` 将优化闭环包装为异步 REST API，支持**批量赛马**。
