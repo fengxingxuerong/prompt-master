@@ -17,15 +17,20 @@ FastAPI 服务层：将 PromptMaster 优化闭环包装为 REST API。
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 import secrets
+import subprocess
+import sys
 import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from .ratelimit import SlidingWindowLimiter, parse_rate_limit_env
@@ -297,6 +302,33 @@ async def web_console(request: Request):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "prompt-master"}
+
+
+@app.get("/api/history")
+async def history_endpoint():
+    """运行历史聚合 + 同任务 Δ 显著性（Web 历史面板的数据源）。
+
+    subprocess 调 `run.py history --json`：与 CLI/MCP 单一事实来源。
+    stdin 必须显式接 DEVNULL——继承 server 的 stdio 会被 run.py 的
+    ensure_utf8_stdio 触碰后永久阻塞（MCP 侧踩过同一坑）。
+    """
+    proc = await asyncio.to_thread(
+        subprocess.run,
+        [sys.executable, str(Path(__file__).resolve().parent.parent / "run.py"),
+         "history", "--last", "50", "--json"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+        cwd=str(Path(__file__).resolve().parent.parent),
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    try:
+        return JSONResponse(json.loads(proc.stdout))
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"history 输出异常：{proc.stderr[-300:]}") from e
 
 
 @app.post(

@@ -212,6 +212,7 @@ WEB_CONSOLE_HTML = r"""<!DOCTYPE html>
       <div class="tab" data-tab="pipeline">流水线 <span class="cnt" id="cntTrace">0</span></div>
       <div class="tab" data-tab="prompt">提示词 <span class="cnt" id="cntPV">0</span></div>
       <div class="tab" data-tab="score">评分</div>
+      <div class="tab" data-tab="history">历史</div>
     </div>
 
     <div class="tab-pane active" id="pane-chat">
@@ -220,6 +221,7 @@ WEB_CONSOLE_HTML = r"""<!DOCTYPE html>
     <div class="tab-pane" id="pane-pipeline"><div class="pipeline" id="pipeline"><div class="empty-ws">提交任务后，节点级执行轨迹会出现在这里</div></div></div>
     <div class="tab-pane" id="pane-prompt"><div id="promptView"><div class="empty-ws">生成的提示词版本与 diff 会出现在这里</div></div></div>
     <div class="tab-pane" id="pane-score"><div id="scoreView"><div class="empty-ws">评分雷达图、版本曲线、基线 Δ 与盲评结论会出现在这里</div></div></div>
+    <div class="tab-pane" id="pane-history"><div id="historyView"><div class="empty-ws">切换到本页查看跨任务历史与 Δ 显著性判定</div></div></div>
 
     <!-- 底部聊天输入 -->
     <div class="chat-input">
@@ -733,7 +735,42 @@ document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
   document.querySelectorAll(".tab-pane").forEach(p=>p.classList.remove("active"));
   $("pane-"+curTab).classList.add("active");
   if(activeRid) renderActive();
+  if(curTab==="history") renderHistory();
 });
+
+// ---- 历史面板：跨任务运行聚合 + 同任务 Δ 显著性 ----
+let historyLoaded = false;
+async function renderHistory(){
+  const v = $("historyView");
+  v.innerHTML = '<div class="empty-ws">加载中…</div>';
+  try{
+    const d = await api("/api/history");
+    historyLoaded = true;
+    let html = "";
+    if(d.task_groups && d.task_groups.length){
+      html += '<h3>同任务跨 run 显著性（Δ 均值 ± 95% CI）</h3>';
+      for(const g of d.task_groups){
+        const mark = g.significant ? "✅ 显著" : "⚠️ 不显著";
+        html += `<div class="hist-group">` +
+          `<b>${mark}</b> Δ均值 <b>${g.delta_mean >= 0 ? "+" : ""}${g.delta_mean}</b>` +
+          ` CI [${g.delta_ci95[0]}, ${g.delta_ci95[1]}]（n=${g.n_runs}${g.note ? "，" + g.note : ""}）` +
+          `<div class="u-dim">${g.task}</div></div>`;
+      }
+      html += "<h3>最近运行</h3>";
+    }
+    html += '<table class="hist-table"><tr><th>日期</th><th>run_id</th><th>状态</th><th>基线</th><th>优化</th><th>Δ</th><th>调用</th><th>任务</th></tr>';
+    for(const r of d.runs){
+      const ba = r.base_avg != null ? r.base_avg.toFixed(2) : "-";
+      const oa = r.opt_avg != null ? r.opt_avg.toFixed(2) : "-";
+      const dl = r.delta != null ? (r.delta >= 0 ? "+" : "") + r.delta.toFixed(2) : "-";
+      html += `<tr><td>${r.mtime}</td><td>${r.run_id}</td><td>${r.status}</td><td>${ba}</td><td>${oa}</td><td>${dl}</td><td>${r.llm_calls}</td><td>${r.task}</td></tr>`;
+    }
+    html += "</table>";
+    v.innerHTML = html;
+  }catch(e){
+    v.innerHTML = '<div class="empty-ws">历史加载失败：' + e.message + "</div>";
+  }
+}
 
 // 初始
 window.addEventListener("resize", () => { if(activeRid) renderScoreView(runs[activeRid]); });
