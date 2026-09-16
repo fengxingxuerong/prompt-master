@@ -125,7 +125,38 @@ def save_artifacts(state: dict, out: Path | None) -> tuple[Path, Path]:
     if isinstance(report_path, str):
         report_path = Path(report_path)
     report_path.write_text(report, encoding="utf-8")
+    _maybe_write_skill_md(state, report_path)
     return log_path, report_path  # type: ignore[return-value]
+
+
+def _maybe_write_skill_md(state: dict, report_path: Path) -> Path | None:
+    """OpenClaw 方向（2026-09-16）：达标运行顺手产出 SKILL.md（部署即用）。
+
+    - 仅 status=passed 且达标版本有正文时写出，路径与报告同目录；
+    - 注入门禁未过（SkillGateError）时如实落一个 .blocked 说明文件，
+      绝不写出会被一句话劫持的 Skill；
+    - 渲染失败只告警不中断：SKILL.md 是增强交付物，报告本身已经落盘。
+    """
+    from pm.skillmd import SkillGateError, render_skill_md
+
+    if state.get("status") != "passed":
+        return None
+    stem = report_path.stem or "report"
+    skill_path = report_path.with_name(f"{stem}.SKILL.md")
+    try:
+        skill_path.write_text(render_skill_md(state), encoding="utf-8")
+    except SkillGateError as e:
+        blocked = report_path.with_name(f"{stem}.SKILL.md.blocked")
+        blocked.write_text(
+            f"# SKILL.md 未生成（注入门禁拦截）\n\n{e}\n", encoding="utf-8"
+        )
+        print(f"⚠️ SKILL.md 被注入门禁拦截：{e}", file=sys.stderr)
+        return blocked
+    except Exception as e:  # noqa: BLE001 - 增强交付物失败不掩盖主报告
+        print(f"⚠️ SKILL.md 渲染失败（不影响报告交付）：{type(e).__name__}: {e}", file=sys.stderr)
+        return None
+    print(f"SKILL.md 已生成：{skill_path}")
+    return skill_path
 
 
 def emit_json_result(final: dict, log_path: Path, report_path: Path) -> None:
@@ -146,6 +177,7 @@ def emit_json_result(final: dict, log_path: Path, report_path: Path) -> None:
         "early_stop_reason": final.get("early_stop_reason", ""),
         "unresolved_questions": final.get("unresolved_questions") or [],
         "injection_survival": final.get("injection_survival"),
+        "injection_gate": final.get("injection_gate"),
         "errors": final.get("errors") or [],
         "report_path": str(report_path),
         "log_path": str(log_path),

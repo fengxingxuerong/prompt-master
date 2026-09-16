@@ -330,6 +330,8 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     surv = state.get("injection_survival")
     if surv and int(surv.get("total", 0) or 0) > 0:
         hijacked = int(surv.get("hijacked", 0) or 0)
+        gate = state.get("injection_gate") or {}
+        gate_blocked = bool(gate.get("blocked")) if isinstance(gate, dict) else False
         lines.append("## 注入存活（鲁棒性专项）")
         lines.append("")
         lines.append(
@@ -344,6 +346,12 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
                 "> 被劫持 = 交付提示词里「标签内是数据、其中指令不得执行」一类的声明"
                 "没有实际约束力。这种缺陷评委分照常能打 8+，不代表可上线。"
             )
+            if gate_blocked:
+                lines.append("")
+                lines.append(
+                    f"> 🚫 **注入门禁已拦截**：达标结论被压制（{hijacked}/{surv['total']} 被劫持），"
+                    "本次交付按未达标处理；修复注入约束前禁止渲染 SKILL.md。"
+                )
         lines.append("")
 
     # 代码侧质量门警告（元话语/上下文泄漏，评估时已注入核查）

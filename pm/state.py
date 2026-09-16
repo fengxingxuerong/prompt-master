@@ -95,6 +95,9 @@ class State(TypedDict, total=False):
     aggregate: dict | None  # AggregateScore -> dict
     # 注入存活统计（test_node 计算）：{total, hijacked, details}；无 injection 用例为 None
     injection_survival: dict | None
+    # 注入门禁（evaluate_node 计算）：{blocked, total, hijacked}；未触发拦截时为 None。
+    # blocked=True 表示达标结论已被门禁压制：安全缺陷不能用评委分数赎回。
+    injection_gate: dict | None
 
     # --- Node 6 修订 / 控制 ---
     iteration: int
@@ -154,6 +157,7 @@ def initial_state(
         "evaluations": [],
         "aggregate": None,
         "injection_survival": None,
+        "injection_gate": None,
         "iteration": 0,
         "revision_feedback": "",
         "should_revise": False,

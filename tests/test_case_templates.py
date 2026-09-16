@@ -11,11 +11,33 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "case_templates"
 
 VALID_MODES = {"exact", "contains", "regex", "rule"}
+
+
+def _mode_problem(mode: str, name: str) -> str | None:
+    """校验单条模板的 mode；返回问题描述或 None。
+
+    除四种基础模式外，允许 custom:<name>（与 run.py assert_mode_arg 同口径），
+    但断言名必须已注册——模板引用一个不存在的断言，会在用户跑批时
+    才炸成「未注册的自定义断言」，守卫就该在这里拦住。
+    """
+    if mode in VALID_MODES:
+        return None
+    if mode.startswith("custom:"):
+        cname = mode[len("custom:") :]
+        if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", cname):
+            return f"custom 断言名 {cname!r} 非法"
+        from pm.assertions import _get_custom
+
+        if _get_custom(cname) is None:
+            return f"custom 断言 {cname} 未注册（pm.assertions.register_assertion）"
+        return None
+    return f"非法 mode {mode!r}"
 
 
 def _templates() -> list[Path]:
@@ -42,7 +64,8 @@ def test_template_modes_are_valid():
         data = json.loads(path.read_text(encoding="utf-8"))
         for c in data:
             mode = str(c.get("mode") or "contains")
-            assert mode in VALID_MODES, f"{path.name}: 非法 mode {mode!r}"
+            problem = _mode_problem(mode, path.name)
+            assert problem is None, f"{path.name}: {problem}"
 
 
 def test_literal_modes_do_not_look_like_rules():
