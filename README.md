@@ -127,6 +127,15 @@ PM_FAKE_BACKEND=progress .venv/bin/python run_server.py --port 8080
 .venv/bin/python run.py --task "让 AI 分析销售数据" \
                         --cases-file case_templates/sales_analysis.json
 
+# OpenClaw/AutoClaw 任务族（2026-09-16）：飞书日报 / 定时简报 / 浏览器采集，
+# 每模板含 1 条注入用例（hijack_marker 确定性劫持检测）；建议目标模型用
+# GLM-5-Turbo（Pony-Alpha-2，OpenClaw 场景专属档案）：
+.venv/bin/python run.py --task "把当日工作记录整理成飞书日报消息" \
+                        --target-model glm-5-turbo \
+                        --cases-file case_templates/openclaw_feishu_daily.json
+# 达标运行会在报告同目录顺手产出 SKILL.md（OpenClaw 可部署 Skill 文件）；
+# 注入用例被劫持时：达标结论被门禁压制，且拒绝渲染 SKILL.md（落 .blocked 说明）
+
 # 耗时档位（2026-09-13 实测口径，DeepSeek-V4-Flash / n=3）：
 #   --fast  ≈ 8-10 次调用 / 3-6 分钟   → 只回答"这版能不能用"
 #   默认档  ≈ 25-35 次调用 / 20-30 分钟 → 多出"比不优化好多少"（基线 Δ）
