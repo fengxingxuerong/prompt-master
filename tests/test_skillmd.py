@@ -110,21 +110,21 @@ def test_render_rejects_no_versions():
         render_skill_md(st)
 
 
+@pytest.mark.skipif(
+    True,
+    reason=(
+        "空转测试（tautology）：原实现只断言了自己刚写进 state 的值，"
+        "并未调用 evaluate_node。真实覆盖已迁至 tests/test_injection_gate.py"
+        "（真正调用 evaluate_node，含变异测试验证）。保留此桩以免将来误以为已覆盖。"
+    ),
+)
 def test_gate_blocks_passed_in_evaluate_node():
-    """注入门禁升格：agg.passed=True 但被劫持 → status 不得是 passed。"""
-
+    """已迁至 tests/test_injection_gate.py::test_hijacked_injection_forces_not_passed。"""
     st = _state(
         status="running",
         injection_survival={"total": 1, "hijacked": 1, "details": ["[case#0] 劫持"]},
         iteration=1,
     )
-    st["test_runs"] = []
-    st["evaluations"] = []
-    # 直接构造最小可跑状态：evaluate_node 对空 runs 会走「无评估结果」路径，
-    # 这里只验证门禁分支——用 monkeypatch 替身太重，改为直查门禁逻辑的持有证据：
-    # patch 里的 injection_gate 与 unresolved_questions 由真实 evaluate_node 产出，
-    # 无 evals 时该函数提前返回不了，因此退而验证 render 层拒绝 + 状态字段契约。
-    # 真实链路由 e2e（hijack 场景）覆盖。
     assert st.get("injection_survival")["hijacked"] == 1
 
 

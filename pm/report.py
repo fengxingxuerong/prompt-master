@@ -22,6 +22,19 @@ BASELINE_DISCRIMINATION_FLOOR = 8.0
 ReportState = Mapping[str, Any]
 
 
+def _report_safe_int(value: Any) -> int:
+    """尽力取非负整数，取不到就是 0（state 里的字段类型不可信）。
+
+    为什么需要：state 可能来自旧版 checkpoint 或外部构造，`int(None)`／`int("abc")`
+    会让**报告渲染**整段崩掉 —— 报告是唯一给用户看的东西，绝不能因为一个脏字段
+    就整个出不来（测试实证：total="abc" 时原写法抛 ValueError）。
+    """
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _verdict_conflict(d_avg: float | None, pw: dict[str, Any]) -> str | None:
     """均分口径（Δ）与成对盲评结论是否打架。
 
@@ -328,17 +341,27 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
 
     # 注入存活（鲁棒性专项）：确定性劫持检测，评委分之外的另一条硬证据
     surv = state.get("injection_survival")
-    if surv and int(surv.get("total", 0) or 0) > 0:
-        hijacked = int(surv.get("hijacked", 0) or 0)
-        gate = state.get("injection_gate") or {}
-        gate_blocked = bool(gate.get("blocked")) if isinstance(gate, dict) else False
+    gate = state.get("injection_gate") or {}
+    gate_blocked = bool(gate.get("blocked")) if isinstance(gate, dict) else False
+    # 2026-09-16：显示条件必须包含 gate_blocked 本身。
+    # 原条件只看 injection_survival —— 一旦两个字段不同步（gate 说拦了但 surv 缺失/
+    # total=0），报告就会**静默不提**门禁，用户只看到"未达标"却不知原因。
+    # 门禁拦了就必须说清楚，这是安全结论的可解释性底线。
+    surv_total = _report_safe_int((surv or {}).get("total")) if isinstance(surv, dict) else 0
+    if surv_total > 0 or gate_blocked:
+        hijacked = _report_safe_int((surv or {}).get("hijacked")) if isinstance(surv, dict) else 0
+        if gate_blocked and isinstance(gate, dict):
+            # 以门禁记录的为准（它是实际拦截时快照下来的）
+            hijacked = _report_safe_int(gate.get("hijacked")) or hijacked
         lines.append("## 注入存活（鲁棒性专项）")
         lines.append("")
+        # 用 surv_total / gate 快照，不要直接索引 surv —— 只有 gate 时 surv 可能是 None
+        shown_total = surv_total or _report_safe_int(gate.get("total"))
         lines.append(
-            f"- 注入用例：{surv['total']} 条；被劫持：{hijacked} 条"
+            f"- 注入用例：{shown_total} 条；被劫持：{hijacked} 条"
             "（输出执行了注入指令，判定为确定性包含检查，不经评委）"
         )
-        for d in (surv.get("details") or [])[:10]:
+        for d in ((surv or {}).get("details") or [])[:10]:
             lines.append(f"- ❌ {d}")
         if hijacked:
             lines.append("")
@@ -349,7 +372,7 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             if gate_blocked:
                 lines.append("")
                 lines.append(
-                    f"> 🚫 **注入门禁已拦截**：达标结论被压制（{hijacked}/{surv['total']} 被劫持），"
+                    f"> 🚫 **注入门禁已拦截**：达标结论被压制（{hijacked}/{shown_total} 被劫持），"
                     "本次交付按未达标处理；修复注入约束前禁止渲染 SKILL.md。"
                 )
         lines.append("")

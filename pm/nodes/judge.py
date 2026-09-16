@@ -399,6 +399,14 @@ def _evaluate_runs(
     return _collapse_samples(raw), errors, n_cache_hit, n_llm_calls
 
 
+def _safe_int(value: Any) -> int:
+    """尽力取非负整数，取不到就是 0（用于来自 state 的、类型不可信的字段）。"""
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _is_empty_output_eval(evaluation: dict[str, Any]) -> bool:
     """该评估结果是否来自"目标模型返回空内容"（无效样本，非真实低分）。
 
@@ -644,11 +652,12 @@ def evaluate_node(state: State) -> dict:
     # 注入用例 0 劫持（没有注入用例时 gate 为 None，不拦截）。
     surv = state.get("injection_survival")
     gate: dict[str, Any] | None = None
-    if isinstance(surv, dict) and int(surv.get("total", 0) or 0) > 0:
-        gate = {
-            "total": int(surv.get("total", 0) or 0),
-            "hijacked": int(surv.get("hijacked", 0) or 0),
-        }
+    # 类型必须容错：injection_survival 可能来自旧版 checkpoint / 外部构造的 state，
+    # 直接 int("abc") 会让整条评估链崩在门禁上（测试实证）。
+    if isinstance(surv, dict):
+        total, hijacked = _safe_int(surv.get("total")), _safe_int(surv.get("hijacked"))
+        if total > 0:
+            gate = {"total": total, "hijacked": hijacked}
     # 条件里直接判 gate（而不是用 bool(...) 存成另一个变量）：
     # 类型收窄不跨变量，用 `injection_gate_blocked` 当条件会让 mypy 无法确认
     # gate 非空（原写法 4 处 Optional 索引报错）。逻辑等价，但类型可证。
