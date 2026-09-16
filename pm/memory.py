@@ -1,0 +1,112 @@
+"""提示词资产记忆：从运行历史中检索与当前任务相似的达标提示词。
+
+设计立场：
+- **零拷贝**：资产的事实来源就是 logs/run_*.json，不另建存储（与 history/library 同族）；
+- **只借鉴成功**：只推荐 passed 且（有基线时）Δ≥0 的运行——失败的借鉴只会带偏；
+- **参与生成而非替代生成**：命中资产以"参考"身份注入 OPTIMIZER 的 context，
+  由提示词注入块明确标注"可借鉴结构，不是标准答案"；PM_MEMORY_HINT=0 一键关闭。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+# 注入生成链路的资产正文上限：参考块太长会挤占 Optimizer 的注意力
+_ASSET_CLIP = 1200
+# 相似度门槛：低于它说明历史里没有真正的同类任务，硬塞参考只会带偏
+_SIM_MIN = 0.10
+
+_TEMPLATE_NOISE = ("帮我写", "写一个", "写个", "prompt", "提示词", "让ai", "让 ai")
+
+
+def _text_bigrams(text: str) -> set[str]:
+    t = "".join(text.split())
+    if len(t) < 2:
+        return {t} if t else set()
+    return {t[i : i + 2] for i in range(len(t) - 1)}
+
+
+def _dice(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return 2 * len(a & b) / (len(a) + len(b))
+
+
+def _sim_grams(text: str) -> set[str]:
+    cleaned = (text or "").lower()
+    for noise in _TEMPLATE_NOISE:
+        cleaned = cleaned.replace(noise, "")
+    return _text_bigrams(cleaned)
+
+
+def find_similar_asset(
+    task: str, exclude_run_id: str | None = None, log_dir: Path | None = None
+) -> dict[str, Any] | None:
+    """在运行历史里找与新任务最相似的达标资产；没有就返回 None。
+
+    筛选口径（缺一不可）：
+    - status == passed（未达标交付的提示词不做参考）；
+    - 有基线时 Δ≥0（比不优化还差的"达标"没有借鉴价值）；
+    - 演示模式（trace 里有 fake）与当前自身 run 排除；
+    - Dice(task bigram) ≥ _SIM_MIN。
+    """
+    if not (task or "").strip():
+        return None
+    log_dir = log_dir or (Path(__file__).resolve().parent.parent / "logs")
+    if os.getenv("PM_MEMORY_HINT", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return None
+
+    new_grams = _sim_grams(task)
+    if not new_grams:
+        return None
+
+    best: tuple[float, dict[str, Any]] | None = None
+    files = sorted(log_dir.glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for f in files[:200]:  # 扫描上限：记忆检索不该拖慢主管道
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if d.get("status") != "passed" or d.get("run_id") == exclude_run_id:
+            continue
+        channels = {str(e.get("channel")) for e in (d.get("trace") or [])}
+        if "fake" in channels:
+            continue
+        agg = d.get("aggregate") or {}
+        base = (d.get("baseline_aggregate") or {}).get("avg_score")
+        if isinstance(base, (int, float)) and isinstance(agg.get("avg_score"), (int, float)):
+            if agg["avg_score"] - base < 0:
+                continue
+        prompt = str(d.get("prompt") or "")
+        if not prompt.strip():
+            continue
+        score = _dice(new_grams, _sim_grams(str(d.get("task") or "")))
+        if score < _SIM_MIN:
+            continue
+        if best is None or score > best[0]:
+            best = (
+                score,
+                {
+                    "run_id": d.get("run_id"),
+                    "similarity": round(score, 3),
+                    "avg_score": agg.get("avg_score"),
+                    "task": str(d.get("task") or ""),
+                    "prompt_excerpt": prompt[:_ASSET_CLIP],
+                },
+            )
+    return best[1] if best else None
+
+
+def render_memory_hint(asset: dict[str, Any]) -> str:
+    """把命中资产渲染成注入 OPTIMIZER context 的参考块。"""
+    return (
+        "\n\n<类似任务的历史高分提示词（供结构参考，不是标准答案；"
+        "本任务的上下文与约束可能不同，请按需取舍）>\n"
+        f"原任务：{asset['task']}\n"
+        f"该提示词实测平均分：{asset.get('avg_score')}\n"
+        f"{asset['prompt_excerpt']}\n"
+        "</类似任务的历史高分提示词>"
+    )

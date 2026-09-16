@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from .. import llm
+from ..memory import find_similar_asset, render_memory_hint
 from ..prompts import OPTIMIZER_SYSTEM, OPTIMIZER_USER, render
 from ..quality import QualityReport, check_prompt_quality, retry_hint
 from ..schemas import PromptVersion
@@ -55,6 +56,12 @@ def optimize_node(state: State) -> dict:
     context = state.get("context", "")
     target_model = state.get("target_model", "未指定")
 
+    # 记忆层·写侧：命中相似达标资产时注入参考块（PM_MEMORY_HINT=0 关闭）。
+    # 注入的是"结构参考"不是答案：块内已标注按需取舍，且只借鉴 passed + Δ≥0 的运行。
+    asset = find_similar_asset(task, exclude_run_id=state.get("run_id"))
+    if asset:
+        context = (context or "") + render_memory_hint(asset)
+
     user_prompt = render(
         OPTIMIZER_USER,
         target_model=target_model,
@@ -89,6 +96,10 @@ def optimize_node(state: State) -> dict:
     if not q_report.ok:
         patch["prompt_quality_issues"] = [{"iteration": 0, "issues": q_report.describe()}]
 
+    patch_extra: dict[str, Any] = {}
+    if asset:
+        patch_extra["memory_hint"] = {"run_id": asset["run_id"], "similarity": asset["similarity"]}
+
     return _apply(
         state,
         node,
@@ -102,4 +113,5 @@ def optimize_node(state: State) -> dict:
         latency_ms=meta.get("latency_ms"),
         channel=meta.get("channel"),
         attempts=meta.get("attempts"),
+        **patch_extra,
     )
