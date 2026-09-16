@@ -19,6 +19,9 @@ dependencies = [
     "python-dotenv==1.2.3",
     "fastapi==0.115.12",
     "uvicorn[standard]==0.34.2",
+    # pm/mcp_server.py（智能体标准协议接入）。必须 <2：mcp 2.x 会把 starlette 顶到
+    # 与 fastapi 0.115 冲突的版本（实测 2.2.0 装完 pm.server 直接 import 失败）
+    "mcp==1.30.0",
 ]
 
 [project.optional-dependencies]
