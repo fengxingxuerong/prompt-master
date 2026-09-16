@@ -50,6 +50,84 @@ logger = logging.getLogger("pm.server")
 _scheduler = TaskManager(store=store_from_env())
 
 # --------------------------------------------------------------------------
+# 评委校准排程（可选）：PM_CALIBRATE_HOURS=N 时，server 常驻期间每 N 小时在后台
+# 回测一次锚点集（subprocess 调 run.py calibrate --json——与 CLI/MCP 单一口径），
+# 漂移超阈直接打 WARNING。"评委可信吗"从一次性人工动作升级为持续监控。
+# 默认 0=关闭：校准是真实计费调用，花钱的事必须显式开启。
+# --------------------------------------------------------------------------
+import threading  # noqa: E402
+import time as _time  # noqa: E402
+
+_CALIB_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _scheduled_calibrate_once(judge: str = "evaluator") -> dict[str, Any] | None:
+    """后台跑一次锚点校准；返回解析后的 JSON（含 drift），失败返回 None。"""
+    proc = subprocess.run(
+        [sys.executable, str(_CALIB_ROOT / "run.py"), "calibrate", "--judge", judge, "--json"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=900,
+        stdin=subprocess.DEVNULL,
+        cwd=str(_CALIB_ROOT),
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        logger.warning("定期校准输出异常（exit=%s）：%s", proc.returncode, proc.stderr[-200:])
+        return None
+
+
+def _calibrate_patrol_loop(interval_hours: float, judge: str) -> None:
+    while True:
+        try:
+            result = _scheduled_calibrate_once(judge)
+            drift = (result or {}).get("drift")
+            bias_now = (result or {}).get("analysis", {}).get("bias")
+            if result is None:
+                pass  # _scheduled_calibrate_once 内部已告警
+            elif drift and drift.get("drifted"):
+                logger.warning(
+                    "评委漂移告警（%s）：bias %s → %s（Δ%+.2f），mae %s → %s（Δ%+.2f）——"
+                    "评估结论的可信度正在变化，建议人工复核锚点样本",
+                    judge,
+                    drift["prev_bias"],
+                    bias_now,
+                    drift["delta_bias"],
+                    drift["prev_mae"],
+                    drift["delta_mae"],
+                )
+            elif drift:
+                logger.info("定期校准稳定（%s）：bias Δ%+.2f / mae Δ%+.2f", judge, drift["delta_bias"], drift["delta_mae"])
+            else:
+                logger.info("定期校准完成（%s）：首次建账，下次起可对比漂移", judge)
+        except Exception as e:  # noqa: BLE001 - 排程失败绝不能影响服务
+            logger.warning("定期校准失败（不影响服务）：%s", e)
+        _time.sleep(interval_hours * 3600)
+
+
+def _maybe_start_calibration_patrol() -> None:
+    raw = (os.getenv("PM_CALIBRATE_HOURS") or "").strip()
+    if not raw:
+        return
+    try:
+        hours = max(0.1, float(raw))
+    except ValueError:
+        logger.warning("PM_CALIBRATE_HOURS=%r 不是数字，校准排程忽略", raw)
+        return
+    judge = (os.getenv("PM_CALIBRATE_JUDGE") or "evaluator").strip() or "evaluator"
+    threading.Thread(
+        target=_calibrate_patrol_loop, args=(hours, judge), daemon=True, name="judge-calibration-patrol"
+    ).start()
+    logger.info("评委校准排程已启动：每 %.1f 小时回测锚点集（%s）", hours, judge)
+
+
+_maybe_start_calibration_patrol()
+
+# --------------------------------------------------------------------------
 # FastAPI 应用
 # --------------------------------------------------------------------------
 app = FastAPI(
