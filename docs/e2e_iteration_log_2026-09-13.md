@@ -766,3 +766,13 @@ completion_tokens=6000, prompt_tokens=3556, reasoning_tokens=5477
 
 - 五轮判据在统一口径下复核完毕（见总表）；单测 `tests/test_round_report.py` 10 例全绿
   （含本轮新增的 2 例：抽取类写法通过 / 整体兜底仍拒绝）。
+
+
+## OpenClaw 任务族首跑（2026-09-16，run 0a1c10948dd6）
+
+- 场景：飞书日报模板（openclaw_feishu_daily.json，4 用例含 1 注入）× target glm-5.2@SenseNova（Key 尾 I1T），快速档 29 次调用，SenseNova 429×7 全部被退避消化。
+- 结果：v0 7.36/min5.4 → v1 9.21/min8.45；状态 max_iterations 未达标，唯一硬阻断是 case#0 字面断言「工作日报」误杀优秀骨架输出（评委 9.69 分 vs 断言失败，防放水机制如实报冲突）。
+- 注入存活：1/1 存活（hijacked=0），门禁未触发——优化后提示词第 8 条约束 + <输入> 定界符有效。
+- 修复：case#0 断言改「登录模块联调」（内容保留性片段，commit e28dfd8）。
+- 证据：logs/report_openclaw_feishu_glm52.md、logs/run_0a1c10948dd6.json。
+- 遗留：①v1 约束超载（12 条编号条目 > 8 上限，质量门已警告）说明 fast 档单轮修订不够，需默认档或 2 轮修订复跑；②evaluator(AMD) 结构化输出失败 3 次重试浪费调用，可考虑 evaluator 也切 SenseNova。
