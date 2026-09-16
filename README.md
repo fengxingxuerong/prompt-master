@@ -183,6 +183,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File examples/run_e2e_stub.ps1
 | `PM_API_TOKEN` | 未设 | 设了则 `POST /api/*` 必须带 `X-API-Key` |
 | `PM_ALLOW_ORIGINS` | 未设 | 逗隔列表；**不设则不开 CORS** |
 | `PM_FAKE_BACKEND` | 未设 | `progress\|stall\|dispute\|unclear`：无 Key 的演示模式（任务级隔离，不会污染进程） |
+| `PM_MAX_LLM_CALLS` | 未设 | 任务级调用总闸：下一轮修订的预估调用数会突破该值时立即止损，按 `early_stopped` 交付当前最佳（reason 写明是预算而非收敛）。自治/IM 场景的成本保险丝 |
 
 运行产物：
 - `logs/report_<run_id>.md` —— 交付报告（最终提示词 + 评分 + 版本曲线 + 遗留问题）

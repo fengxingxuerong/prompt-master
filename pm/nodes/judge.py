@@ -691,11 +691,37 @@ def evaluate_node(state: State) -> dict:
         # 并关掉平台期规则（M4）——否则一次运气好的采样就能把修订提前卡死。
         noise = agg.noise if (agg.n_samples or 1) >= 2 else None
         stop_reason = early_stop_reason(avg_scores, noise=noise)
+
+        # 成本闸（PM_MAX_LLM_CALLS）：下一轮修订的预估调用数会突破任务预算 →
+        # 立即止损，按 early_stopped 终态交付当前最佳版本。复用既有终态而不是新造
+        # status（Agent/CLI/API 的终态集合都不用改），reason 写明是预算而非收敛。
+        # used 必须是「本轮评估后的最新用量」：state.llm_calls 还是进节点时的旧值，
+        # 本轮刚消耗的 n_llm_calls 不算进去的话，超预算会整整晚一轮才被发现（实测）。
+        budget_raw = (os.getenv("PM_MAX_LLM_CALLS") or "").strip()
+        if budget_raw and not stop_reason:
+            try:
+                budget = max(0, int(budget_raw))
+                case_ids = {int(r.get("test_case_index", 0)) for r in runs}
+                n_cases = len(case_ids) or 1
+                n_samples = max(1, len(runs) // n_cases)
+                per_iter_est = 1 + n_cases * n_samples * len(judges)
+                used = state.get("llm_calls", 0) + n_llm_calls
+                if used + per_iter_est > budget:
+                    patch["status"] = "early_stopped"
+                    patch["should_revise"] = False
+                    patch["early_stop_reason"] = (
+                        f"调用预算耗尽：已用 {used} 次，下一轮修订预计还需约 "
+                        f"{per_iter_est} 次（PM_MAX_LLM_CALLS={budget}）"
+                    )
+                    logger.warning("预算闸触发：%s", patch["early_stop_reason"])
+            except ValueError:
+                logger.warning("PM_MAX_LLM_CALLS=%r 不是整数，预算闸忽略", budget_raw)
+
         if stop_reason:
             patch["status"] = "early_stopped"
             patch["should_revise"] = False
             patch["early_stop_reason"] = stop_reason
-        else:
+        elif patch.get("status") != "early_stopped":
             patch["should_revise"] = True
             patch["revision_feedback"] = _build_feedback(agg, evals, state)
 

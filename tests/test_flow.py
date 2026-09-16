@@ -134,6 +134,34 @@ def test_stall_scenario_respects_max_iterations():
     assert "未达标" in final["final_report"]
 
 
+def test_budget_gate_stops_revision_before_overspend(monkeypatch):
+    """PM_MAX_LLM_CALLS：下一轮修订预估会破预算 → early_stopped 止损交付。
+
+    预算闸必须在"继续修订"分支里拦下（而不是等 max_iterations 兜底），
+    reason 写明是预算而非收敛 —— 自治场景下这是"花完预算交作业"，不是失败。
+    """
+    # conftest 的 autouse 夹具把测量层固定回旧口径（k=1、无基线、无盲评），
+    # 每轮修订只花 ~7 次调用 —— 预算必须按这个口径卡紧（30 在旧口径下压不住）
+    monkeypatch.setenv("PM_MAX_LLM_CALLS", "18")
+    # SCORE_SCRIPT 计数器是模块级共享的：前面的 progress 测试已消费到第 3 批（全 9 分），
+    # 不重置的话本测试首轮就达标，预算闸永远轮不到出场
+    testing.reset()
+    with testing.fake_backend("progress"):
+        app = build_app()
+        final = app.invoke(
+            initial_state(
+                task="分析销售数据", target_model="fake", n_test_cases=3, max_iterations=3
+            ),
+            {"configurable": {"thread_id": "budget-gate"}, "recursion_limit": 100},
+        )
+    assert final["status"] == "early_stopped"
+    assert "预算" in final["early_stop_reason"], final["early_stop_reason"]
+    assert final["iteration"] < 3, "预算闸应在跑满修订轮次之前止损"
+    # 止损交付仍然是完整交付：报告与最佳版本都在
+    assert final.get("final_report")
+    assert final.get("prompt")
+
+
 def test_test_cases_locked_across_iterations():
     """测试集必须首轮锁定，否则迭代前后分数不可比。"""
     with testing.fake_backend("progress"):
