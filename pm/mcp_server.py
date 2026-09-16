@@ -54,9 +54,7 @@ def _run_cli_json(args: list[str], timeout: float = 60.0) -> Any:
 
 
 def _http_json(method: str, url: str, payload: dict | None = None, timeout: float = 30.0) -> Any:
-    data = (
-        json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
-    )
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     if data is not None:
         req.add_header("Content-Type", "application/json")

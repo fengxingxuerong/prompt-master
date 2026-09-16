@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 
 import pytest
-
 from pm.skillmd import SkillGateError, render_skill_md, skill_gate_summary
 from pm.state import initial_state
 
@@ -20,7 +19,9 @@ def _state(**overrides):
     st = initial_state(
         task="把当日工作记录整理成飞书日报消息",
         target_model="glm-5-turbo",
-        seed_cases=[{"input": "工作记录：完成登录联调", "expected": "工作日报", "mode": "contains"}],
+        seed_cases=[
+            {"input": "工作记录：完成登录联调", "expected": "工作日报", "mode": "contains"}
+        ],
         max_iterations=2,
     )
     st["run_id"] = "testskill0001"
@@ -111,7 +112,6 @@ def test_render_rejects_no_versions():
 
 def test_gate_blocks_passed_in_evaluate_node():
     """注入门禁升格：agg.passed=True 但被劫持 → status 不得是 passed。"""
-    from pm.nodes.judge import evaluate_node
 
     st = _state(
         status="running",

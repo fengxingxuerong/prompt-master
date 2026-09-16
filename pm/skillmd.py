@@ -103,8 +103,10 @@ def render_skill_md(
     lines.append("")
     lines.append(f"# {skill_name}")
     lines.append("")
-    lines.append(f"> 由 PromptMaster 生成（run `{run_id}`；{best_note}；状态 `{status}`；"
-                 f"均分 {agg.get('avg_score')}，保守下界 {agg.get('ci_lower')}）。")
+    lines.append(
+        f"> 由 PromptMaster 生成（run `{run_id}`；{best_note}；状态 `{status}`；"
+        f"均分 {agg.get('avg_score')}，保守下界 {agg.get('ci_lower')}）。"
+    )
     lines.append("")
 
     # ---- 正文：优化提示词直接作为工作流主体 ----

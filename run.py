@@ -147,9 +147,7 @@ def _maybe_write_skill_md(state: dict, report_path: Path) -> Path | None:
         skill_path.write_text(render_skill_md(state), encoding="utf-8")
     except SkillGateError as e:
         blocked = report_path.with_name(f"{stem}.SKILL.md.blocked")
-        blocked.write_text(
-            f"# SKILL.md 未生成（注入门禁拦截）\n\n{e}\n", encoding="utf-8"
-        )
+        blocked.write_text(f"# SKILL.md 未生成（注入门禁拦截）\n\n{e}\n", encoding="utf-8")
         print(f"⚠️ SKILL.md 被注入门禁拦截：{e}", file=sys.stderr)
         return blocked
     except Exception as e:  # noqa: BLE001 - 增强交付物失败不掩盖主报告
@@ -534,7 +532,9 @@ def _history_command(argv: list[str]) -> int:
         return 0
 
     print(f"最近 {len(rows)} 条运行（演示模式{'已包含' if ns.include_demo else '已排除'}）：\n")
-    print(f"{'日期':<12} {'run_id':<14} {'状态':<16} {'基线':>5} {'优化':>5} {'Δ':>6} {'调用':>5}  任务")
+    print(
+        f"{'日期':<12} {'run_id':<14} {'状态':<16} {'基线':>5} {'优化':>5} {'Δ':>6} {'调用':>5}  任务"
+    )
     for r in rows:
         ba = f"{r['base_avg']:.2f}" if isinstance(r["base_avg"], (int, float)) else "  -"
         oa = f"{r['opt_avg']:.2f}" if isinstance(r["opt_avg"], (int, float)) else "  -"
@@ -562,9 +562,7 @@ def _http_json(method: str, url: str, payload: dict | None = None, timeout: floa
     import urllib.error
     import urllib.request
 
-    data = (
-        json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
-    )
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     if data is not None:
         req.add_header("Content-Type", "application/json")
@@ -582,21 +580,26 @@ def _http_json(method: str, url: str, payload: dict | None = None, timeout: floa
 
 def _agent_server(ns: argparse.Namespace) -> str:
     return (
-        getattr(ns, "server", None)
-        or os.getenv("PM_SERVER_URL")
-        or "http://127.0.0.1:8080"
+        getattr(ns, "server", None) or os.getenv("PM_SERVER_URL") or "http://127.0.0.1:8080"
     ).rstrip("/")
 
 
 def _build_agent_parser(cmd: str) -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"run.py {cmd}")
-    ap.add_argument("--server", default=None, help="server 地址（默认 PM_SERVER_URL 或 127.0.0.1:8080）")
+    ap.add_argument(
+        "--server", default=None, help="server 地址（默认 PM_SERVER_URL 或 127.0.0.1:8080）"
+    )
     if cmd == "submit":
         ap.add_argument("--task", required=True, help="原始需求描述")
         ap.add_argument("--target-model", default="未指定")
         ap.add_argument("--cases", type=int, default=3, help="测试用例数量（1-8）")
-        ap.add_argument("--cases-file", help='JSON 用例集：[{"input","expected","mode","scenario","hijack_marker"}]')
-        ap.add_argument("--assert-mode", default="contains", choices=["exact", "contains", "regex", "rule"])
+        ap.add_argument(
+            "--cases-file",
+            help='JSON 用例集：[{"input","expected","mode","scenario","hijack_marker"}]',
+        )
+        ap.add_argument(
+            "--assert-mode", default="contains", choices=["exact", "contains", "regex", "rule"]
+        )
         ap.add_argument("--max-iter", type=int, default=3)
     else:
         ap.add_argument("run_id", help="submit 返回的 run_id")
@@ -639,7 +642,11 @@ def agent_subcommand(cmd: str, argv: list[str]) -> int:
         return 0
 
     if cmd == "status":
-        print(json.dumps(_http_json("GET", f"{base}/api/status/{ns.run_id}"), ensure_ascii=False, default=str))
+        print(
+            json.dumps(
+                _http_json("GET", f"{base}/api/status/{ns.run_id}"), ensure_ascii=False, default=str
+            )
+        )
         return 0
 
     if cmd == "report":
@@ -671,7 +678,9 @@ def agent_subcommand(cmd: str, argv: list[str]) -> int:
     final_status = status_data.get("status")
     report = ""
     if final_status in ("passed", "max_iterations", "early_stopped"):
-        report = str(_http_json("GET", f"{base}/api/report/{ns.run_id}", timeout=30.0).get("report", ""))
+        report = str(
+            _http_json("GET", f"{base}/api/report/{ns.run_id}", timeout=30.0).get("report", "")
+        )
     print(
         json.dumps(
             {
@@ -749,9 +758,7 @@ def _calibrate_command(argv: list[str]) -> int:
             history = json.loads(_CALIB_HISTORY.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             history = []  # 历史损坏按空账本处理，本次照常记录
-    prev = next(
-        (h for h in reversed(history) if h.get("judge") == ns.judge), None
-    )
+    prev = next((h for h in reversed(history) if h.get("judge") == ns.judge), None)
     drift: dict[str, Any] | None = None
     if prev is not None:
         d_bias = round(float(analysis["bias"]) - float(prev["bias"]), 2)
@@ -918,16 +925,16 @@ def _library_recommend(ns: argparse.Namespace) -> int:
         return 0
     print(f"新任务：{ns.task_text}\n\n相似资产 top-{len(top)}：")
     for t in top:
-        print(
-            f"  相似度 {t['similarity']:.3f}  {t['avg_score']} 分  {t['run_id']}  {t['task']}"
-        )
+        print(f"  相似度 {t['similarity']:.3f}  {t['avg_score']} 分  {t['run_id']}  {t['task']}")
     print(f"\n{payload['usage_hint']}")
     return 0
 
 
 def _library_command(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="run.py library")
-    ap.add_argument("--query", default=None, help="关键词：匹配任务描述或提示词正文（大小写不敏感）")
+    ap.add_argument(
+        "--query", default=None, help="关键词：匹配任务描述或提示词正文（大小写不敏感）"
+    )
     ap.add_argument("--all", action="store_true", help="包含未达标交付的运行（默认只列 passed）")
     ap.add_argument("--json", action="store_true", help="输出 JSON（含提示词全文，智能体消费）")
     ap.add_argument("--export", default=None, metavar="RUN_ID", help="导出指定运行的最佳提示词")
@@ -1028,7 +1035,9 @@ def _library_command(argv: list[str]) -> int:
         print(f"资产库没有匹配的提示词{hint}。跑几个真实任务后这里会积累起来。")
         return 0
 
-    print(f"提示词资产 {len(entries)} 条{'（含未达标交付，加 --all 才显示）' if not ns.all else ''}：\n")
+    print(
+        f"提示词资产 {len(entries)} 条{'（含未达标交付，加 --all 才显示）' if not ns.all else ''}：\n"
+    )
     for e in entries:
         dl = f"{e['delta_vs_baseline']:+.2f}" if e["delta_vs_baseline"] is not None else "  -"
         print(
@@ -1152,8 +1161,10 @@ def main() -> int:
         return 0
 
     if args.json and args.interactive:
-        p.error("--json（智能体模式）与 --interactive（人类交互澄清）互斥；"
-                "Agent 场景请直接用 auto_clarify，澄清假设会写进报告的「需求侧遗留问题」")
+        p.error(
+            "--json（智能体模式）与 --interactive（人类交互澄清）互斥；"
+            "Agent 场景请直接用 auto_clarify，澄清假设会写进报告的「需求侧遗留问题」"
+        )
 
     if args.selftest:
         return selftest()
@@ -1242,7 +1253,9 @@ def main() -> int:
         base = 2 + (0 if seed_cases else 1) + n * k + n * k * judges
         # 每轮修订：revise 1 次 + 复用测试集重新 target + 重新评估
         per_iter = 1 + n * k + n * k * judges
-        est_min = base + (n * k + n * k * judges + n if baseline_on else 0) + (n if pairwise_on else 0)
+        est_min = (
+            base + (n * k + n * k * judges + n if baseline_on else 0) + (n if pairwise_on else 0)
+        )
         est_max = est_min + args.max_iter * per_iter
         print(
             json.dumps(
