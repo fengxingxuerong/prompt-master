@@ -314,11 +314,13 @@ class TaskManager:
                     final = dict(chunk)
                     # token 用量随节点推进实时可见，不用等到任务结束
                     final["llm_usage"] = ledger.snapshot()
-                    self.store.update_task(run_id, progress=_progress_of(final))
-                    # 报告一落地就对外可见：否则存在"/api/status 已说 passed、
-                    # /api/report 还 404"的窗口，控制台会显示"报告未生成"
+                    # 终态 chunk 必须先落 result 再刷 progress：轮询方从 progress 快照
+                    # 读到 status=passed 就会立即取报告；若 result 尚未落库，get_status
+                    # 只能兜底读 progress，而 /api/report 仍为空——"status 已 passed、
+                    # 报告拿不到"的窗口（顺序敏感，勿对调）。
                     if chunk.get("final_report"):
                         self.store.update_task(run_id, result=final)
+                    self.store.update_task(run_id, progress=_progress_of(final))
                 final["llm_usage"] = ledger.snapshot()
 
             report_path, _ = _save_artifacts(run_id, final)

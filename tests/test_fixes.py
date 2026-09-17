@@ -73,6 +73,29 @@ def _wait_terminal(tm: TaskManager, run_id: str, timeout: float = 40.0) -> dict:
     return st
 
 
+def _wait_artifacts(tm: TaskManager, run_id: str, log_dir: Path, timeout: float = 15.0) -> str | None:
+    """终态之后还要等收尾：result 落库与报告/状态文件落盘发生在 status=passed 之后。
+
+    _wait_terminal 从 progress 快照看到终态即返回，但 worker 线程还要把 final 写进
+    store.result、落盘 report_<rid>.md / run_<rid>.md（_save_artifacts 在流结束后才跑）。
+    全量跑时 CPU 争抢能把这几十毫秒的尾窗拉长到秒级——单独跑绿、全量跑红的 flaky 根因。
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    report = tm.get_report(run_id)
+    while time.monotonic() < deadline:
+        if (
+            report
+            and (log_dir / f"report_{run_id}.md").exists()
+            and (log_dir / f"run_{run_id}.json").exists()
+        ):
+            return report
+        time.sleep(0.05)
+        report = tm.get_report(run_id)
+    return report
+
+
 def _structured_with_cases(cases_per_call: list[list[str]]):
     """第 i 次 mockgen 调用返回 cases_per_call[i]（越界后重复最后一组）。"""
     state = {"n": 0}
@@ -411,7 +434,7 @@ def test_demo_mode_is_isolated_and_persists(tmp_path: Path, monkeypatch):
 
     assert os.getenv("PM_EVAL_CACHE") is None
     # ③ 报告里的 run_id 与 API 句柄一致（M0），且已落盘（M2）
-    report = tm.get_report(rid)
+    report = _wait_artifacts(tm, rid, tmp_path)
     rec = tm._tasks[rid]
     assert report, (
         f"报告为空：poll_status={st} rec_status={rec.status} "
