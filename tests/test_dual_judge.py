@@ -210,3 +210,39 @@ def test_all_judges_fail_yields_system_fallback():
     assert n_calls == 0 and cache_hit is False
     assert len(errors) == 2, f"两个评委的失败都要记账：{errors}"
     assert "evaluator_b" in errors[-1]
+
+
+def test_partial_judge_failure_degrades_to_single():
+    """evaluator 挂、evaluator_b 活：降级为单评委结果，不崩、错误只记挂掉的那个。
+
+    真实运行（sensenova 429）出现过单评委失败——这条降级路径的分数仍可用，
+    但报告应保留 merged 单结果口径而不是编造双评委一致性。
+    """
+
+    def flaky(role, model_cls, system, user, max_retries=3, overrides=None):
+        if role == "evaluator":
+            raise RuntimeError("evaluator 端点限流")
+        return (
+            _mk_ev(8.0),
+            {"model": "f", "channel": "fake", "attempts": 1, "latency_ms": 1},
+        )
+
+    hook = backend.CallHook(structured=flaky, plain=None, disable_cache=True)
+    errors: list[str] = []
+    run = {"test_case_index": 0, "test_input": "x", "output": "y"}
+    with backend.use(hook):
+        ev, n_calls, cache_hit = _evaluate_one(
+            run,
+            task="t",
+            context="",
+            prompt="p",
+            judges=["evaluator", "evaluator_b"],
+            judge_spec="",
+            q_warns=[],
+            errors=errors,
+        )
+    assert ev["judge"] == "evaluator"  # 单结果 passthrough，不冒充 merged
+    assert ev["model_reported_score"] == 8.0
+    assert n_calls == 1 and cache_hit is False
+    assert len(errors) == 1
+    assert errors[0].startswith("evaluate#0[evaluator]:")
