@@ -295,7 +295,10 @@ function Invoke-Scenario {
         $fallbackHits = @([regex]::Matches($text, '降级为 JSON 文本解析')).Count
         $hardFail = $text -match '结构化输出失败|Traceback|RuntimeError'
 
-        $ok = ($res.ExitCode -eq 0) -and ($chanHits -gt 0) -and (-not $hardFail)
+        # 退出码协议（feat(cli) 起）：0=达标、1=未达标但已交付——桩端点的评分行为
+        # 不代表真实水位，e2e 验证的是链路（channel 命中 + 报告完整），两者都算跑通；
+        # 2/3（参数错/运行失败）才是真失败。
+        $ok = ($res.ExitCode -in @(0, 1)) -and ($chanHits -gt 0) -and (-not $hardFail)
         if ($ForbidFallback) { $ok = $ok -and ($fallbackHits -eq 0) }
         else { $ok = $ok -and ($fallbackHits -gt 0) }
 
