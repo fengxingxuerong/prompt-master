@@ -710,3 +710,41 @@ pytest tests/ -q                                   # 291 全绿（新增：注�
 python run.py --selftest
 # 真机探针（花真钱，手动）：从报告抽最终提示词 → 对目标端点跑主路径/缺失/模糊/空标签/注入
 ```
+
+## 十三、发布与部署
+
+### 部署形态
+
+```
+形态 A · 个人工具（最小）      python run.py --task "..." --fast
+形态 B · 常驻服务（推荐）      python run_server.py   # Web 控制台 :8080 + REST API + MCP 同源
+形态 C · 智能体接入            MCP stdio（python -m pm.mcp_server）或 Agent CLI
+```
+
+### 常驻服务的关键配置（`python run_server.py` 前设置）
+
+| 变量 | 建议值 | 说明 |
+|---|---|---|
+| `PM_API_TOKEN` | 随机串 | 设了则 POST /api/* 必须带 X-API-Key——**共享网络必设** |
+| `PM_ALLOW_ORIGINS` | 留空 | 留空不开 CORS（默认安全）；确需跳源再显式列 |
+| `PM_TASK_DB` | `logs/tasks.db` | 设了才允许 `--workers > 1`（多进程共享任务表） |
+| `PM_MAX_TASKS` | 默认 200 | 任务表保留上限（SQLite 下为库内条数上限） |
+| `PM_CALIBRATE_HOURS` | 12 | 评委校准排程（真实计费，按需开启） |
+| `PM_MAX_LLM_CALLS` | 如 300 | 任务级成本总闸（自治场景强烈建议） |
+| `PM_FAKE_BACKEND` | — | 无 Key 演示模式（progress/stall/dispute/unclear） |
+
+### 故障排查入口（按顺序）
+
+```bash
+python run.py --selftest      # ① 拓扑与控制流自检（无 Key）
+python run.py --preflight     # ② 真实端点逐角色冒烟（花小钱，跑大任务前必做）
+python run.py history         # ③ 运行历史 + Δ 显著性（判断"有没有变好"）
+python run.py calibrate       # ④ 评委可信度校准 + 漂移对比
+```
+
+### 常见边界（部署前必读）
+
+- **端点稳定性是环境变量**：AMD 网关曾多次 502/限流（第 8/12 轮作废）；换端点前先 `--preflight`，并把角色级 `PM_<角色>_BASE_URL` 配好
+- **max_tokens 预算不能跨端点搬**：第 11 轮「8000=0% 失败」只对 AMD DeepSeek 成立；SenseNova 同模型名 reasoning 吃满 8000——**换端点必须重测预算**
+- **注入防御是模型相关的**：同一 prompt 在 AMD 免疫注入、SenseNova 可能 1/1 被劫持——**目标模型用 SenseNova 时，注入用例务必保留在用例集里**（注入门禁会兜底拦截误判达标）
+- **日志会膨胀**：`logs/` 会积累每次运行产物；定期把 `logs/run_*.json` `report_*.md` 归档到子目录（.gitignore 已忽略，不影响仓库）
