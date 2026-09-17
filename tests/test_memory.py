@@ -79,7 +79,9 @@ def test_render_memory_hint_contains_guard_note(log_dir):
     _write_run(log_dir, "good1", "对客服对话做分类分诊")
     hit = find_similar_asset("对客服对话做分类分诊", log_dir=log_dir)
     hint = render_memory_hint(hit)
-    assert "不是标准答案" in hint and "按需取舍" in hint, "参考块必须自带防误用声明"
+    assert "不是标准答案" in hint and "禁止照搬参考的任务语义" in hint, (
+        "参考块必须自带防误用声明（含照抄任务语义的实测警示）"
+    )
 
 
 def test_unrelated_task_returns_none(log_dir):
