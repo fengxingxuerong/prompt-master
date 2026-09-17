@@ -1,7 +1,7 @@
 # PromptMaster 智能体接入指南（Skill 描述）
 
 > 本文件是给**智能体（Agent）**看的接入契约。你的标准学习入口：本节 + `run.py --help`。
-> 人类用户看 README「三之二」。
+> 人类用户看 docs/agent-cli-guide.md（原 README「三之二」）。
 
 ## 这个工具是什么
 
