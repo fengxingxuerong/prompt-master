@@ -21,7 +21,9 @@
 set -u
 cd "$(dirname "$0")/.."
 
-PY="${PY:-.venv/bin/python}"
+# venv python 跨平台探测：Linux/macOS 是 .venv/bin/python，Windows venv 是
+# .venv/Scripts/python.exe——Git Bash 下也常见，自动回退而不是写死一种。
+PY="${PY:-$([ -x .venv/Scripts/python.exe ] && echo .venv/Scripts/python.exe || echo .venv/bin/python)}"
 STUB_PY="${STUB_PY:-$PY}"   # 桩服务只需要 fastapi/uvicorn，与运行时同一 venv 即可
 PORT="${PORT:-8130}"
 STUB_BASE="http://127.0.0.1:${PORT}/v1"
