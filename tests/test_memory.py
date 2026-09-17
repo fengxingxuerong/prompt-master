@@ -11,7 +11,16 @@ from pm.memory import find_similar_asset, render_memory_hint
 from pm.state import initial_state
 
 
-def _write_run(log_dir: Path, run_id: str, task: str, status: str = "passed", demo: bool = False, avg: float = 9.0, base: float | None = 6.0, prompt: str = "[角色] 测试提示词") -> None:
+def _write_run(
+    log_dir: Path,
+    run_id: str,
+    task: str,
+    status: str = "passed",
+    demo: bool = False,
+    avg: float = 9.0,
+    base: float | None = 6.0,
+    prompt: str = "[角色] 测试提示词",
+) -> None:
     trace_channels = ["fake"] if demo else ["json_fallback"]
     d = {
         "run_id": run_id,
@@ -34,7 +43,9 @@ def log_dir(tmp_path: Path) -> Path:
 
 def test_find_similar_hits_passed_and_delta_positive(log_dir):
     _write_run(log_dir, "good1", "对电商客服对话做分类分诊，提取订单号", avg=9.5, base=5.0)
-    hit = find_similar_asset("帮我写一个 prompt 让 AI 给外卖评论做分类并提取退款诉求", log_dir=log_dir)
+    hit = find_similar_asset(
+        "帮我写一个 prompt 让 AI 给外卖评论做分类并提取退款诉求", log_dir=log_dir
+    )
     assert hit and hit["run_id"] == "good1"
     assert hit["similarity"] >= memory._SIM_MIN
 
@@ -50,7 +61,12 @@ def test_find_similar_skips_failed_and_negative_delta(log_dir):
 def test_find_similar_skips_demo_and_self(log_dir):
     _write_run(log_dir, "demo1", "对客服对话做分类分诊，提取订单号", demo=True)
     _write_run(log_dir, "self1", "对客服对话做分类分诊，提取订单号")
-    assert find_similar_asset("对客服对话做分类分诊，提取订单号", exclude_run_id="self1", log_dir=log_dir) is None
+    assert (
+        find_similar_asset(
+            "对客服对话做分类分诊，提取订单号", exclude_run_id="self1", log_dir=log_dir
+        )
+        is None
+    )
 
 
 def test_find_similar_respects_memory_hint_off(log_dir, monkeypatch):
@@ -68,7 +84,9 @@ def test_render_memory_hint_contains_guard_note(log_dir):
 
 def test_unrelated_task_returns_none(log_dir):
     _write_run(log_dir, "good1", "对电商客服对话做分类分诊，提取订单号")
-    assert find_similar_asset("写一首关于春天的诗", log_dir=log_dir) is None, "低于相似度门槛不该硬塞参考"
+    assert find_similar_asset("写一首关于春天的诗", log_dir=log_dir) is None, (
+        "低于相似度门槛不该硬塞参考"
+    )
 
 
 def test_optimize_node_injects_memory_hint(log_dir, monkeypatch):

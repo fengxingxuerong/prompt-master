@@ -93,14 +93,21 @@ def test_patrol_disabled_by_default(monkeypatch):
 def test_patrol_loop_survives_calibration_failure(monkeypatch, caplog):
     """排程循环单次失败不能炸线程：记 WARNING 后继续下一轮。"""
     monkeypatch.setattr(
-        server, "_scheduled_calibrate_once", lambda judge="evaluator": (_ for _ in ()).throw(
-            RuntimeError("网络炸了")
-        )
+        server,
+        "_scheduled_calibrate_once",
+        lambda judge="evaluator": (_ for _ in ()).throw(RuntimeError("网络炸了")),
     )
     sleeps: list[float] = []
-    monkeypatch.setattr(server._time, "sleep", lambda s: sleeps.append(s) or (_ for _ in ()).throw(
-        KeyboardInterrupt  # 用异常退出循环，验证第一轮失败后走到了 sleep
-    ))
+    monkeypatch.setattr(
+        server._time,
+        "sleep",
+        lambda s: (
+            sleeps.append(s)
+            or (_ for _ in ()).throw(
+                KeyboardInterrupt  # 用异常退出循环，验证第一轮失败后走到了 sleep
+            )
+        ),
+    )
     with pytest.raises(KeyboardInterrupt):
         server._calibrate_patrol_loop(0.001, "evaluator")
     assert any("不影响服务" in r.getMessage() for r in caplog.records)

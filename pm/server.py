@@ -101,7 +101,12 @@ def _calibrate_patrol_loop(interval_hours: float, judge: str) -> None:
                     drift["delta_mae"],
                 )
             elif drift:
-                logger.info("定期校准稳定（%s）：bias Δ%+.2f / mae Δ%+.2f", judge, drift["delta_bias"], drift["delta_mae"])
+                logger.info(
+                    "定期校准稳定（%s）：bias Δ%+.2f / mae Δ%+.2f",
+                    judge,
+                    drift["delta_bias"],
+                    drift["delta_mae"],
+                )
             else:
                 logger.info("定期校准完成（%s）：首次建账，下次起可对比漂移", judge)
         except Exception as e:  # noqa: BLE001 - 排程失败绝不能影响服务
@@ -120,7 +125,10 @@ def _maybe_start_calibration_patrol() -> None:
         return
     judge = (os.getenv("PM_CALIBRATE_JUDGE") or "evaluator").strip() or "evaluator"
     threading.Thread(
-        target=_calibrate_patrol_loop, args=(hours, judge), daemon=True, name="judge-calibration-patrol"
+        target=_calibrate_patrol_loop,
+        args=(hours, judge),
+        daemon=True,
+        name="judge-calibration-patrol",
     ).start()
     logger.info("评委校准排程已启动：每 %.1f 小时回测锚点集（%s）", hours, judge)
 
@@ -392,8 +400,14 @@ async def history_endpoint():
     """
     proc = await asyncio.to_thread(
         subprocess.run,
-        [sys.executable, str(Path(__file__).resolve().parent.parent / "run.py"),
-         "history", "--last", "50", "--json"],
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parent.parent / "run.py"),
+            "history",
+            "--last",
+            "50",
+            "--json",
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -406,7 +420,9 @@ async def history_endpoint():
     try:
         return JSONResponse(json.loads(proc.stdout))
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"history 输出异常：{proc.stderr[-300:]}") from e
+        raise HTTPException(
+            status_code=500, detail=f"history 输出异常：{proc.stderr[-300:]}"
+        ) from e
 
 
 @app.post(
