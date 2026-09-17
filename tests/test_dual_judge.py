@@ -10,9 +10,9 @@
 
 from __future__ import annotations
 
-from pm import testing
+from pm import backend, testing
 from pm.graph import build_app
-from pm.nodes import _active_judges, _merge_judge_results
+from pm.nodes import _active_judges, _evaluate_one, _merge_judge_results
 from pm.schemas import DimensionScores, EvaluationResult
 from pm.state import initial_state
 
@@ -177,3 +177,36 @@ def test_dual_judge_dispute_full_loop():
     assert all(e.weighted_score == 6.0 for e in evals)
     assert all(e.judge_disagreement == 5.0 for e in evals)
     assert "未达标" in final["final_report"]
+
+
+# --------------------------------------------------------------------------
+# 4. 全评委失败的系统兜底（真实场景：双评委同时 429 / 端点不可达）
+# --------------------------------------------------------------------------
+def _judge_always_fail(role, model_cls, system, user, max_retries=3, overrides=None):
+    raise RuntimeError("评委端点不可达")
+
+
+def test_all_judges_fail_yields_system_fallback():
+    """两个评委都抛异常：不崩图，落 judge=system 的 1.0 兜底评估，错误逐个记账。"""
+    hook = backend.CallHook(structured=_judge_always_fail, plain=None, disable_cache=True)
+    errors: list[str] = []
+    run = {"test_case_index": 0, "test_input": "x", "output": "y"}
+    with backend.use(hook):
+        ev, n_calls, cache_hit = _evaluate_one(
+            run,
+            task="t",
+            context="",
+            prompt="p",
+            judges=["evaluator", "evaluator_b"],
+            judge_spec="",
+            q_warns=[],
+            errors=errors,
+        )
+    assert ev["judge"] == "system"
+    assert ev["model_reported_score"] == 1.0
+    assert ev["should_revise"] is False  # 基础设施问题，修订提示词无意义
+    assert any("全部评委评估失败" in i for i in ev["issues"])
+    assert "PM_EVALUATOR_*" in " ".join(ev["suggestions"])
+    assert n_calls == 0 and cache_hit is False
+    assert len(errors) == 2, f"两个评委的失败都要记账：{errors}"
+    assert "evaluator_b" in errors[-1]
