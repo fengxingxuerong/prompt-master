@@ -92,6 +92,7 @@ def _run_in_node(js: str, md: str) -> str:
         [shutil.which("node"), str(tmp), md],
         capture_output=True,
         text=True,
+        encoding="utf-8",  # node 的 stdout 恒为 UTF-8；不指定时 Windows 中文机会按 GBK 解码，reader 线程直接炸掉
         timeout=30,
         check=True,
     )
