@@ -290,4 +290,8 @@ prompt-master/
   其中风险最高的步骤 `pip install .` 已用 `pip install --dry-run .` 验证过能构建出
   `prompt-master-1.0.0`，但仍请首次构建后跑一次 `docker run` + `/api/health` 再上生产。
 
+## 许可证
+
+MIT（见 `LICENSE`）。
+
 ---
