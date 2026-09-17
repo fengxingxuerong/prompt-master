@@ -51,7 +51,11 @@ EXIT_UNDELIVERED = _cli.EXIT_UNDELIVERED
 LOG_DIR = _cli.LOG_DIR
 assert_mode_arg = _cli.assert_mode_arg
 emit_json_result = _cli.emit_json_result
-main = _cli.main
+# main 经 pm.cli 的 PEP 562 惰性导出（运行时按需拉起重依赖链）；mypy 会把
+# _cli.main 静态解析为同名子模块而报 "Module not callable"，故显式从子模块导入。
+# run_pipeline / selftest 只做兼容转发，属性访问走 __getattr__，同样惰性
+from pm.cli.main import main  # noqa: E402
+
 recursion_budget = _cli.recursion_budget
 run_pipeline = _cli.run_pipeline
 save_artifacts = _cli.save_artifacts

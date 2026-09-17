@@ -9,15 +9,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from pm.graph import mermaid
 from pm.state import initial_state
 
 from .agent_mode import agent_subcommand
 from .calibrate import _calibrate_command
 from .history import _history_command
 from .library import _library_command
-from .pipeline import run_pipeline
-from .selftest import selftest
 from .support import (
     EXIT_FAILED,
     _resolve_case_mode,
@@ -137,6 +134,10 @@ def main() -> int:
     setup_logging(args.verbose)
 
     if args.mermaid:
+        # 图结构依赖 pm.graph（langchain 链），延迟到真正要用时再 import，
+        # 让 --help / --dry-run 等轻路径保持 ~0.2s 启动
+        from pm.graph import mermaid
+
         print(mermaid())
         return 0
 
@@ -147,6 +148,8 @@ def main() -> int:
         )
 
     if args.selftest:
+        from .selftest import selftest  # selftest 依赖 pm.testing（重），同样延迟
+
         return selftest()
 
     if args.preflight:
@@ -279,6 +282,8 @@ def main() -> int:
 
     if not args.json:
         print(f"run_id: {init['run_id']}  目标模型: {args.target_model}")
+    from .pipeline import run_pipeline  # 真实流程入口：此时 langchain 链才被拉起
+
     try:
         final = run_pipeline(args, init)
         log_path, report_path = save_artifacts(final, args.out)

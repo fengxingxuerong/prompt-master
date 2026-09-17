@@ -220,7 +220,8 @@ def test_main_mermaid(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFix
 
 def test_main_selftest_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[int] = []
-    monkeypatch.setattr(cli_main, "selftest", lambda: called.append(1) or 0)
+    # main.py 的 selftest 延迟到分支内 import，patch 真实来源模块
+    monkeypatch.setattr("pm.cli.selftest.selftest", lambda: called.append(1) or 0)
     assert _run_main(monkeypatch, ["--selftest"]) == 0
     assert called == [1]
 
