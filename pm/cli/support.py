@@ -120,7 +120,11 @@ def _maybe_write_skill_md(state: dict[str, Any], report_path: Path) -> Path | No
     except Exception as e:  # noqa: BLE001 - 增强交付物失败不掩盖主报告
         print(f"⚠️ SKILL.md 渲染失败（不影响报告交付）：{type(e).__name__}: {e}", file=sys.stderr)
         return None
-    print(f"SKILL.md 已生成：{skill_path}")
+    # 进度提示一律走 stderr：--json 模式的 stdout 是 Agent 消费契约（恰好一个 JSON），
+    # 任何人类可读输出混进去都会让 json.loads 直接炸（实测：SKILL 行混入首行前）。
+    # 结构化路径由 save_artifacts 写进 state["skill_path"]，经 emit_json_result 下发。
+    print(f"SKILL.md 已生成：{skill_path}", file=sys.stderr)
+    state["skill_path"] = str(skill_path)
     return skill_path
 
 
@@ -146,6 +150,7 @@ def emit_json_result(final: dict[str, Any], log_path: Path, report_path: Path) -
         "errors": final.get("errors") or [],
         "report_path": str(report_path),
         "log_path": str(log_path),
+        "skill_path": final.get("skill_path"),
         "n_versions": len(versions),
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
