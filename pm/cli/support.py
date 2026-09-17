@@ -89,6 +89,8 @@ def save_artifacts(state: dict[str, Any], out: Path | None) -> tuple[Path, Path]
     report_path = out or (LOG_DIR / f"report_{run_id}.md")
     if isinstance(report_path, str):
         report_path = Path(report_path)
+    # --out 常来自智能体拼的路径：父目录不存在时自动补齐，而不是把整轮运行砸在最后一步
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report, encoding="utf-8")
     _maybe_write_skill_md(state, report_path)
     return log_path, report_path

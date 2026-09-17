@@ -113,7 +113,9 @@ def _calibrate_command(argv: list[str]) -> int:
                     "judge": ns.judge,
                     "analysis": analysis,
                     "drift": drift,
-                    "history_len": len(history) + (0 if ns.no_save else 1),
+                    # history 已 append（保存路径），len 即账本当前条数；
+                    # 旧写法再 +1 会把本次记录数成两倍，误导"已校准过几轮"的判断
+                    "history_len": len(history),
                     "saved": not ns.no_save,
                 },
                 ensure_ascii=False,

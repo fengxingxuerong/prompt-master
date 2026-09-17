@@ -86,11 +86,13 @@ def _library_recommend(ns: argparse.Namespace) -> int:
                     },
                 )
             )
-    # 同任务多轮去重：只保留每条 task 的最高分 run（否则 12 轮 e2e 的同一任务会霸榜）
+    # 同任务多轮去重：只保留每条 task 的最高分 run（否则 12 轮 e2e 的同一任务会霸榜）。
+    # 同 task 的相似度必然相同，所以这里按分数挑，而不是按遍历序先到先得
     best_by_task: dict[str, tuple[float, dict[str, Any]]] = {}
     for score, item in scored:
         key = item["task"]
-        if key not in best_by_task or score > best_by_task[key][0]:
+        cur = best_by_task.get(key)
+        if cur is None or (item["avg_score"] or 0) > (cur[1]["avg_score"] or 0):
             best_by_task[key] = (score, item)
     ranked = sorted(
         best_by_task.values(),

@@ -1,0 +1,452 @@
+"""pm/cli/ 异步客户端、校准、流水线与自检的函数级测试。
+
+- agent_mode：HTTP 客户端错误翻译、payload 组装、wait 轮询的终态/超时/失败分支
+- calibrate：样本护栏、漂移告警判定、--no-save 只看不记账
+- pipeline：interrupt 探测、假后端直跑、无效场景告警与交互 resume 循环
+- selftest：整条自检命令的三场景冒烟（假后端，不联网）
+"""
+
+from __future__ import annotations
+
+import argparse
+import io
+import json
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import calibrate_judge  # noqa: E402  # 仓库根顶层脚本，_calibrate_command 运行时按名导入
+from pm.cli import agent_mode  # noqa: E402
+from pm.cli import calibrate as cli_calibrate  # noqa: E402
+from pm.cli import support as cli_support  # noqa: E402
+from pm.cli.history import _TERMINAL_STATUS  # noqa: E402
+from pm.cli.pipeline import _pending_interrupts, run_pipeline  # noqa: E402
+from pm.cli.selftest import selftest  # noqa: E402
+from pm.state import initial_state  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# agent_mode._http_json：错误必须带可执行建议
+# ---------------------------------------------------------------------------
+class _FakeResp:
+    def __init__(self, body: bytes) -> None:
+        self._b = body
+
+    def read(self) -> bytes:
+        return self._b
+
+    def __enter__(self) -> _FakeResp:
+        return self
+
+    def __exit__(self, *args: Any) -> bool:
+        return False
+
+
+def test_http_json_ok_post_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.request as ur
+
+    captured: dict[str, Any] = {}
+
+    def fake_urlopen(req: Any, timeout: float | None = None) -> _FakeResp:
+        captured["method"] = req.get_method()
+        captured["url"] = req.full_url
+        captured["data"] = req.data
+        return _FakeResp(b'{"ok": true}')
+
+    monkeypatch.setattr(ur, "urlopen", fake_urlopen)
+    assert agent_mode._http_json("POST", "http://x/api/optimize", {"a": 1}) == {"ok": True}
+    assert captured["method"] == "POST"
+    assert json.loads(captured["data"].decode("utf-8")) == {"a": 1}
+
+
+def test_http_json_http_error_includes_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+    import urllib.request as ur
+
+    def fake_urlopen(req: Any, timeout: float | None = None) -> _FakeResp:
+        raise urllib.error.HTTPError(req.full_url, 500, "boom", {}, io.BytesIO(b"server died"))
+
+    monkeypatch.setattr(ur, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError) as ei:
+        agent_mode._http_json("GET", "http://x/api/status/r1")
+    assert "HTTP 500" in str(ei.value) and "server died" in str(ei.value)
+
+
+def test_http_json_url_error_suggests_run_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+    import urllib.request as ur
+
+    def fake_urlopen(req: Any, timeout: float | None = None) -> _FakeResp:
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(ur, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError) as ei:
+        agent_mode._http_json("GET", "http://x/api/status/r1")
+    assert "run_server.py" in str(ei.value)
+
+
+# ---------------------------------------------------------------------------
+# agent_mode：server 解析与子命令
+# ---------------------------------------------------------------------------
+def test_agent_server_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PM_SERVER_URL", raising=False)
+    assert agent_mode._agent_server(argparse.Namespace(server=None)) == "http://127.0.0.1:8080"
+    monkeypatch.setenv("PM_SERVER_URL", "http://env-host:9000/")
+    # 环境变量生效 + 末尾斜杠去除
+    assert agent_mode._agent_server(argparse.Namespace(server=None)) == "http://env-host:9000"
+    # 显式 --server 最优先
+    ns = argparse.Namespace(server="http://cli-host:1/")
+    assert agent_mode._agent_server(ns) == "http://cli-host:1"
+
+
+def test_agent_submit_requires_task() -> None:
+    with pytest.raises(SystemExit):
+        agent_mode.agent_subcommand("submit", [])
+
+
+def test_agent_submit_payload_from_cases_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake(
+        method: str, url: str, payload: dict[str, Any] | None = None, timeout: float = 30.0
+    ) -> dict[str, Any]:
+        seen.update(method=method, url=url, payload=payload)
+        return {"run_id": "R1"}
+
+    monkeypatch.setattr(agent_mode, "_http_json", fake)
+    cf = tmp_path / "cases.json"
+    cf.write_text(
+        json.dumps(
+            [{"input": "a", "expected": "b", "mode": "rule"}, {"input": "c"}], ensure_ascii=False
+        ),
+        encoding="utf-8",
+    )
+    assert agent_mode.agent_subcommand("submit", ["--task", "T", "--cases-file", str(cf)]) == 0
+    assert seen["method"] == "POST" and seen["url"].endswith("/api/optimize")
+    p = seen["payload"]
+    # 用例数以用例集为准；mode 逐条透传；无 mode 的用例留空串
+    assert p["n_test_cases"] == 2
+    assert p["test_cases"][0]["assert_mode"] == "rule"
+    assert p["test_cases"][1]["assert_mode"] == ""
+    assert p["assertion_mode"] == "contains"
+
+    # 无用例集：不带 test_cases，断言模式固定 contains
+    seen.clear()
+    assert agent_mode.agent_subcommand("submit", ["--task", "T", "--assert-mode", "rule"]) == 0
+    p2 = seen["payload"]
+    assert "test_cases" not in p2 and p2["assertion_mode"] == "contains"
+
+
+def test_agent_status_and_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        agent_mode,
+        "_http_json",
+        lambda m, u, payload=None, timeout=30.0: {"status": "passed", "report": "R 内容"},
+    )
+    assert agent_mode.agent_subcommand("status", ["r1"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "passed"
+
+    assert agent_mode.agent_subcommand("report", ["r1"]) == 0
+    assert json.loads(capsys.readouterr().out)["report"] == "R 内容"
+
+    out = tmp_path / "report.md"
+    assert agent_mode.agent_subcommand("report", ["r1", "--out", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "R 内容"
+    assert json.loads(capsys.readouterr().out)["report_path"] == str(out)
+
+
+def test_agent_wait_reaches_terminal_and_fetches_report(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    polls: list[str] = []
+
+    def fake(
+        method: str, url: str, payload: dict[str, Any] | None = None, timeout: float = 30.0
+    ) -> dict[str, Any]:
+        polls.append(url)
+        if "/api/status/" in url:
+            if len([p for p in polls if "/api/status/" in p]) == 1:
+                return {"status": "running", "iteration": 1}
+            return {
+                "status": "passed",
+                "aggregate": {"avg_score": 9.0},
+                "iteration": 2,
+                "llm_calls": 9,
+            }
+        return {"report": "最终报告"}
+
+    monkeypatch.setattr(agent_mode, "_http_json", fake)
+    monkeypatch.setattr(agent_mode.time, "sleep", lambda s: None)
+    assert agent_mode.agent_subcommand("wait", ["r1", "--interval", "5"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "passed"
+    assert payload["report"] == "最终报告"
+    assert payload["aggregate"] == {"avg_score": 9.0}
+
+
+def test_agent_wait_timeout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        agent_mode,
+        "_http_json",
+        lambda m, u, payload=None, timeout=30.0: {"status": "running"},
+    )
+    monkeypatch.setattr(agent_mode.time, "sleep", lambda s: None)
+    clock = iter([0.0, 1e12])  # deadline=max(30,timeout) 后直接超时
+    monkeypatch.setattr(agent_mode.time, "monotonic", lambda: next(clock))
+    assert agent_mode.agent_subcommand("wait", ["r1"]) == cli_support.EXIT_FAILED
+    assert json.loads(capsys.readouterr().out)["error"] == "等待超时"
+
+
+def test_agent_wait_failed_terminal_no_report_fetch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    urls: list[str] = []
+
+    def fake(
+        method: str, url: str, payload: dict[str, Any] | None = None, timeout: float = 30.0
+    ) -> dict[str, Any]:
+        urls.append(url)
+        return {"status": "failed", "error": "炸了"}
+
+    monkeypatch.setattr(agent_mode, "_http_json", fake)
+    monkeypatch.setattr(agent_mode.time, "sleep", lambda s: None)
+    assert agent_mode.agent_subcommand("wait", ["r1"]) == cli_support.EXIT_FAILED
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "failed" and payload["report"] == ""
+    assert all("/api/report/" not in u for u in urls), "failed 终态不该再拉报告"
+    assert "passed" in _TERMINAL_STATUS  # 终态集合与 history 共用，别漂移
+
+
+# ---------------------------------------------------------------------------
+# calibrate：样本护栏 + 漂移账本
+# ---------------------------------------------------------------------------
+def _patch_calib(
+    monkeypatch: pytest.MonkeyPatch, analysis: dict[str, Any], errors: list[Any] | None = None
+) -> None:
+    monkeypatch.setattr(calibrate_judge, "load_samples", lambda p: [{"id": "s1"}])
+    monkeypatch.setattr(
+        calibrate_judge, "calibrate", lambda samples, judge: (analysis, list(errors or []))
+    )
+    monkeypatch.setattr(calibrate_judge, "render_report", lambda judge, a: f"REPORT-{judge}")
+
+
+def test_calibrate_missing_samples(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(tmp_path / "nope.json")])
+        == cli_support.EXIT_CONFIG
+    )
+    assert "样本加载失败" in capsys.readouterr().err
+
+
+def test_calibrate_empty_samples(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    f = tmp_path / "s.json"
+    f.write_text("[]", encoding="utf-8")
+    assert cli_calibrate._calibrate_command(["--samples", str(f)]) == cli_support.EXIT_CONFIG
+    assert "样本为空" in capsys.readouterr().err
+
+
+def test_calibrate_all_anchors_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _patch_calib(monkeypatch, {}, errors=[("s1", "超时")])
+    assert cli_calibrate._calibrate_command([]) == cli_support.EXIT_FAILED
+    err = capsys.readouterr().err
+    assert "[SKIP] s1" in err and "全部锚点评估失败" in err
+
+
+def test_calibrate_first_run_no_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from test_cli_units import _patch_log_dir  # tests 无包结构，顶层互导
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.2, "mae": 0.3, "r": 0.9})
+    assert cli_calibrate._calibrate_command(["--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["drift"] is None and payload["saved"] is True
+    assert payload["history_len"] == 1
+    assert (tmp_path / "judge_calibration_history.json").exists()
+
+
+def test_calibrate_drift_alert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from test_cli_units import _patch_log_dir  # tests 无包结构，顶层互导
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    history = [{"ts": "t0", "judge": "evaluator", "n": 5, "bias": 0.9, "mae": 0.9, "r": 0.8}]
+    (tmp_path / "judge_calibration_history.json").write_text(json.dumps(history), encoding="utf-8")
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.2, "mae": 0.3, "r": 0.9})
+    assert cli_calibrate._calibrate_command(["--json"]) == 0
+    d = json.loads(capsys.readouterr().out)["drift"]
+    assert d["delta_bias"] == -0.7 and d["delta_mae"] == -0.6
+    assert d["drifted"] is True  # 任一变化超 ±0.5 即告警
+    # 账本在旧记录之后追加
+    saved = json.loads((tmp_path / "judge_calibration_history.json").read_text(encoding="utf-8"))
+    assert len(saved) == 2 and saved[-1]["bias"] == 0.2
+
+
+def test_calibrate_no_save_keeps_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from test_cli_units import _patch_log_dir  # tests 无包结构，顶层互导
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.0, "mae": 0.0, "r": None})
+    assert cli_calibrate._calibrate_command(["--json", "--no-save"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["saved"] is False and payload["history_len"] == 0 and payload["drift"] is None
+    assert not (tmp_path / "judge_calibration_history.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# pipeline：interrupt 探测与执行
+# ---------------------------------------------------------------------------
+def test_pending_interrupts_collects_values() -> None:
+    snap = SimpleNamespace(
+        tasks=[
+            SimpleNamespace(
+                interrupts=[SimpleNamespace(value={"q": 1}), SimpleNamespace(value={"q": 2})]
+            ),
+            SimpleNamespace(interrupts=[]),
+        ]
+    )
+    app = SimpleNamespace(get_state=lambda config: snap)
+    assert _pending_interrupts(app, {}) == [{"q": 1}, {"q": 2}]
+
+
+def test_run_pipeline_fake_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PM_FAKE_BACKEND", "progress")
+    args = SimpleNamespace(checkpoint=None, thread_id=None, interactive=False, max_iter=1)
+    init = initial_state(
+        task="让 AI 分析销售数据",
+        target_model="fake-target",
+        n_test_cases=2,
+        max_iterations=1,
+        auto_clarify=True,
+    )
+    final = run_pipeline(args, init)
+    assert final["run_id"] == init["run_id"]
+    assert "llm_usage" in final  # 台账快照写回 state
+
+
+def test_run_pipeline_invalid_scenario_warns(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pm.cli import pipeline as cli_pipeline
+
+    monkeypatch.setenv("PM_FAKE_BACKEND", "bogus")
+    invoked: list[Any] = []
+
+    class _Stub:
+        def invoke(self, init: Any, config: Any) -> dict[str, Any]:
+            invoked.append(init)
+            return {}
+
+        def get_state(self, config: Any) -> SimpleNamespace:
+            return SimpleNamespace(values={"run_id": "stub", "status": "failed"})
+
+    monkeypatch.setattr(cli_pipeline, "build_app", lambda sqlite_path=None: _Stub())
+    args = SimpleNamespace(checkpoint=None, thread_id="t9", interactive=False, max_iter=1)
+    final = run_pipeline(args, {"run_id": "stub"})
+    assert "不是可用场景" in capsys.readouterr().out and invoked
+    assert "llm_usage" in final
+
+
+def test_run_pipeline_interactive_resumes_interrupts(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """交互模式：命中澄清中断 → 读回答 → resume → 下轮无中断收尾。"""
+    from pm.cli import pipeline as cli_pipeline
+
+    monkeypatch.setenv("PM_FAKE_BACKEND", "progress")
+    resumes: list[Any] = []
+    states = iter(
+        [
+            SimpleNamespace(
+                tasks=[
+                    SimpleNamespace(
+                        interrupts=[
+                            SimpleNamespace(
+                                value={"task_summary": "销售分析", "questions": ["口径是什么？"]}
+                            )
+                        ]
+                    )
+                ]
+            ),
+            SimpleNamespace(tasks=[]),
+            SimpleNamespace(values={"run_id": "stub", "final_report": "R"}),
+        ]
+    )
+    app = SimpleNamespace(
+        invoke=lambda init, config: resumes.append("invoke"),
+        get_state=lambda config: next(states),
+    )
+    monkeypatch.setattr(cli_pipeline, "build_app", lambda sqlite_path=None: app)
+    monkeypatch.setattr("builtins.input", lambda *a: "按月度口径")
+
+    args = SimpleNamespace(checkpoint=None, thread_id="t1", interactive=True, max_iter=1)
+    final = run_pipeline(args, {"run_id": "stub"})
+    assert final["final_report"] == "R"
+    assert len(resumes) == 2  # 初次 invoke + resume
+    assert "口径是什么" in capsys.readouterr().out
+
+
+def test_run_pipeline_interactive_eof_falls_back(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """stdin 关闭（EOF）时按"按你的推断继续"推进，不挂死。"""
+    from pm.cli import pipeline as cli_pipeline
+
+    monkeypatch.setenv("PM_FAKE_BACKEND", "progress")
+    resumes: list[Any] = []
+    states = iter(
+        [
+            SimpleNamespace(
+                tasks=[SimpleNamespace(interrupts=[SimpleNamespace(value={"questions": ["Q"]})])]
+            ),
+            SimpleNamespace(tasks=[]),
+            SimpleNamespace(values={"run_id": "stub"}),
+        ]
+    )
+
+    class _CaptureApp:
+        def invoke(self, init: Any, config: Any) -> dict[str, Any]:
+            resumes.append(init)
+            return {}
+
+        def get_state(self, config: Any) -> Any:
+            return next(states)
+
+    monkeypatch.setattr(cli_pipeline, "build_app", lambda sqlite_path=None: _CaptureApp())
+
+    def _eof(*args: Any) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _eof)
+    args = SimpleNamespace(checkpoint=None, thread_id="t2", interactive=True, max_iter=1)
+    assert run_pipeline(args, {"run_id": "stub"})["run_id"] == "stub"
+    assert len(resumes) == 2
+
+
+# ---------------------------------------------------------------------------
+# selftest：整条自检命令冒烟（三场景假后端）
+# ---------------------------------------------------------------------------
+def test_selftest_command_passes(capsys: pytest.CaptureFixture[str]) -> None:
+    assert selftest() == 0
+    out = capsys.readouterr().out
+    assert "自检通过" in out
+    assert "[FAIL]" not in out, "三场景任一检查失败都算自检失败"
