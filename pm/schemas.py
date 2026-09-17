@@ -504,7 +504,7 @@ class TestRun(BaseModel):
     error: str | None = None
     latency_ms: int | None = None
     cache_hit: bool = Field(default=False, description="是否命中目标输出缓存（断点续跑）")
-    assertion: dict | None = Field(
+    assertion: dict[str, Any] | None = Field(
         default=None,
         description="事实断言结果（ground-truth，pm/assertions.py）；无标注用例为 None",
     )

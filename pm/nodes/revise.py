@@ -33,7 +33,7 @@ def _attempted_text(state: State) -> str:
     return "\n".join(lines) if lines else "（无历史记录，本轮是首次修订）"
 
 
-def revise_node(state: State) -> dict:
+def revise_node(state: State) -> dict[str, Any]:
     node = "revise"
     prev_prompt = state["prompt"]
     # 字符预算注入：抽象的"净增量≤30%"在真实端点上执行不稳（实测 572/578 字符

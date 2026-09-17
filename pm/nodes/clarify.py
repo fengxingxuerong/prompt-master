@@ -19,7 +19,7 @@ from .common import _apply
 logger = logging.getLogger("pm.nodes.clarify")
 
 
-def clarify_node(state: State) -> dict:
+def clarify_node(state: State) -> dict[str, Any]:
     node = "clarify"
     task = state["task"]
     context = state.get("context", "")
@@ -98,7 +98,7 @@ def clarify_node(state: State) -> dict:
     )
 
 
-def ask_user_node(state: State) -> dict:
+def ask_user_node(state: State) -> dict[str, Any]:
     """独立的提问节点。
 
     为什么必须独立成节点（这是个容易踩的坑）：

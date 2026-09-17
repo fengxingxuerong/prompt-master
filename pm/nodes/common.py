@@ -15,7 +15,9 @@ from ..state import State, merge_state, trace_event
 logger = logging.getLogger("pm.nodes")
 
 
-def _apply(state: State, node: str, patch: dict[str, Any], event: str, **payload) -> dict:
+def _apply(
+    state: State, node: str, patch: dict[str, Any], event: str, **payload: Any
+) -> dict[str, Any]:
     """把节点产出与日志事件合并成一份返回值。"""
     log = trace_event(state, node, event, **payload)
     return merge_state(patch, log)

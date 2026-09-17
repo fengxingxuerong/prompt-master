@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import os
-from typing import Any
+from typing import Any, cast
 
 from pm.graph import build_app
 from pm.llm import usage_scope
@@ -15,16 +16,16 @@ from .support import recursion_budget
 # --------------------------------------------------------------------------
 # 交互模式：处理 interrupt
 # --------------------------------------------------------------------------
-def _pending_interrupts(app, config):
+def _pending_interrupts(app: Any, config: Any) -> list[dict[str, Any]]:
     snap = app.get_state(config)
-    found = []
+    found: list[dict[str, Any]] = []
     for task in getattr(snap, "tasks", []) or []:
         for it in getattr(task, "interrupts", []) or []:
             found.append(it.value)
     return found
 
 
-def run_pipeline(args, init: dict) -> dict:
+def run_pipeline(args: argparse.Namespace, init: dict[str, Any]) -> dict[str, Any]:
     from langgraph.types import Command
 
     app = build_app(sqlite_path=args.checkpoint)
@@ -80,4 +81,4 @@ def run_pipeline(args, init: dict) -> dict:
 
     # 台账快照写回 state：报告与 /api/status 直接展示（usage_scope 外已无记账）
     final["llm_usage"] = ledger.snapshot()
-    return final
+    return cast("dict[str, Any]", final)  # app.get_state().values 经 langgraph（skip）返回 Any

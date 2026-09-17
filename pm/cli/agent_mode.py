@@ -7,13 +7,15 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .history import _TERMINAL_STATUS
 from .support import EXIT_FAILED, _result_exit_code
 
 
-def _http_json(method: str, url: str, payload: dict | None = None, timeout: float = 30.0) -> dict:
+def _http_json(
+    method: str, url: str, payload: dict[str, Any] | None = None, timeout: float = 30.0
+) -> dict[str, Any]:
     """极简 JSON HTTP 客户端。非 2xx / 连不上都抛 RuntimeError（带可执行建议）。"""
     import urllib.error
     import urllib.request
@@ -24,7 +26,7 @@ def _http_json(method: str, url: str, payload: dict | None = None, timeout: floa
         req.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            return cast("dict[str, Any]", json.loads(resp.read().decode("utf-8")))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")[:300]
         raise RuntimeError(f"HTTP {e.code} {url}: {body}") from e

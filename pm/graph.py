@@ -23,6 +23,7 @@ LangGraph 图装配。
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -81,7 +82,7 @@ def route_after_evaluate(state: State) -> str:
 # --------------------------------------------------------------------------
 # 构建
 # --------------------------------------------------------------------------
-def build_graph(checkpointer=None):
+def build_graph(checkpointer: Any = None) -> Any:
     g = StateGraph(State)
 
     g.add_node("clarify", nodes.clarify_node)
@@ -127,7 +128,7 @@ def build_graph(checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 
 
-def build_app(sqlite_path: str | None = None):
+def build_app(sqlite_path: str | None = None) -> Any:
     """编译可执行应用。
 
     sqlite_path 为空时用 MemorySaver（进程内，够用于单轮运行与 interrupt）；
@@ -148,7 +149,7 @@ def build_app(sqlite_path: str | None = None):
 def mermaid() -> str:
     """导出图的可视化描述，便于文档与调试。"""
     try:
-        return build_graph(checkpointer=MemorySaver()).get_graph().draw_mermaid()
+        return cast("str", build_graph(checkpointer=MemorySaver()).get_graph().draw_mermaid())
     except Exception as e:  # noqa: BLE001
         logger.warning("生成 mermaid 失败：%s", e)
         return ""

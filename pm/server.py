@@ -26,9 +26,9 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -75,7 +75,7 @@ def _scheduled_calibrate_once(judge: str = "evaluator") -> dict[str, Any] | None
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     try:
-        return json.loads(proc.stdout)
+        return cast("dict[str, Any] | None", json.loads(proc.stdout))
     except json.JSONDecodeError:
         logger.warning("定期校准输出异常（exit=%s）：%s", proc.returncode, proc.stderr[-200:])
         return None
@@ -192,7 +192,7 @@ _CSP_EXEMPT_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 
 @app.middleware("http")
-async def _security_headers(request: Request, call_next):
+async def _security_headers(request: Request, call_next: Any) -> Response:
     """给所有响应补基础安全头；控制台页额外上带 nonce 的 CSP。
 
     nonce 必须在**处理请求之前**生成并放进 request.state，路由渲染 HTML 时才能用同一个值；
@@ -374,7 +374,7 @@ class RaceReportResponse(BaseModel):
 # 路由
 # --------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-async def web_console(request: Request):
+async def web_console(request: Request) -> str:
     """Web 控制台（单 HTML 页面）。
 
     nonce 占位符在渲染时替换成中间件为本请求生成的值；替换后 HTML 与响应头里的
@@ -386,12 +386,12 @@ async def web_console(request: Request):
 
 
 @app.get("/api/health")
-async def health():
+async def health() -> dict[str, Any]:
     return {"status": "ok", "service": "prompt-master"}
 
 
 @app.get("/api/history")
-async def history_endpoint():
+async def history_endpoint() -> JSONResponse:
     """运行历史聚合 + 同任务 Δ 显著性（Web 历史面板的数据源）。
 
     subprocess 调 `run.py history --json`：与 CLI/MCP 单一事实来源。
@@ -430,7 +430,7 @@ async def history_endpoint():
     response_model=OptimizeResponse,
     dependencies=[Depends(require_token)],
 )
-async def optimize(req: OptimizeRequest, request: Request):
+async def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     await enforce_rate_limit(request, cost=1)
     run_id = uuid.uuid4().hex[:12]
     seeds = [c.model_dump() for c in req.test_cases] if req.test_cases else None
@@ -455,7 +455,7 @@ async def optimize(req: OptimizeRequest, request: Request):
 
 
 @app.get("/api/status/{run_id}", response_model=StatusResponse)
-async def status(run_id: str):
+async def status(run_id: str) -> StatusResponse:
     s = _scheduler.get_status(run_id)
     if s is None:
         raise HTTPException(status_code=404, detail=f"run_id {run_id} 不存在")
@@ -463,7 +463,7 @@ async def status(run_id: str):
 
 
 @app.get("/api/report/{run_id}", response_model=ReportResponse)
-async def report(run_id: str):
+async def report(run_id: str) -> ReportResponse:
     rpt = _scheduler.get_report(run_id)
     if rpt is None:
         raise HTTPException(status_code=404, detail=f"run_id {run_id} 不存在或报告未生成")
@@ -471,7 +471,7 @@ async def report(run_id: str):
 
 
 @app.post("/api/race", response_model=RaceResponse, dependencies=[Depends(require_token)])
-async def race(req: RaceRequest, request: Request):
+async def race(req: RaceRequest, request: Request) -> RaceResponse:
     # 赛马的成本 = 参赛任务数：一次 10 任务提交按 10 次计费，不能让批量入口变成限流旁路
     await enforce_rate_limit(request, cost=len(req.tasks))
     specs = [
@@ -491,7 +491,7 @@ async def race(req: RaceRequest, request: Request):
 
 
 @app.get("/api/race/{race_id}", response_model=RaceStatusResponse)
-async def race_status(race_id: str):
+async def race_status(race_id: str) -> RaceStatusResponse:
     s = _scheduler.get_race_status(race_id)
     if s is None:
         raise HTTPException(status_code=404, detail=f"race_id {race_id} 不存在")
@@ -499,7 +499,7 @@ async def race_status(race_id: str):
 
 
 @app.get("/api/race/{race_id}/report", response_model=RaceReportResponse)
-async def race_report(race_id: str):
+async def race_report(race_id: str) -> RaceReportResponse:
     rpt = _scheduler.get_race_report(race_id)
     if rpt is None:
         raise HTTPException(status_code=404, detail=f"race_id {race_id} 不存在或报告未生成")

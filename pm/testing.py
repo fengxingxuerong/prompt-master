@@ -112,7 +112,7 @@ def _fake_structured(
     system: str,
     user: str,
     max_retries: int = 3,
-    overrides: dict | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     st = _state()
     scenario = st.scenario_now()
@@ -227,7 +227,7 @@ def _fake_structured(
 
 
 def _fake_plain(
-    role: str, system: str, user: str, overrides: dict | None = None
+    role: str, system: str, user: str, overrides: dict[str, Any] | None = None
 ) -> tuple[str, dict[str, Any]]:
     n = _bump(role)
     meta = {

@@ -24,7 +24,7 @@ import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .graph import build_app
 from .llm import usage_scope
@@ -152,7 +152,7 @@ class TaskManager:
         self._tasks = make_view(self.store, "task")
         self._races = make_view(self.store, "race")
         self._lock = threading.Lock()
-        self._futures: dict[str, Future] = {}
+        self._futures: dict[str, Future[None]] = {}
         self._max_records = (
             max_records if max_records is not None else _int_env("PM_MAX_TASKS", 200)
         )
@@ -203,7 +203,7 @@ class TaskManager:
         if rec is not None:
             report = (rec.result or {}).get("final_report") if rec.result else None
             if report:
-                return report
+                return cast("str", report)
             if rec.report_path and rec.report_path.exists():
                 return rec.report_path.read_text(encoding="utf-8")
         # 进程重启 / 记录被淘汰后，仍可从 logs/ 找回

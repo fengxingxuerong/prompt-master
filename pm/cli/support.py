@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 # 原 run.py 同款：仓库根/logs（拆包后 __file__ 深了两层，改用 parents[2] 回到仓库根）
 LOG_DIR = Path(os.getenv("PM_LOG_DIR") or (Path(__file__).resolve().parents[2] / "logs"))
@@ -28,7 +29,7 @@ def setup_logging(verbose: bool) -> None:
 
 
 def _resolve_case_mode(
-    item: dict, default_mode: str, index: int, p: argparse.ArgumentParser
+    item: dict[str, Any], default_mode: str, index: int, p: argparse.ArgumentParser
 ) -> str:
     """取这条用例自己的 mode；没写就用全局值。非法值直接报错而不是静默回退。
 
@@ -76,7 +77,7 @@ def recursion_budget(max_iterations: int) -> int:
     return max(40, 4 * per_run)
 
 
-def save_artifacts(state: dict, out: Path | None) -> tuple[Path, Path]:
+def save_artifacts(state: dict[str, Any], out: Path | None) -> tuple[Path, Path]:
     LOG_DIR.mkdir(exist_ok=True)
     run_id = state.get("run_id", "unknown")
     log_path = LOG_DIR / f"run_{run_id}.json"
@@ -90,10 +91,10 @@ def save_artifacts(state: dict, out: Path | None) -> tuple[Path, Path]:
         report_path = Path(report_path)
     report_path.write_text(report, encoding="utf-8")
     _maybe_write_skill_md(state, report_path)
-    return log_path, report_path  # type: ignore[return-value]
+    return log_path, report_path
 
 
-def _maybe_write_skill_md(state: dict, report_path: Path) -> Path | None:
+def _maybe_write_skill_md(state: dict[str, Any], report_path: Path) -> Path | None:
     """OpenClaw 方向（2026-09-16）：达标运行顺手产出 SKILL.md（部署即用）。
 
     - 仅 status=passed 且达标版本有正文时写出，路径与报告同目录；
@@ -121,7 +122,7 @@ def _maybe_write_skill_md(state: dict, report_path: Path) -> Path | None:
     return skill_path
 
 
-def emit_json_result(final: dict, log_path: Path, report_path: Path) -> None:
+def emit_json_result(final: dict[str, Any], log_path: Path, report_path: Path) -> None:
     """智能体模式的机器可读出口：stdout 恰好一个 JSON 对象，其余信息走文件/日志。
 
     字段以 Agent 的决策需求为准：状态、分数（含保守下界）、最佳提示词、

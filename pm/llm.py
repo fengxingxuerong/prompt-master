@@ -19,11 +19,11 @@ import os
 import re
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from dotenv import load_dotenv
 from langchain_core.language_models import BaseChatModel
@@ -373,10 +373,10 @@ def _invoke_with_conn_retry(role: str, call: Any) -> Any:
 
 def _invoke_with_rate_limit_retry(
     role: str,
-    invoke_fn,  # Callable[[BaseChatModel], Any]：接收 llm 实例执行一次调用
+    invoke_fn: Callable[[Any], Any],  # 接收 llm 实例执行一次调用
     overrides: dict[str, Any] | None = None,
     deadline: float | None = None,
-):
+) -> Any:
     """带 429 退避与 Key 轮换的调用封装。
 
     每次撞到限流：先退避等待，再轮换到 Key 池中的下一个 Key 重建客户端重试；
@@ -556,14 +556,14 @@ def get_llm(role: str, overrides: dict[str, Any] | None = None) -> BaseChatModel
 # --------------------------------------------------------------------------
 # JSON 提取：从可能带围栏/前后缀的文本里抠出第一个合法 JSON 对象
 # --------------------------------------------------------------------------
-def extract_json_object(text: str) -> dict | None:
+def extract_json_object(text: str) -> dict[str, Any] | None:
     if not text:
         return None
     # 优先处理 ```json 围栏
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fenced:
         try:
-            return json.loads(fenced.group(1))
+            return cast("dict[str, Any] | None", json.loads(fenced.group(1)))
         except json.JSONDecodeError:
             pass
 
@@ -589,7 +589,7 @@ def extract_json_object(text: str) -> dict | None:
                 depth -= 1
                 if depth == 0:
                     try:
-                        return json.loads(text[start : i + 1])
+                        return cast("dict[str, Any] | None", json.loads(text[start : i + 1]))
                     except json.JSONDecodeError:
                         break
         start = text.find("{", start + 1)
@@ -893,7 +893,7 @@ def structured_call(
     # 演示模式 / 自测注入的钩子：只影响当前线程或当前异步任务，不改动模块属性（C4）
     hook = backend.current()
     if hook is not None and hook.structured is not None:
-        return hook.structured(  # type: ignore[no-any-return]
+        return hook.structured(
             role, model_cls, system, user, max_retries=max_retries, overrides=overrides
         )
 
@@ -982,9 +982,13 @@ def structured_call(
             # 闭包按默认参数绑定当前轮的 temp/messages，避免 B023 循环变量捕获
             resp = _invoke_with_rate_limit_retry(
                 role,
-                lambda llm, _t=temp, _msgs=messages: llm.with_config(
-                    temperature=max(_t, 0.0)
-                ).invoke(_msgs),
+                # mypy 无法对带默认参数的 lambda 完成推断，显式 cast 到目标签名
+                cast(
+                    "Callable[[Any], Any]",
+                    lambda llm, _t=temp, _msgs=messages: llm.with_config(
+                        temperature=max(_t, 0.0)
+                    ).invoke(_msgs),
+                ),
                 overrides,
                 deadline=limit_deadline,
             )

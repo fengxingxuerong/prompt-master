@@ -169,7 +169,7 @@ def main() -> int:
     if len(task) < 4 or len(task) > 8000:
         p.error(f"需求描述长度需在 4-8000 字之间（当前 {len(task)} 字）")
 
-    seed_cases: list[dict] = []
+    seed_cases: list[dict[str, Any]] = []
     if args.cases_file:
         try:
             raw = json.loads(Path(args.cases_file).read_text(encoding="utf-8"))

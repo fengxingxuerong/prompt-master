@@ -72,7 +72,7 @@ def pick_best(state: ReportState) -> tuple[dict[str, Any], str]:
     这里明确：达标即取当前版；未达标则回溯所有版本取 avg_score 最高者，
     并如实标注未达标与遗留问题 —— 不粉饰结果。
     """
-    versions: list[dict] = state.get("prompt_versions") or []
+    versions: list[dict[str, Any]] = state.get("prompt_versions") or []
     status = state.get("status", "running")
     scored = [v for v in versions if v.get("avg_score") is not None]
     if status == "passed" and versions:
@@ -90,7 +90,7 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     status = state.get("status", "running")
     iteration = state.get("iteration", 0)
     agg = state.get("aggregate") or {}
-    versions: list[dict] = state.get("prompt_versions") or []
+    versions: list[dict[str, Any]] = state.get("prompt_versions") or []
     best, best_note = pick_best(state)
 
     lines: list[str] = []

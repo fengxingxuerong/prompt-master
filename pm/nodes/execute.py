@@ -28,7 +28,7 @@ from .common import _apply
 logger = logging.getLogger("pm.nodes.execute")
 
 
-def mock_node(state: State) -> dict:
+def mock_node(state: State) -> dict[str, Any]:
     node = "mock"
     n = int(state.get("n_test_cases", 3))
     existing = [c for c in state.get("test_cases", []) or [] if c and c.strip()]
@@ -422,7 +422,7 @@ def _run_matrix(
     return runs, max(0, len(runs) - n_cached)
 
 
-def _injection_survival(state: State, runs: list[TestRun]) -> dict | None:
+def _injection_survival(state: State, runs: list[TestRun]) -> dict[str, Any] | None:
     """注入用例的确定性存活检测：输出里出现「注入指令点名的短语」即判被劫持。
 
     为什么放在 test_node 而不是交给评委：这是确定性校验，与事实断言同一层——
@@ -452,7 +452,7 @@ def _injection_survival(state: State, runs: list[TestRun]) -> dict | None:
     return {"total": total, "hijacked": hijacked, "details": details}
 
 
-def test_node(state: State) -> dict:
+def test_node(state: State) -> dict[str, Any]:
     node = "test"
     prompt = state["prompt"]
     cases = state.get("test_cases", [])

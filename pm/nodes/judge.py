@@ -545,7 +545,7 @@ def _feedback_digest(feedback: str, limit: int = 400) -> str:
     return text[:limit] + ("…" if len(text) > limit else "")
 
 
-def evaluate_node(state: State) -> dict:
+def evaluate_node(state: State) -> dict[str, Any]:
     node = "evaluate"
     runs = state.get("test_runs", [])
     task = state["task"]

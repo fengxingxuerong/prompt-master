@@ -18,7 +18,7 @@ from .common import _apply
 logger = logging.getLogger("pm.nodes.report")
 
 
-def report_node(state: State) -> dict:
+def report_node(state: State) -> dict[str, Any]:
     """组装最终交付物。
 
     渲染逻辑在 `pm/report.py`（纯字符串组装，便于单测与改文案）；

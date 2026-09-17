@@ -78,8 +78,18 @@ files = ["pm", "run.py", "run_server.py"]
 ignore_missing_imports = true
 # 不跟随解析第三方包（numpy 等 stub 在 3.13 下有语法兼容问题，且非本项目代码）
 follow_imports = "skip"
-# 存量代码先用非严格模式：只保证显式标注的函数签名一致
-check_untyped_defs = false
-disallow_untyped_defs = false
-warn_unused_ignores = false
-no_implicit_optional = true
+# 2026-09-17 起全量 strict：存量代码在 check_untyped_defs 档位本就 0 错，
+# 满血 strict 的缺口（裸泛型 / 缺签名 / 返回 Any）已全部修齐
+strict = true
+
+[[tool.mypy.overrides]]
+# pydantic BaseModel 因 follow_imports=skip 被判 Any，继承它的模型类只能豁免
+# disallow_subclassing_any；模型字段本身均已完整标注
+module = ["pm.schemas", "pm.llm", "pm.assertions", "pm.server"]
+disallow_subclassing_any = false
+
+[[tool.mypy.overrides]]
+# FastAPI / FastMCP / pydantic 的装饰器因 follow_imports=skip 被判 untyped，
+# 被装饰函数本身均已完整标注；只放开装饰器这一项，其余 strict 规则照常
+module = ["pm.server", "pm.mcp_server", "pm.schemas"]
+disallow_untyped_decorators = false

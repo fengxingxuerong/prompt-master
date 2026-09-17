@@ -50,7 +50,7 @@ def _generate_prompt_with_gate(
     return prompt2, meta2, report2, calls
 
 
-def optimize_node(state: State) -> dict:
+def optimize_node(state: State) -> dict[str, Any]:
     node = "optimize"
     task = state["task"]
     context = state.get("context", "")

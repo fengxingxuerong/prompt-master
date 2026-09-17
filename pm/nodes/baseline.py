@@ -33,7 +33,7 @@ from .judge import (
 logger = logging.getLogger("pm.nodes.baseline")
 
 
-def baseline_node(state: State) -> dict:
+def baseline_node(state: State) -> dict[str, Any]:
     """基线：把**原始需求原样当 prompt** 喂 target，同口径采样 + 同口径评委评分。
 
     为什么必须有：没有基线就只能报"最终 8.2 分"，报不出"比不优化好多少"。
@@ -167,7 +167,7 @@ def _conflict_attribution(
     }
 
 
-def compare_node(state: State) -> dict:
+def compare_node(state: State) -> dict[str, Any]:
     """成对盲评：把优化版与基线版的输出随机标成 A/B，让评委选边。
 
     pointwise 绝对打分的可比性差（同一份输出两次能差 1 分），成对偏好一致性好得多；

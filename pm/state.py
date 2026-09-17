@@ -24,10 +24,12 @@ def new_run_id() -> str:
 # trace 重置标记（L7）：纯累加 reducer 在用同一 thread_id 重新提交时会把
 # 上一轮的 trace 全部带进本轮（实测 20 条历史记录混进新报告）。
 # 新一轮运行以该标记开头提交 trace，即丢弃历史重新计数。
-TRACE_RESET: dict = {"__trace_reset__": True}
+TRACE_RESET: dict[str, Any] = {"__trace_reset__": True}
 
 
-def trace_reducer(old: list[dict] | None, new: list[dict] | None) -> list[dict]:
+def trace_reducer(
+    old: list[dict[str, Any]] | None, new: list[dict[str, Any]] | None
+) -> list[dict[str, Any]]:
     """trace 累加 reducer：普通更新逐条累加，以 TRACE_RESET 开头则丢弃历史。"""
     if not new:
         return list(old or [])
@@ -53,17 +55,17 @@ class State(TypedDict, total=False):
     auto_clarify: bool
     # 事实断言（ground-truth）：用户提供的测试集 [{"input":..., "expected":...}]
     # 非空时 mockgen 不再生成用例（省一次调用），expected 参与确定性校验
-    seed_cases: list[dict]
+    seed_cases: list[dict[str, Any]]
     assertion_mode: str  # exact | contains | regex | custom:<name>；空 = contains
 
     # --- 测量层（基线 / 重复采样 / 成对盲评）---
-    baseline_runs: list[dict]  # 原始需求直喂 target 的输出（含多采样）
-    baseline_aggregate: dict | None  # 与主路同口径的基线聚合分，用于算 Δ
-    pairwise: dict | None  # 成对盲评结果：{verdict, votes, details, conflict}
-    revision_history: list[dict]  # 每轮“针对什么反馈→改出什么分”，供修订器避重复
+    baseline_runs: list[dict[str, Any]]  # 原始需求直喂 target 的输出（含多采样）
+    baseline_aggregate: dict[str, Any] | None  # 与主路同口径的基线聚合分，用于算 Δ
+    pairwise: dict[str, Any] | None  # 成对盲评结果：{verdict, votes, details, conflict}
+    revision_history: list[dict[str, Any]]  # 每轮“针对什么反馈→改出什么分”，供修订器避重复
 
     # --- Node 1 澄清 ---
-    clarification: dict | None  # ClarificationResult -> dict
+    clarification: dict[str, Any] | None  # ClarificationResult -> dict
     clarification_answers: str  # 用户回答（交互模式）
     clarify_round: int
     # 已向用户提问的轮数（M8）：与 clarify_round 分开计数。
@@ -76,8 +78,10 @@ class State(TypedDict, total=False):
 
     # --- Node 2 优化 ---
     prompt: str
-    prompt_versions: list[dict]  # list[PromptVersion -> dict]
-    prompt_quality_issues: list[dict]  # list[{iteration, issues}] 质量门警告（元话语泄漏等）
+    prompt_versions: list[dict[str, Any]]  # list[PromptVersion -> dict]
+    prompt_quality_issues: list[
+        dict[str, Any]
+    ]  # list[{iteration, issues}] 质量门警告（元话语泄漏等）
 
     # --- Node 3 模拟输入 ---
     test_cases: list[str]
@@ -88,16 +92,16 @@ class State(TypedDict, total=False):
     hijack_markers: list[str]
 
     # --- Node 4 测试执行 ---
-    test_runs: list[dict]  # list[TestRun -> dict]
+    test_runs: list[dict[str, Any]]  # list[TestRun -> dict]
 
     # --- Node 5 评估 ---
-    evaluations: list[dict]  # list[EvaluationResult -> dict]
-    aggregate: dict | None  # AggregateScore -> dict
+    evaluations: list[dict[str, Any]]  # list[EvaluationResult -> dict]
+    aggregate: dict[str, Any] | None  # AggregateScore -> dict
     # 注入存活统计（test_node 计算）：{total, hijacked, details}；无 injection 用例为 None
-    injection_survival: dict | None
+    injection_survival: dict[str, Any] | None
     # 注入门禁（evaluate_node 计算）：{blocked, total, hijacked}；未触发拦截时为 None。
     # blocked=True 表示达标结论已被门禁压制：安全缺陷不能用评委分数赎回。
-    injection_gate: dict | None
+    injection_gate: dict[str, Any] | None
 
     # --- Node 6 修订 / 控制 ---
     iteration: int
@@ -109,11 +113,11 @@ class State(TypedDict, total=False):
 
     # --- 可观测（累加字段，靠 reducer 生效；trace 支持重置标记，见 trace_reducer）---
     errors: Annotated[list[str], operator.add]
-    trace: Annotated[list[dict], trace_reducer]
+    trace: Annotated[list[dict[str, Any]], trace_reducer]
     llm_calls: int
     # 按角色的 token/调用/耗时台账（llm.usage_scope 记账，run_pipeline / scheduler 收快照）
     # 覆盖语义：执行入口一次性写入汇总值，不需要 reducer 累加
-    llm_usage: dict
+    llm_usage: dict[str, Any]
 
 
 def initial_state(
@@ -123,7 +127,7 @@ def initial_state(
     n_test_cases: int = 3,
     max_iterations: int = 3,
     auto_clarify: bool = True,
-    seed_cases: list[dict] | None = None,
+    seed_cases: list[dict[str, Any]] | None = None,
     assertion_mode: str = "",
 ) -> dict[str, Any]:
     """构造初始状态（普通 dict，LangGraph 会按 State 的 reducer 合并更新）。"""
@@ -192,7 +196,7 @@ def merge_state(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def trace_event(state: Mapping[str, Any], node: str, event: str, **payload: Any) -> dict:
+def trace_event(state: Mapping[str, Any], node: str, event: str, **payload: Any) -> dict[str, Any]:
     """构造一条结构化日志事件（只含新增项，由 reducer 累加）。"""
     return {
         "trace": [
