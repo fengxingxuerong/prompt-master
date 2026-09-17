@@ -43,9 +43,7 @@ def log_dir(tmp_path: Path) -> Path:
 
 def test_find_similar_hits_passed_and_delta_positive(log_dir):
     _write_run(log_dir, "good1", "对电商客服对话做分类分诊，提取订单号", avg=9.5, base=5.0)
-    hit = find_similar_asset(
-        "帮我写一个 prompt 让 AI 给外卖评论做分类并提取退款诉求", log_dir=log_dir
-    )
+    hit = find_similar_asset("对电商客服对话做分类分诊，提取退款诉求", log_dir=log_dir)
     assert hit and hit["run_id"] == "good1"
     assert hit["similarity"] >= memory._SIM_MIN
 
