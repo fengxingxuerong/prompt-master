@@ -100,7 +100,9 @@ run_case() {
     "$log" | head -20
 
   # 不能只看退出码：节点被静默跳过、比较全部失败时 run.py 仍然返 0
-  if [ $code -ne 0 ]; then
+  # 退出码协议（feat cli 起）：0=达标、1=未达标但已交付——桩端点的评分不代表
+  # 真实水位，e2e 验证链路（channel + 报告完整），两者都算跑通；2/3 才是真失败。
+  if [ $code -gt 1 ]; then
     echo "✗ run.py 退出码 $code" >&2
     FAILED=1
   fi
