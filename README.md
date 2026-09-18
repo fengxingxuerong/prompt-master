@@ -152,6 +152,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File examples/run_e2e_stub.ps1
 | `PM_JUDGES` / `PM_JUDGE_DISAGREEMENT` | `2` / `2.0` | 评委数与分差阈值 |
 | `PM_TARGET_MAX_CONCURRENCY` | `4` | 目标模型并发上限（硬上限 32，超出自动封顶并告警） |
 | `PM_EVAL_CACHE` / `PM_TARGET_CACHE` / `PM_CACHE_DIR` | 开 / `logs/` | 本地结果缓存（键含模型与采样参数指纹） |
+| `PM_CACHE_BACKEND` | `json` | 缓存存储后端：`json`（默认，本地文件）/ `sqlite`（多 worker 共享同一份缓存，见「已知限制」多 worker 条目） |
 | `PM_LOG_DIR` | `logs/` | 报告与状态快照的输出目录 |
 | `PM_MAX_TASKS` | `200` | 服务里保留的任务数上限（按插入序淘汰；SQLite 存储时是库内条数上限） |
 | `PM_TASK_DB` | 未设 | 任务/赛马记录的 SQLite 路径。设了才允许 `--workers > 1`（各 worker 共享记录） |
@@ -239,7 +240,7 @@ prompt-master/
 │   ├── run_e2e_stub.sh          双通道本地 e2e（Linux / macOS）
 │   ├── run_e2e_stub.ps1         同上，Windows 版（额外做端口避让、缓存隔离与端点自检）
 │   └── run_multiworker_check.py 跨进程共享记录验证（两个服务进程，一个提交一个查询）
-├── tests/                      回归测试（pytest 460 项，口径见 docs/operations.md 第七节）
+├── tests/                      回归测试（pytest 598 项，口径见 docs/operations.md 第七节）
 ├── Dockerfile / .dockerignore  服务镜像（只装运行时依赖，非 root，/data 挂载点）
 ├── .github/workflows/ci.yml    CI：ruff + mypy + pytest × 3 个 Python 版本
 └── pyproject.toml              ruff / mypy / pytest 配置
@@ -284,8 +285,11 @@ prompt-master/
   挡不住改写过的元话语；它只负责兜底，不能当成语义级质量检测。
 - 控制台的 CSP 用逐响应 nonce，但**渲染前转义仍是第一道防线**：CSP 只能拦住"执行"，
   拦不住数据已经进了 DOM。两层都要在，缺一层都不算完（`tests/test_web_console.py` 两层都测）。
-- 多 worker 下每个进程各持一份本地结果缓存（`logs/*_cache.json`），命中率下降、可能重复调用
-  同样的目标输出；要共享缓存得把 `pm/cache.py` 也换成外部存储。记录本身已共享，结论不受影响。
+- 多 worker 缓存共享（2026-09-18 起）：设 `PM_CACHE_BACKEND=sqlite` 后，缓存存储
+  从本地 JSON 文件切换为 SQLite 共享文件（`logs/eval_cache.db` / `logs/target_cache.db`），
+  各 worker 进程读写同一份缓存，命中率不再随 worker 数下降、也不会互相覆盖丢条目。
+  默认仍为 JSON 文件（`logs/*_cache.json`，单 worker 行为不变）；两种后端的淘汰语义
+  一致（容量上限 200 条、插入序淘汰）。记录（`PM_TASK_DB`）与缓存可独立选择后端。
 - `Dockerfile` 与 `.dockerignore` **未经本机构建验证**（开发机没有 docker）：
   其中风险最高的步骤 `pip install .` 已用 `pip install --dry-run .` 验证过能构建出
   `prompt-master-1.0.0`，但仍请首次构建后跑一次 `docker run` + `/api/health` 再上生产。

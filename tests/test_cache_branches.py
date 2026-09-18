@@ -122,3 +122,90 @@ def test_cache_disabled_under_demo_backend(tmp_path: Path, monkeypatch):
 def test_cache_dir_override(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("PM_CACHE_DIR", str(tmp_path))
     assert C.env_cache_dir() == tmp_path
+
+
+# --------------------------------------------------------------------------
+# SqliteCache（多 worker 共享后端，2026-09-18 新增）
+# --------------------------------------------------------------------------
+def test_sqlite_cache_round_trip(tmp_path: Path):
+    """SqliteCache 与 JsonCache 同接口：get/put/len/clear 语义一致。"""
+    cache = C.SqliteCache(tmp_path / "eval_cache.db", max_entries=4)
+    cache.put("k", {"v": 1})
+    assert cache.get("k") == {"v": 1}
+    assert len(cache) == 1
+    assert cache.get("missing") is None
+    # 更新已有键：值覆盖、seq 不动
+    cache.put("k", {"v": 2})
+    assert cache.get("k") == {"v": 2}
+    assert len(cache) == 1  # 更新不新增条目
+    cache.clear()
+    assert len(cache) == 0
+    assert cache.get("k") is None
+    cache.close()
+
+
+def test_sqlite_cache_eviction_by_insertion_order(tmp_path: Path):
+    """容量淘汰与 JsonCache 同语义：超过上限淘汰最旧的 1/4。"""
+    cache = C.SqliteCache(tmp_path / "eval_cache.db", max_entries=4)
+    for i in range(4):
+        cache.put(f"k{i}", i)
+    assert len(cache) == 4
+    cache.put("k4", 4)  # 触发淘汰
+    assert len(cache) <= 4
+    assert cache.get("k4") == 4  # 新键必须在
+    assert cache.get("k0") is None  # 最旧的被淘汰
+    # 更新已有键不改变插入序：k1 被更新后仍在淘汰候选里
+    cache.put("k1", 99)
+    for i in range(5, 8):
+        cache.put(f"k{i}", i)
+    assert cache.get("k1") is None  # 更新未刷新 seq → 仍被淘汰
+    cache.close()
+
+
+def test_sqlite_cache_shared_across_instances(tmp_path: Path):
+    """同一 db 文件的多个实例（模拟多 worker）读写同一份缓存。"""
+    p = tmp_path / "eval_cache.db"
+    a = C.SqliteCache(p, max_entries=8)
+    b = C.SqliteCache(p, max_entries=8)
+    a.put("shared", {"from": "worker-a"})
+    assert b.get("shared") == {"from": "worker-a"}  # B 进程能看到 A 写入
+    b.put("second", 2)
+    assert a.get("second") == 2  # A 也能看到 B 写入
+    a.close()
+    b.close()
+
+
+def test_sqlite_cache_survives_bad_payload(tmp_path: Path):
+    """损坏的缓存条目按未命中处理，不抛异常（与 JsonCache 损坏文件同理）。"""
+    import sqlite3 as _sqlite3
+
+    p = tmp_path / "eval_cache.db"
+    cache = C.SqliteCache(p)
+    cache.put("good", 1)
+    cache.close()
+    # 人为写入非法 JSON
+    conn = _sqlite3.connect(str(p))
+    conn.execute("INSERT INTO cache_entries (key, value) VALUES (?,?)", ("bad", "{not json"))
+    conn.commit()
+    conn.close()
+    cache = C.SqliteCache(p)
+    assert cache.get("bad") is None  # 解析失败 → 未命中
+    assert cache.get("good") == 1  # 其余条目不受影响
+    cache.close()
+
+
+def test_sqlite_cache_backend_selected_by_env(monkeypatch, tmp_path: Path):
+    """PM_CACHE_BACKEND=sqlite 时单例返回 SqliteCache；默认仍为 JsonCache。"""
+    monkeypatch.setattr(C, "_eval_cache", None)
+    monkeypatch.setenv("PM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("PM_EVAL_CACHE", "1")
+
+    monkeypatch.setenv("PM_CACHE_BACKEND", "sqlite")
+    assert isinstance(C.eval_cache(), C.SqliteCache)
+    # 默认后端不设或非法值时回退 json
+    monkeypatch.setattr(C, "_eval_cache", None)
+    monkeypatch.setenv("PM_CACHE_BACKEND", "json")
+    assert isinstance(C.eval_cache(), C.JsonCache)
+    monkeypatch.setattr(C, "_eval_cache", None)
+    monkeypatch.setenv("PM_CACHE_BACKEND", "bogus")
+    assert isinstance(C.eval_cache(), C.JsonCache)  # 非法值回退默认

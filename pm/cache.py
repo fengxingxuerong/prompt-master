@@ -15,8 +15,11 @@
   上一轮的目标输出。对「同一 prompt 版本重新跑」的断点续跑场景这正是期望行为；
   但要注意它会让目标模型的非确定性被冻结 —— 需要真实变化时清空缓存即可。
 
-存储：JSON 文件（默认 logs/eval_cache.json + logs/target_cache.json），
-线程安全（target 并发化后多线程同时读写），容量上限 + 插入序淘汰。
+存储：默认 JSON 文件（logs/eval_cache.json + logs/target_cache.json），线程安全，
+容量上限 + 插入序淘汰。多 worker 部署（--workers > 1）时设
+`PM_CACHE_BACKEND=sqlite` 换用 SQLite 共享缓存（logs/*_cache.db）：
+多个 worker 进程读写同一份缓存文件，命中率不再随 worker 数下降，
+也不会出现"各进程各持一份、互相覆盖"的重复烧钱问题。
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
@@ -39,6 +43,15 @@ DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent / "logs"
 
 def env_cache_dir() -> Path:
     return Path(os.getenv("PM_CACHE_DIR", str(DEFAULT_CACHE_DIR)))
+
+
+def env_cache_backend() -> str:
+    """缓存存储后端：json（默认）| sqlite（多 worker 共享）。非法值回退 json。"""
+    raw = os.getenv("PM_CACHE_BACKEND", "json").strip().lower()
+    if raw not in ("json", "sqlite"):
+        logger.warning("PM_CACHE_BACKEND=%r 无效（可选 json/sqlite），回退默认 json", raw)
+        return "json"
+    return raw
 
 
 def env_cache_enabled(which: str) -> bool:
@@ -144,31 +157,138 @@ class JsonCache:
             return len(self._data)
 
 
+class SqliteCache:
+    """SQLite 共享缓存：多 worker 部署时多个进程读写同一份缓存文件。
+
+    为什么需要它（README「已知限制」的债）：JsonCache 是"每进程一份内存态 +
+    落盘覆盖"，`--workers > 1` 时各 worker 各持一份 `logs/*_cache.json`，
+    命中率下降、且互相覆盖丢失条目 —— 记录层早已共享（PM_TASK_DB → SQLite），
+    缓存层却还各管各的。本类把缓存也收敛到同一份 SQLite 文件。
+
+    与 JsonCache 的差异（接口完全一致：get/put/clear/__len__）：
+    - 存储走 SQLite 表，WAL 模式 + 进程内锁 + check_same_thread=False
+      （与 pm/store.py 的 SqliteStore 同款模式，多进程读写不互斥）；
+    - `seq` 自增主键当插入序：更新已有键不动 seq（淘汰顺序不被刷新打乱），
+      淘汰最旧的 1/4（与 JsonCache 的容量语义一致）；
+    - 值经 JSON 序列化落 TEXT（default=str 降级，与 JsonCache 落盘口径一致）。
+
+    注意：SQLite 是文件级锁，同一文件被多进程访问时由 SQLite 自己保证事务
+    原子性；进程内多线程由 self._lock 串行化。
+    """
+
+    def __init__(self, path: Path, max_entries: int = 200):
+        self.path = Path(path)
+        self.max_entries = max(1, int(max_entries))
+        self._lock = threading.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        with self._lock:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cache_entries (
+                    seq   INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key   TEXT NOT NULL UNIQUE,
+                    value TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.commit()
+
+    def get(self, key: str) -> Any | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM cache_entries WHERE key=?", (key,)
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(row[0])
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning("缓存条目 %s 解析失败，按未命中处理：%s", key, e)
+            return None
+
+    def put(self, key: str, value: Any) -> None:
+        payload = json.dumps(value, ensure_ascii=False, default=str)
+        with self._lock:
+            try:
+                # 更新已有键：只改值不动 seq（保持插入序，淘汰语义与 JsonCache 一致）
+                cur = self._conn.execute(
+                    "UPDATE cache_entries SET value=? WHERE key=?", (payload, key)
+                )
+                if cur.rowcount == 0:
+                    self._evict_locked()
+                    self._conn.execute(
+                        "INSERT INTO cache_entries (key, value) VALUES (?,?)", (key, payload)
+                    )
+                self._conn.commit()
+            except sqlite3.Error as e:
+                logger.warning("缓存写入失败（不影响主流程）：%s", e)
+
+    def _evict_locked(self) -> None:
+        """容量检查 + 淘汰最旧的 1/4（调用方需已持有锁）。"""
+        row = self._conn.execute("SELECT COUNT(*) FROM cache_entries").fetchone()
+        count = int(row[0]) if row else 0
+        if count < self.max_entries:
+            return
+        drop = max(1, self.max_entries // 4)
+        self._conn.execute(
+            "DELETE FROM cache_entries WHERE seq IN "
+            "(SELECT seq FROM cache_entries ORDER BY seq ASC LIMIT ?)",
+            (drop,),
+        )
+
+    def clear(self) -> None:
+        with self._lock:
+            try:
+                self._conn.execute("DELETE FROM cache_entries")
+                self._conn.commit()
+            except sqlite3.Error as e:
+                logger.warning("清除缓存失败（不影响主流程）：%s", e)
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def __len__(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) FROM cache_entries").fetchone()
+        return int(row[0]) if row else 0
+
+
 # --------------------------------------------------------------------------
-# 全局单例（进程内共享；路径由环境变量决定）
+# 全局单例（进程内共享；路径与后端由环境变量决定）
 # --------------------------------------------------------------------------
-_eval_cache: JsonCache | None = None
-_target_cache: JsonCache | None = None
+_eval_cache: Any | None = None
+_target_cache: Any | None = None
 _cache_lock = threading.Lock()
 
 
-def eval_cache() -> JsonCache | None:
+def _build_cache(which: str) -> Any:
+    """按 PM_CACHE_BACKEND 构造缓存实例：json（默认）| sqlite（多 worker 共享）。"""
+    if env_cache_backend() == "sqlite":
+        return SqliteCache(env_cache_dir() / f"{which}_cache.db")
+    return JsonCache(env_cache_dir() / f"{which}_cache.json")
+
+
+def eval_cache() -> Any | None:
     """评估结果缓存单例；PM_EVAL_CACHE=0 时返回 None（完全禁用）。"""
     global _eval_cache
     if not env_cache_enabled("eval"):
         return None
     with _cache_lock:
         if _eval_cache is None:
-            _eval_cache = JsonCache(env_cache_dir() / "eval_cache.json")
+            _eval_cache = _build_cache("eval")
         return _eval_cache
 
 
-def target_cache() -> JsonCache | None:
+def target_cache() -> Any | None:
     """目标模型输出缓存单例；PM_TARGET_CACHE=0 时返回 None（完全禁用）。"""
     global _target_cache
     if not env_cache_enabled("target"):
         return None
     with _cache_lock:
         if _target_cache is None:
-            _target_cache = JsonCache(env_cache_dir() / "target_cache.json")
+            _target_cache = _build_cache("target")
         return _target_cache
