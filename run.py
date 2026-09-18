@@ -54,13 +54,31 @@ emit_json_result = _cli.emit_json_result
 # main 经 pm.cli 的 PEP 562 惰性导出（运行时按需拉起重依赖链）；mypy 会把
 # _cli.main 静态解析为同名子模块而报 "Module not callable"，故显式从子模块导入。
 # run_pipeline / selftest 只做兼容转发，属性访问走 __getattr__，同样惰性
+from typing import Any  # noqa: E402
+
 from pm.cli.main import main  # noqa: E402
 
 recursion_budget = _cli.recursion_budget
-run_pipeline = _cli.run_pipeline
 save_artifacts = _cli.save_artifacts
-selftest = _cli.selftest
 setup_logging = _cli.setup_logging
+
+# run_pipeline / selftest 会拉起 langchain 重依赖链（各约 700ms），且仓库内已无
+# 使用者：兼容转发同样惰性化，`from run import run_pipeline` 首次访问时才加载
+_LAZY_RUN_EXPORTS: dict[str, tuple[str, str]] = {
+    "run_pipeline": ("pm.cli.pipeline", "run_pipeline"),
+    "selftest": ("pm.cli.selftest", "selftest"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_RUN_EXPORTS:
+        import importlib
+
+        module_name, attr = _LAZY_RUN_EXPORTS[name]
+        value = getattr(importlib.import_module(module_name), attr)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 if __name__ == "__main__":
     sys.exit(main())
