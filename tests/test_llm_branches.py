@@ -807,7 +807,7 @@ def test_channel_b_rate_limit_raises_without_consuming_retries(monkeypatch):
     """限流预算耗尽：立即上抛原始 429，不把 3 次解析重试名额烧完。"""
     calls = {"invoke": 0}
 
-    def fake_rate_limited(role, fn, overrides=None, deadline=None):
+    def fake_rate_limited(role, fn, overrides=None, deadline=None, counter=None):
         calls["invoke"] += 1
         raise RuntimeError("Error code: 429 - rate limit exceeded")
 
@@ -840,3 +840,126 @@ def test_rate_limit_deadline_trims_wait(monkeypatch):
 def test_total_wait_budget_covers_max_wait():
     """总预算必须不小于单调用预算，否则通道 B 拿不到任何等待窗口。"""
     assert L.RATE_LIMIT_TOTAL_WAIT >= L.RATE_LIMIT_MAX_WAIT
+
+
+# --------------------------------------------------------------------------
+# 13. 健壮性补丁（2026-09-18 走查修复）：负数环境变量 / requests 计数 / Optional 解包
+# --------------------------------------------------------------------------
+def test_negative_rate_limit_retries_clamped(monkeypatch):
+    """RATE_LIMIT_RETRIES 被 clamp 后永不取负值，且 0 时首次失败即上抛原始 429。
+
+    旧 bug：模块级 `range(RATE_LIMIT_RETRIES + 1)` 在负数时是空循环，
+    末尾 `raise last_exc` 拿到 None → TypeError，真实 429 被掩盖成配置错误。
+    修复后环境变量经 `max(0, ...)` 兜底，模块常量恒 ≥ 0；此处再验证
+    0 档位（负数被 clamp 后的等价行为）——首次 429 直接上抛，不进入重试。
+    """
+    assert L.RATE_LIMIT_RETRIES >= 0  # clamp 保证非负
+    monkeypatch.setattr(L, "RATE_LIMIT_RETRIES", 0)
+
+    def always_429(_llm):
+        e = RuntimeError("Error code: 429 - rate limit exceeded")
+        e.status_code = 429  # type: ignore[attr-defined]
+        raise e
+
+    with pytest.raises(RuntimeError, match="429"):
+        L._invoke_with_rate_limit_retry("evaluator", always_429)
+
+
+def test_negative_conn_retries_clamped(monkeypatch):
+    """TRANSIENT_CONN_RETRIES 被 clamp 后永不取负值，且 0 时上抛原始连接错误。
+
+    旧 bug：`range(-1 + 1)` 空循环后 `raise AssertionError("unreachable")`，
+    把真实 ConnectionError 掩盖成"不可能到达"的断言失败。修复后恒 ≥ 0；
+    0 档位下首次连接失败直接上抛原异常。
+    """
+    assert L.TRANSIENT_CONN_RETRIES >= 0  # clamp 保证非负
+    monkeypatch.setattr(L, "TRANSIENT_CONN_RETRIES", 0)
+
+    def always_down():
+        raise ConnectionError("Connection error.")
+
+    with pytest.raises(ConnectionError, match="Connection error"):
+        L._invoke_with_conn_retry("evaluator", always_down)
+
+
+def test_meta_requests_counts_real_network_calls(monkeypatch):
+    """meta['requests'] 记录真实网络请求数（含 429 退避后的重试），与 attempts 语义区分。
+
+    attempts 是通道 B 的解析尝试次数；requests 是所有实际打到端点的请求。
+    一次 429 后重试成功：requests=2（首次 + 重试），attempts=1（通道 A 直接命中）。
+    """
+    cls = _model_cls()
+
+    class _T(_FakeLLM):
+        def invoke(self, messages: Any) -> Any:
+            if not getattr(self, "_first_done", False):
+                self._first_done = True
+                raise _rate_limit_exc()
+            return {"value": 7}
+
+    fake = _T([])
+    _patch_llm(monkeypatch, fake)
+    out, meta = L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
+    assert out.value == 7
+    assert meta["channel"] == "structured_output"
+    assert meta["requests"] == 2  # 首次 429 + 退避后重试成功
+    assert meta["attempts"] == 1  # 通道 A 一次命中，没走解析重试
+
+
+def test_unwrap_optional_handles_union_and_none():
+    """_unwrap_optional 解包 X | None；非 Union 注解原样返回。"""
+    assert L._unwrap_optional(int | None) is int
+    assert L._unwrap_optional(int) is int
+    assert L._unwrap_optional(str | None) is str
+    # 多类型 Union（非"单类型+None"）保持原样，避免误解包
+    assert L._unwrap_optional(int | str | None) == int | str | None
+
+
+def _optional_nested_cls():
+    """必填但可空的嵌套字段模型（Optional[X] + 无默认值 = 必填可空）。
+
+    这是 `_unwrap_optional` 要防御的真实形态：Pydantic 里
+    `detail: Detail | None = Field(...)` 是「必填但可空」，
+    注解是 Union 而非裸 BaseModel —— 三处 schema 逻辑若只认裸类型，
+    骨架会渲染成 `"detail": ""`、形状修复不收拢、重试提示不点名。
+    """
+    from pydantic import BaseModel
+
+    class Detail(BaseModel):
+        score: int
+        note: str
+
+    class Holder(BaseModel):
+        detail: Detail | None  # 无默认值 → 必填
+        title: str
+
+    return Holder
+
+
+def test_schema_skeleton_handles_optional_nested_field():
+    """必填可空嵌套字段在骨架里必须渲染成对象骨架，而不是 `""` 占位。"""
+    cls = _optional_nested_cls()
+    skeleton = L._schema_skeleton(cls)
+    parsed = json.loads(skeleton)
+    # detail 是嵌套对象：渲染成 {score, note} 骨架，不是空字符串
+    assert isinstance(parsed["detail"], dict)
+    assert "score" in parsed["detail"] and "note" in parsed["detail"]
+    assert parsed["title"] == ""
+
+
+def test_repair_shape_handles_optional_nested_field():
+    """必填可空嵌套字段的平铺子键也要能被收拢（_unwrap_optional 生效）。"""
+    cls = _optional_nested_cls()
+    flat = {"score": 7, "note": "ok", "title": "t"}
+    fixed = L._repair_shape(cls, flat)
+    assert fixed["detail"] == {"score": 7, "note": "ok"}
+    assert "score" not in fixed  # 子键不再残留在顶层
+    assert cls.model_validate(fixed).detail.score == 7
+
+
+def test_nested_field_names_mentions_optional_nested():
+    """重试提示必须点名可空嵌套字段（别平铺），不能因 Union 注解而漏掉。"""
+    cls = _optional_nested_cls()
+    hint = L._nested_field_names(cls)
+    assert "detail" in hint
+    assert "score" in hint

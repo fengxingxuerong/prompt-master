@@ -19,11 +19,12 @@ import os
 import re
 import threading
 import time
+import types
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, Union, cast, get_args, get_origin
 
 from dotenv import load_dotenv
 from langchain_core.language_models import BaseChatModel
@@ -277,7 +278,9 @@ def _next_key(role: str) -> str:
 
 # 429 退避参数：首次等 5s，之后指数递增，最多 RETRY_ON_429 次
 # （这两个在 import 期求值，所以必须走容错解析，否则 `PM_RATE_LIMIT_RETRIES=` 空值会让服务根本起不来）
-RATE_LIMIT_RETRIES = _int_env("PM_RATE_LIMIT_RETRIES", 5)
+# max(0, ...) 兜底：负数会让 `range(N+1)` 变成空循环，重试路径在 raise 处拿到
+# None 异常（TypeError）或走进 "unreachable" 断言，把真实错误类型彻底掩盖。
+RATE_LIMIT_RETRIES = max(0, _int_env("PM_RATE_LIMIT_RETRIES", 5))
 RATE_LIMIT_BASE_SLEEP = _float_env("PM_RATE_LIMIT_BASE_SLEEP", 5.0)
 # 单次调用的退避总时长上限（A3）：旧版 5/10/20/40/80 累加可达 155s（单 Key 加倍后 310s），
 # 而通道 A 耗尽后还有通道 B 的 3 次重试各自再跑一轮退避，最坏能阻塞十几分钟。
@@ -327,7 +330,7 @@ _TRANSIENT_CONN_HINTS = (
     "503 service",
     "504 gateway",
 )
-TRANSIENT_CONN_RETRIES = _int_env("PM_CONN_RETRIES", 2)
+TRANSIENT_CONN_RETRIES = max(0, _int_env("PM_CONN_RETRIES", 2))
 TRANSIENT_CONN_BASE_SLEEP = _float_env("PM_CONN_BASE_SLEEP", 1.5)
 
 # 解析/校验失败时的温度**附加调整量**（默认 0 = 沿用降温 TEMPERATURE_DECAY）。
@@ -350,10 +353,17 @@ def _is_transient_conn_error(e: Exception) -> bool:
     return any(k in text for k in _TRANSIENT_CONN_HINTS)
 
 
-def _invoke_with_conn_retry(role: str, call: Any) -> Any:
-    """执行一次调用；瞬时连接故障按 1.5s/3s 短退避重试（默认 2 次），其余异常直接上抛。"""
+def _invoke_with_conn_retry(role: str, call: Any, counter: list[int] | None = None) -> Any:
+    """执行一次调用；瞬时连接故障按 1.5s/3s 短退避重试（默认 2 次），其余异常直接上抛。
+
+    `counter`（单元素 list，可选）：每次**真实发起网络请求**（含连接重试）就 +1。
+    放在最内层是为了让计数覆盖所有实际打到端点的调用——外层 429 重试/Key 轮换
+    每次都会重新走进这里，连接故障的内部重试也在这里发生，语义最准确。
+    """
     for i in range(TRANSIENT_CONN_RETRIES + 1):
         try:
+            if counter is not None:
+                counter[0] += 1
             return call()
         except Exception as e:
             if not _is_transient_conn_error(e) or i >= TRANSIENT_CONN_RETRIES:
@@ -376,6 +386,7 @@ def _invoke_with_rate_limit_retry(
     invoke_fn: Callable[[Any], Any],  # 接收 llm 实例执行一次调用
     overrides: dict[str, Any] | None = None,
     deadline: float | None = None,
+    counter: list[int] | None = None,
 ) -> Any:
     """带 429 退避与 Key 轮换的调用封装。
 
@@ -388,6 +399,11 @@ def _invoke_with_rate_limit_retry(
 
     `deadline`（monotonic 绝对时刻）是可选的外层共享预算：结构化调用在通道 A/B 之间
     共享一个总限流预算（③ 解耦），取两者更早者生效；不传时行为与旧版完全一致。
+
+    `counter`（单元素 list）可选：每发起一次**真实网络请求**就 +1（含 429 退避重试、
+    Key 轮换后的重试与连接类内部重试），供调用方在 meta 里如实记录请求次数。
+    计数实际发生在最内层 `_invoke_with_conn_retry`（所有重试路径最终都会重新走进它），
+    这里只是透传。默认 None 行为不变。
     """
     last_exc: Exception | None = None
     wait_deadline = time.monotonic() + max(0.0, RATE_LIMIT_MAX_WAIT)
@@ -429,7 +445,7 @@ def _invoke_with_rate_limit_retry(
         try:
             t0 = time.time()
             # 默认参数绑定当前轮的 llm，避免闭包捕获循环变量（B023）
-            resp = _invoke_with_conn_retry(role, lambda _llm=llm: invoke_fn(_llm))
+            resp = _invoke_with_conn_retry(role, lambda _llm=llm: invoke_fn(_llm), counter)
             # 记账只记真实成功的调用（429 退避后的重试、双通道各自的真实请求都覆盖；
             # 演示/测试钩子在 structured_call/plain_call 入口就返回，不会到这里）
             _record_usage(role, resp, int((time.time() - t0) * 1000))
@@ -471,14 +487,20 @@ def _decorrelate_judge_b(cfg: LLMConfig) -> LLMConfig:
         with _JUDGE_B_SAME_WARN_LOCK:
             if not _JUDGE_B_SAME_WARNED:
                 _JUDGE_B_SAME_WARNED = True
+                # 温度已是 1.0 时 +0.1 被 min 截断，实际没升：文案必须如实说明，
+                # 否则"已自动升至 1.0"会误导（且 1.0 与 0.9 的去相关本就有限）。
+                if not explicit_temp and cfg.temperature >= 1.0:
+                    mitigation = "B 温度已到上限 1.0 无法再升，去同质化实际失效"
+                elif not explicit_temp:
+                    mitigation = f"已将B温度自动升至 {cfg.temperature:.1f} 以降低采样相关性"
+                else:
+                    mitigation = "温度为显式配置未改动"
                 logger.warning(
                     "评委B与评委A同模型同端点（%s @ %s）：交叉验证去同质化不足，%s。"
                     "建议为 PM_EVALUATOR_B_MODEL 配置不同模型家族（如 A 用 DeepSeek、B 用 GLM）",
                     a.model,
                     a.base_url or "(默认端点)",
-                    f"已将B温度自动升至 {cfg.temperature:.1f} 以降低采样相关性"
-                    if not explicit_temp
-                    else "温度为显式配置未改动",
+                    mitigation,
                 )
     return cfg
 
@@ -617,6 +639,28 @@ def _model_required_fields(model: type[BaseModel]) -> list[str]:
     return sorted(required)
 
 
+def _unwrap_optional(anno: Any) -> Any:
+    """解包 `X | None` / `Optional[X]` 的联合注解，取其中非 None 的那个。
+
+    为什么需要：Pydantic 里 `X | None = Field(...)` 可以「必填但可空」，
+    此时 `fld.annotation` 是 Union——`_schema_skeleton` / `_nested_field_names` /
+    `_repair_shape` 三处只认裸 `BaseModel` 子类，会把可空嵌套字段当成普通标量
+    （骨架里渲染成 `""`、形状修复不收拢、重试提示不点名），模型照抄后必挂。
+    统一在这里解包，三处共用同一套语义。
+
+    注意两种 Union 形态都要覆盖：`Optional[X]` 的 origin 是 `typing.Union`，
+    而 PEP 604 语法 `X | None` 的 origin 是 `types.UnionType`（该对象**没有**
+    `__origin__` 属性，只认 `typing.Union` 会漏掉它）。统一走
+    `typing.get_origin` 判型最稳，Pydantic v2 的 annotation 正是 `X | None` 形态。
+    """
+    if get_origin(anno) not in (Union, types.UnionType):
+        return anno
+    args = [a for a in get_args(anno) if a is not type(None)]
+    if len(args) == 1:
+        return args[0]
+    return anno
+
+
 def _is_length_finish_error(e: Exception) -> bool:
     """是否因触达 max_tokens 而被截断（不是普通降级）。"""
     if type(e).__name__ == "LengthFinishReasonError":
@@ -722,7 +766,7 @@ def _repair_shape(model: type[BaseModel], data: dict[str, Any]) -> dict[str, Any
         return data
     out = dict(data)
     for name, fld in (getattr(model, "model_fields", None) or {}).items():
-        anno = fld.annotation
+        anno = _unwrap_optional(fld.annotation)
         if not (isinstance(anno, type) and issubclass(anno, BaseModel)):
             continue
         if name in out:
@@ -750,7 +794,7 @@ def _nested_field_names(model: type[BaseModel]) -> str:
     for name, fld in (getattr(model, "model_fields", None) or {}).items():
         if not fld.is_required():
             continue
-        anno = fld.annotation
+        anno = _unwrap_optional(fld.annotation)
         if isinstance(anno, type) and issubclass(anno, BaseModel):
             kids = "/".join(_model_required_fields(anno))
             if kids:
@@ -772,7 +816,7 @@ def _schema_skeleton(model: type[BaseModel], indent: int = 0) -> str:
     lines: list[str] = []
     for name in _model_required_fields(model):
         fld = model.model_fields[name]
-        anno = fld.annotation
+        anno = _unwrap_optional(fld.annotation)
         origin = getattr(anno, "__origin__", None)
         if origin in (list, tuple):
             lines.append(f'{child_pad}"{name}": []')
@@ -898,11 +942,15 @@ def structured_call(
         )
 
     cfg = build_config(role, overrides)
+    # 真实网络请求计数（与 attempts 语义不同：attempts 是通道 B 的解析尝试次数，
+    # 这里记录所有实际打到端点的请求，含通道 A 调用、429 退避重试、Key 轮换与连接重试）
+    requests_counter: list[int] = [0]
     meta: dict[str, Any] = {
         "role": role,
         "model": cfg.model,
         "channel": None,
         "attempts": 0,
+        "requests": 0,
         "latency_ms": None,
         "temperature": cfg.temperature,
     }
@@ -935,13 +983,24 @@ def structured_call(
             ),
             overrides,
             deadline=limit_deadline,
+            counter=requests_counter,
         )
         if isinstance(result, model_cls):
-            meta.update(channel=channel_a, attempts=1, latency_ms=int((time.time() - t0) * 1000))
+            meta.update(
+                channel=channel_a,
+                attempts=1,
+                requests=requests_counter[0],
+                latency_ms=int((time.time() - t0) * 1000),
+            )
             return result, meta
         if isinstance(result, dict):
             validated = model_cls.model_validate(result)
-            meta.update(channel=channel_a, attempts=1, latency_ms=int((time.time() - t0) * 1000))
+            meta.update(
+                channel=channel_a,
+                attempts=1,
+                requests=requests_counter[0],
+                latency_ms=int((time.time() - t0) * 1000),
+            )
             return validated, meta
         # 端点"支持"结构化输出却返回了意外类型（常见：None / 空内容）。
         # 必须显式记录再降级，否则故障原因会在日志里彻底消失。
@@ -991,6 +1050,7 @@ def structured_call(
                 ),
                 overrides,
                 deadline=limit_deadline,
+                counter=requests_counter,
             )
             raw = resp.content if isinstance(resp.content, str) else str(resp.content)
             data = extract_json_object(raw)
@@ -1000,7 +1060,10 @@ def structured_call(
             data = _repair_shape(model_cls, data)
             validated = model_cls.model_validate(data)
             meta.update(
-                channel="json_fallback", attempts=attempt, latency_ms=int((time.time() - t0) * 1000)
+                channel="json_fallback",
+                attempts=attempt,
+                requests=requests_counter[0],
+                latency_ms=int((time.time() - t0) * 1000),
             )
             return validated, meta
         except (ValidationError, ValueError, json.JSONDecodeError) as e:
@@ -1034,7 +1097,12 @@ def structured_call(
             # 端点/网络类异常沿用降温：这类失败与采样随机性无关，保守重试即可
             temp = max(0.0, temp - TEMPERATURE_DECAY)
 
-    meta.update(channel="failed", attempts=max_retries, latency_ms=int((time.time() - t0) * 1000))
+    meta.update(
+        channel="failed",
+        attempts=max_retries,
+        requests=requests_counter[0],
+        latency_ms=int((time.time() - t0) * 1000),
+    )
     raise RuntimeError(f"[{role}] 结构化输出失败，已重试 {max_retries} 次。最后错误：{last_err}")
 
 
@@ -1047,11 +1115,13 @@ def plain_call(
         return hook.plain(role, system, user, overrides=overrides)
 
     cfg = build_config(role, overrides)
+    requests_counter: list[int] = [0]
     t0 = time.time()
     resp = _invoke_with_rate_limit_retry(
         role,
         lambda llm: llm.invoke([SystemMessage(content=system), HumanMessage(content=user)]),
         overrides,
+        counter=requests_counter,
     )
     text = resp.content if isinstance(resp.content, str) else str(resp.content)
     meta = {
@@ -1059,6 +1129,7 @@ def plain_call(
         "model": cfg.model,
         "channel": "plain",
         "attempts": 1,
+        "requests": requests_counter[0],
         "latency_ms": int((time.time() - t0) * 1000),
         "temperature": cfg.temperature,
     }
