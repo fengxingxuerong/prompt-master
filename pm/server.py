@@ -86,7 +86,9 @@ def _calibrate_patrol_loop(interval_hours: float, judge: str) -> None:
         try:
             result = _scheduled_calibrate_once(judge)
             drift = (result or {}).get("drift")
-            bias_now = (result or {}).get("analysis", {}).get("bias")
+            analysis = (result or {}).get("analysis") or {}
+            bias_now = analysis.get("bias")
+            mae_now = analysis.get("mae")
             if result is None:
                 pass  # _scheduled_calibrate_once 内部已告警
             elif drift and drift.get("drifted"):
@@ -98,6 +100,7 @@ def _calibrate_patrol_loop(interval_hours: float, judge: str) -> None:
                     bias_now,
                     drift["delta_bias"],
                     drift["prev_mae"],
+                    mae_now,
                     drift["delta_mae"],
                 )
             elif drift:

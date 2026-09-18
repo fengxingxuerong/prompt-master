@@ -73,7 +73,9 @@ def _wait_terminal(tm: TaskManager, run_id: str, timeout: float = 40.0) -> dict:
     return st
 
 
-def _wait_artifacts(tm: TaskManager, run_id: str, log_dir: Path, timeout: float = 15.0) -> str | None:
+def _wait_artifacts(
+    tm: TaskManager, run_id: str, log_dir: Path, timeout: float = 15.0
+) -> str | None:
     """终态之后还要等收尾：result 落库与报告/状态文件落盘发生在 status=passed 之后。
 
     _wait_terminal 从 progress 快照看到终态即返回，但 worker 线程还要把 final 写进
