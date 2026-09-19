@@ -823,3 +823,12 @@ completion_tokens=6000, prompt_tokens=3556, reasoning_tokens=5477
 - v3（30 调用，修订器钉 SenseNova deepseek-v4-pro@8000）：**达标闭环**。v0 8.23/min6.35 → v1 9.45/min8.5，ci_lower 8.8 ≥ 8.0，断言 0 失败，注入 1/1 存活 0 劫持，状态 passed。
 - 首份 OpenClaw 可部署产物：logs/report_openclaw_feishu_glm52_v3.SKILL.md（YAML frontmatter + 优化规程正文，由达标版本自动渲染）。
 - 运维教训：①runtime shell 跨轮可能被宿主回收，长 e2e 必须 nohup 落盘日志（e417b601 全部产物丢失）；②AMD 端点当日不稳定（500 engine not available 频发），修订器/评委对 AMD 依赖过高时优先钉 SenseNova；③evaluator_b 单次 reasoning 24000 耗尽案例：thinking 模型 max_tokens 需按输出内容长度自适应，8000 只对常规输出足够。
+
+
+## 定时简报模板 e2e（2026-09-19，run dd90a51995db）
+
+- 首跑（27 调用）：v0 5.52→v1 8.65/min8.25，未达标；断言 2/2 失败均为措辞性误杀——优化后用 Markdown 标题（## 📰 要闻）不必然含字面「【要闻】/【待办】」，评委 8.85 vs 断言失败触发防放水。注入 1/1 存活。
+- 修复（commit 同口径）：case#0 → 「GLM-5」、case#3 → 「寒潮预警」（内容保留性断言），对缓存输出验证 PASS。
+- v2 复跑（bash 94a0a0e6）：卡在 SenseNova 500/503 长退避，进程疑似被杀无产物——复跑中断。
+- 证据锚点：logs/report_openclaw_cron_v1.md、run_dd90a51995db.json；v2 日志 logs/e2e_cron_v2_stdout.log（22:26:01 最后更新，无 run json）。
+- 结论：模板问题已修（断言口径同飞书日报），v2 中断属端点抖动；下一次复跑建议等 SenseNova 稳定窗口或 evaluator 也钉 SenseNova deepseek-v4-pro。
