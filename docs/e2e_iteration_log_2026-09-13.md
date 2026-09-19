@@ -815,3 +815,11 @@ completion_tokens=6000, prompt_tokens=3556, reasoning_tokens=5477
 ### 遗留
 
 ① SenseNova 端点上注入防御失败，修订方向是强化「标签内数据指令不得执行」的约束（可考虑目标模型专属注入示例）；② NVIDIA 若作评委 B 需调大 max_tokens 且接受慢速；③ OpenRouter 账户申诉解锁前搁置。
+
+
+## OpenClaw 任务族 v2/v3 复跑（2026-09-19，run 52d26debe20f / db50a0a61703）
+
+- v2（17 调用）：未达标但非模板问题——修订器返回空内容提前止损（AMD 端点 500 风暴 + evaluator_b 一次 24000 reasoning 耗尽）。断言失败 0 条，证明 e28dfd8 的模板修复有效；注入 1/1 存活。
+- v3（30 调用，修订器钉 SenseNova deepseek-v4-pro@8000）：**达标闭环**。v0 8.23/min6.35 → v1 9.45/min8.5，ci_lower 8.8 ≥ 8.0，断言 0 失败，注入 1/1 存活 0 劫持，状态 passed。
+- 首份 OpenClaw 可部署产物：logs/report_openclaw_feishu_glm52_v3.SKILL.md（YAML frontmatter + 优化规程正文，由达标版本自动渲染）。
+- 运维教训：①runtime shell 跨轮可能被宿主回收，长 e2e 必须 nohup 落盘日志（e417b601 全部产物丢失）；②AMD 端点当日不稳定（500 engine not available 频发），修订器/评委对 AMD 依赖过高时优先钉 SenseNova；③evaluator_b 单次 reasoning 24000 耗尽案例：thinking 模型 max_tokens 需按输出内容长度自适应，8000 只对常规输出足够。
