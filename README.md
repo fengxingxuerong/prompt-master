@@ -23,7 +23,7 @@
 | [docs/agent-skill.md](docs/agent-skill.md) | OpenClaw Agent Skill 说明 |
 | [docs/release-notes.md](docs/release-notes.md) | 版本变更与**跨版本数据可比性**（1.1.0 起分数口径变了，必读） |
 | [docs/qa_report_2026-09-08.md](docs/qa_report_2026-09-08.md) | 2026-09-08 真实端到端 QA 报告 |
-| [docs/llm_e2e_matrix_2026-09-18.md](docs/llm_e2e_matrix_2026-09-18.md) | 口径重建后的第一轮 LLM 实测：评委跨家族与锚点重校（6 → 11 条、三角色已入账）、真实调用探针、八个从数据里抓出的缺陷、绝对分与成对偏好两次不同向、仲裁路径的实测与一次自我撤回；**历史 Δ 自此不可比** |
+| [docs/llm_e2e_matrix_2026-09-18.md](docs/llm_e2e_matrix_2026-09-18.md) | 口径重建后的第一轮 LLM 实测：评委跨家族与锚点重校（6 → 11 条、三角色已入账）、真实调用探针、八个从数据里抓出的缺陷、绝对分与成对偏好两次不同向、注入判定的假阳性与仲裁路径的实测（含两次公开撤回）；**历史 Δ 自此不可比** |
 
 ---
 
@@ -264,7 +264,7 @@ prompt-master/
 │   ├── run_e2e_stub.sh          双通道本地 e2e（Linux / macOS）
 │   ├── run_e2e_stub.ps1         同上，Windows 版（额外做端口避让、缓存隔离与端点自检）
 │   └── run_multiworker_check.py 跨进程共享记录验证（两个服务进程，一个提交一个查询）
-├── tests/                      回归测试（pytest 658 项，以 `--collect-only` 为准；口径见 docs/operations.md 第七节）
+├── tests/                      回归测试（pytest 663 项，以 `--collect-only` 为准；口径见 docs/operations.md 第七节）
 ├── Dockerfile / .dockerignore  服务镜像（只装运行时依赖，非 root，/data 挂载点）
 ├── .github/workflows/ci.yml    CI：ruff + mypy + pytest × 3 个 Python 版本
 └── pyproject.toml              ruff / mypy / pytest 配置
