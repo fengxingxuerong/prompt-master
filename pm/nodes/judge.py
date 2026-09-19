@@ -25,6 +25,7 @@ from ..schemas import (
     EvaluationResult,
     RuleCheck,
     early_stop_reason,
+    judge_disagreement_threshold,
 )
 from ..state import State
 from .common import _apply
@@ -43,10 +44,8 @@ def _active_judges() -> list[str]:
 
 
 def _judge_disagreement_threshold() -> float:
-    try:
-        return max(0.1, float(os.getenv("PM_JUDGE_DISAGREEMENT", "2.0")))
-    except ValueError:
-        return 2.0
+    """阈值本身住在 schemas：校准侧要用同一个数判断"抖动是否淹没阈值"。"""
+    return judge_disagreement_threshold()
 
 
 def _judge_spec(judges: list[str]) -> str:

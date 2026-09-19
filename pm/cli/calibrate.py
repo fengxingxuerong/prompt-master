@@ -66,6 +66,13 @@ def _calibrate_command(argv: list[str]) -> int:
         default=str(Path(__file__).resolve().parents[2] / "judge_calibration" / "samples.json"),
         help="锚点样本 JSON 路径（需人工核对 human_score）",
     )
+    ap.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="额外做「评委与自己比」的复现性测量：同输入连打 N 次（绕缓存），"
+        "代价是 N×锚点 次调用；1=不测",
+    )
     ap.add_argument("--json", action="store_true", help="输出 JSON（智能体消费）")
     ap.add_argument(
         "--no-save", action="store_true", help="本次结果不追加进漂移历史（只看不动账本）"
@@ -97,6 +104,13 @@ def _calibrate_command(argv: list[str]) -> int:
     if not analysis:
         print("全部锚点评估失败，无法校准（先跑 run.py --preflight 检查端点）", file=sys.stderr)
         return EXIT_FAILED
+
+    # 复现性：与"准不准"正交的另一件事。一个每次调用在不同口径之间跳变的评委，
+    # 在 bias/MAE/r 上可以看着完全正常（抖动甚至摊平 MAE），但它会让双评委分差、
+    # 仲裁触发率与 Δ 的噪声带全部失去含义。绕缓存重复打，否则极差恒为 0。
+    if ns.repeat >= 2:
+        rep = calib.repeatability(samples, ns.judge, ns.repeat)
+        analysis["repeatability"] = rep
 
     # 漂移对比：只在**同口径**的历史记录之间比。
     # 旧写法是"与上一条同角色记录比"，但换评委模型、改评分提示词（锚点/权威顺序）
@@ -185,19 +199,31 @@ def _calibrate_command(argv: list[str]) -> int:
         }
 
     if not ns.no_save:
-        history.append(
-            {
-                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "judge": ns.judge,
-                "n": analysis["n"],
-                "bias": analysis["bias"],
-                "mae": analysis["mae"],
-                "r": analysis["r"],
-                "model": now_model,
-                "rubric": now_rubric,
-                "anchors": now_anchors,
-            }
-        )
+        entry: dict[str, Any] = {
+            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "judge": ns.judge,
+            "n": analysis["n"],
+            "bias": analysis["bias"],
+            "mae": analysis["mae"],
+            "r": analysis["r"],
+            "model": now_model,
+            "rubric": now_rubric,
+            "anchors": now_anchors,
+        }
+        rep = analysis.get("repeatability") or {}
+        if rep.get("n_items"):
+            # 复现性也进账本：MAE/bias 只说"准不准"，极差说"这台仪表自己稳不稳"。
+            # 换评委型号后若极差变大，仲裁触发率与 Δ 分辨率都会变，那时漂移对比
+            # 必须能把"仪表换了"和"评委漂了"分开。
+            entry.update(
+                {
+                    "rep_times": rep["times"],
+                    "rep_range_mean": rep["range_mean"],
+                    "rep_range_max": rep["range_max"],
+                    "rep_threshold": rep["disagreement_threshold"],
+                }
+            )
+        history.append(entry)
         _CALIB_HISTORY.parent.mkdir(parents=True, exist_ok=True)
         _CALIB_HISTORY.write_text(
             json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -236,5 +262,8 @@ def _calibrate_command(argv: list[str]) -> int:
             f"{analysis['bias']}（Δ{drift['delta_bias']:+.2f}），mae {drift['prev_mae']} → "
             f"{analysis['mae']}（Δ{drift['delta_mae']:+.2f}）；告警线 ±{_CALIB_DRIFT_ALERT}"
         )
+    rep_out = analysis.get("repeatability")
+    if rep_out:
+        print(calib.render_repeatability(rep_out))
     print(f"校准记录已{'保存' if not ns.no_save else '跳过保存'}：{_CALIB_HISTORY}")
     return 0

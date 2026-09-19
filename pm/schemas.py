@@ -61,6 +61,19 @@ UNSTABLE_SPREAD = _env_float("PM_UNSTABLE_SPREAD", 1.5, positive_only=True)
 JUDGE_BIAS_ALERT = _env_float("PM_JUDGE_BIAS_ALERT", 1.0, positive_only=True)
 
 
+def judge_disagreement_threshold() -> float:
+    """双评委加权分差超过它 → 走仲裁。**调用时读 env**，所以测试与按角色覆盖都有效。
+
+    放在这里而不是只留在 nodes/judge.py：复现性测量（calibrate_judge --repeat）必须拿它
+    当参照才能说"抖动是否淹没阈值"，而 calibrate_judge 刻意不 import pm.nodes（那会把
+    langgraph 整条依赖链拉进一个几块钱的校准命令）。两处各写一份 2.0 一定会漂，故共用此源。
+    """
+    try:
+        return max(0.1, float(os.getenv("PM_JUDGE_DISAGREEMENT", "2.0")))
+    except ValueError:
+        return 2.0
+
+
 def noise_margin(noise: float | None = 0.0) -> float:
     """迭代收益判定余量：至少 2× 采样噪声。
 
@@ -189,6 +202,23 @@ class DimensionScores(BaseModel):
     constraint_compliance: float = Field(ge=1, le=10, description="约束遵守")
     robustness: float = Field(ge=1, le=10, description="鲁棒性：幻觉/矛盾/越界猜测")
     quality: float = Field(ge=1, le=10, description="质量与深度")
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _unwrap_score_objects(cls, v: Any) -> Any:
+        """维度值写成 `{"score": 3, "reasoning": "…"}` 时也要认，别作废整轮评估。
+
+        真跑实测（2026-09-19，仲裁 deepseek-v4-flash）：10 次把维度值包成对象，
+        内层键名还在 `reasoning` / `evidence` 之间漂。这实际上是模型在**逐维给证据**——
+        正是评分提示词要的"先取证后打分"——结果被 schema 判成非法输出、整轮重来（多一次
+        计费往返 + 几十秒退避）。与 `_adopt_near_miss_keys` 同一族：形状抖动在解析层收，
+        不放大成结论错误。证据文本这里刻意丢弃：判定只用数值，文本要留应去 `issues`。
+        """
+        if isinstance(v, dict):
+            for key in ("score", "value", "points", "rating", "raw"):
+                if key in v and not isinstance(v[key], (dict, list)):
+                    return v[key]
+        return v
 
     @model_validator(mode="before")
     @classmethod

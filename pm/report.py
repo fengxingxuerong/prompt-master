@@ -162,6 +162,49 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
                 else ""
             )
         )
+        # 这台"放水探测器"其实大部分是恒零的：提示词把权重给了模型、演算示例直接示范
+        # 怎么求加权，而 model_reported_score 又排在 dimension_scores 之后生成——
+        # 实测 109 次原始评委调用里评委 A 有 80%、仲裁 88% 是**逐字复述**加权结果。
+        # 所以先把"相等占比"印出来，否则上面那行 -0.17 会被读成"没放水"。
+        evals = [e for e in (state.get("evaluations") or []) if isinstance(e, dict)]
+        scored = [
+            e
+            for e in evals
+            if isinstance(e.get("model_reported_score"), (int, float))
+            and isinstance(e.get("weighted_score"), (int, float))
+        ]
+        if scored:
+            same = sum(
+                1 for e in scored if abs(e["model_reported_score"] - e["weighted_score"]) < 1e-9
+            )
+            if same:
+                lines.append(
+                    f"  - ⚠️ 其中 {same}/{len(scored)} 条自报分与代码加权分**完全相等**："
+                    "这部分不是独立印象，复述上面那行不构成「没放水」的证据。"
+                    "（该探测器只在两数真的分开时才有意义）"
+                )
+        # 满分声明：五维全部 ≥9.5 却还留着 issue，是自相矛盾；一条 issue 都不给则是
+        # "无可指摘"的强声明却没有可核对的证据。两种都是天花板行为，实测占 9.4%。
+        ceil_with_issue: list[Any] = []
+        ceil_no_issue: list[Any] = []
+        for e in evals:
+            ds = e.get("dimension_scores") or {}
+            dims = [v for v in ds.values() if isinstance(v, (int, float))]
+            if len(dims) == 5 and min(dims) >= 9.5:
+                (ceil_with_issue if (e.get("issues") or []) else ceil_no_issue).append(
+                    e.get("test_case_index")
+                )
+        if ceil_with_issue:
+            lines.append(
+                f"- ⚠️ 五维全 ≥9.5 却仍列出了问题：{'、'.join('#' + str(i) for i in ceil_with_issue)}"
+                " —— 有缺陷就不该是满分，这条分数的信息量低于它的数字看起来的程度"
+            )
+        if ceil_no_issue:
+            lines.append(
+                "- ⚠️ 宣称「无可指摘」（五维全 ≥9.5 且 issues 为空）："
+                f"{'、'.join('#' + str(i) for i in ceil_no_issue)} —— 本轮人工锚点里最高只到 8.7，"
+                "满分声明建议人工抽查"
+            )
         # 评委配置体检：同源评委 = 同一分布采样两次，交叉验证不提供独立证据
         jh = state.get("judge_health") or {}
         if jh.get("homogeneous"):
@@ -171,7 +214,6 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         # 分数出自谁：双评委分差超阈值时采信的是**第三方单评委**，两位原评委的分只留在
         # judge_scores 里。真跑实测占 9/26 轮（两个已完成 run，冻结口径；见 llm_e2e_matrix 发现 13），不是边角情况，但报告此前从不说明，
         # 读者会以为表里每个数都是两位评委的共识（n_arbitrated 只进过 trace）。
-        evals = [e for e in (state.get("evaluations") or []) if isinstance(e, dict)]
         n_arb = sum(1 for e in evals if e.get("judge") == "arbiter")
         n_cons = sum(1 for e in evals if e.get("judge") == "conservative")
         if evals and (n_arb or n_cons):

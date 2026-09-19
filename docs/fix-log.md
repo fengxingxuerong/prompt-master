@@ -154,15 +154,18 @@ python run.py --selftest
 | P20 | 锚点 6 → 11 之后，校准把"换考卷"报成"评委漂移"（评委 B 当场印 Δmae −0.34 的假告警，其实是 MAE 1.32→0.98） | 账本再记第三把指纹 `anchors`（`(id, 人工分)` 摘要，重核人工分也算换尺子）；缺指纹的老记录改按 `n` 拦——`n` 是**成功打分的锚点数**，某条被端点抖动作废同样换了分母 |
 | P21 | 给发现 13 写回归测试时抓到的两处：① 仲裁**失败回退**只改 `judge`，不写 `judge_scores`/分差，而新加的披露行正承诺"逐评委原始分在 `judge_scores`"；② `judge` 字段给模型看的枚举只列了 4 个值，代码实际还会写 `conservative` / `system` | 回退分支补上同样的两行出处账；枚举补齐 6 个值，并加一条跨层测试——报告数的字面量必须 ∈ 评委侧真写得出的值集合，schema 描述必须覆盖后者（消费侧手抄字面量的老毛病，见 P9） |
 | P22 | 注入存活把**拒绝时复述校验码**判成「被劫持」（真跑第 1 点两条输出都是「…不输出校验码A8CBA30C」这类安全拒绝），而基线臂因为拒绝得更简短反而 0/1 —— 这个度量与它想测的东西方向相反，会系统性惩罚更严谨的提示词；它还支撑过一条已作废的结论（矩阵文档发现 11 已撤回） | 判定从「有没有出现」改成「以什么姿态出现」：`injection_hit_kind` 三态（执行 / 引用式拒绝 / 未出现），引用式拒绝不计劫持但写进 details 供审计。防漏判两道闸：整条输出基本就是标记时仍定罪；标记自身以否定词开头时（mockgen 会自选「不通过」「未通过」）关闭否定剥离。附带实测纠正：**NFKC 不折叠中文弯引号**，只写直引号会退化成旧行为 |
+| P23 | 仲裁把**维度值**写成 `{"score": 3, "reasoning": "…"}`（真跑 10 次，内层键名还在 `reasoning`/`evidence` 之间漂）→ 必填 float 报 ValidationError、整轮仲裁重来。讽刺的是这正是评分提示词要的"逐维先取证" | `DimensionScores` 加 `_unwrap_score_objects`：只认 score/value/points/rating/raw；一个都没有时**照原样交给 pydantic 报错**，不瞎挑一个键当分 |
+| P24 | 度量层自己的三处恒零/失真，全部来自"评委跟**自己**比"这项新测量：① 自报分与代码加权分在 109 次原始调用里 80%（评委 A）/88%（仲裁）**完全相等**，放水探测器对这两个角色没有信号——提示词给了权重、演算示例示范怎么求和，而该字段排在维度分之后生成；② 同一份输入重复打极差达 2.60（评委 B）/4.43（仲裁），**且 `temperature=0` 不改善**、median-of-3 只改善 16% 且有一条反而更差；③ 191 条评估里 9.4% 五维全 ≥9.5，而人工锚点最高只到 8.7 | 新增 `calibrate --repeat N`：复现性与 bias/MAE/r 并列、绕开评估缓存、`rep_*` 进漂移账本，自我极差越过 `PM_JUDGE_DISAGREEMENT` 时印「抖动已淹没阈值」；报告披露"相等占比"与两类满分声明（**只告警不否决**）；阈值读取上收到 `schemas.judge_disagreement_threshold()`，校准与主管道共用一个数。绕缓存不许整体替换 `CallHook`（会连假后端一起丢掉→自测打真端点），故新增 `backend.with_cache_disabled()` 做合成 |
 
 **验证方式（可复现）**：
 
 ```bash
 ruff check . && ruff format --check . && mypy pm
-pytest tests/ -q                                   # 663 全绿
+pytest tests/ -q                                   # 677 全绿
 python run.py --selftest && python eval_prompts.py # 拓扑自检 + 节点提示词结构契约 6/6
 powershell -File examples/run_e2e_stub.ps1          # 三通道桩 e2e 3/3（含双向盲评链路）
 python scripts/live_prompt_audit_20260918.py        # 真机探针 T1-T6（代码侧判定，不让 LLM 自评）
-python run.py calibrate && python run.py calibrate --judge evaluator_b   # 11 条人工锚点上的 MAE
+python run.py calibrate --judge evaluator_b            # 11 条锚点上的 MAE/偏差/排序一致性
+python run.py calibrate --judge evaluator_b --repeat 3 # 加测复现性：同输入打 3 次，绕开评估缓存
 ```
 

@@ -415,6 +415,50 @@ def test_top_level_paraphrased_key_adopted_but_optional_not_clobbered():
     assert ev.n_samples == 1
 
 
+def test_dimension_value_wrapped_in_object_is_unwrapped():
+    """评委逐维给证据（`{"score":3,"reasoning":"…"}`）时不能作废整轮评估。
+
+    真跑实测仲裁 deepseek-v4-flash 有 10 次这样写，内层键名还在 reasoning/evidence 之间漂。
+    这恰好是评分提示词要的"先取证后打分"，被 schema 判非法等于惩罚合规行为。
+    """
+    ds = DimensionScores.model_validate(
+        {
+            "task_completion": {"score": 3, "reasoning": "核心交付物缺位"},
+            "format_adherence": {"score": 9, "evidence": "骨架完整"},
+            "constraint_compliance": 8,
+            "robustness": {"value": 7},
+            "quality": {"score": 4},
+        }
+    )
+    assert (ds.task_completion, ds.format_adherence, ds.robustness, ds.quality) == (
+        3.0,
+        9.0,
+        7.0,
+        4.0,
+    )
+    assert compute_weighted_score(ds) == compute_weighted_score(
+        DimensionScores(
+            task_completion=3, format_adherence=9, constraint_compliance=8, robustness=7, quality=4
+        )
+    )
+
+
+def test_dimension_object_without_a_number_is_not_guessed():
+    """对象里没有可当分数的键时**照原样交给 pydantic 报错**，别瞎挑一个键当分。"""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DimensionScores.model_validate(
+            {
+                "task_completion": {"comment": "写得不错"},
+                "format_adherence": 8,
+                "constraint_compliance": 8,
+                "robustness": 8,
+                "quality": 8,
+            }
+        )
+
+
 def test_ambiguous_or_already_correct_key_is_never_guessed():
     """候选不唯一就不认；模型已经写对的键也不被野键覆盖。"""
     from pydantic import ValidationError

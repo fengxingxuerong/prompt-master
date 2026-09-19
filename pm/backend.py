@@ -60,6 +60,27 @@ def cache_disabled() -> bool:
     return bool(hook is not None and hook.disable_cache)
 
 
+@contextmanager
+def with_cache_disabled() -> Iterator[None]:
+    """在**当前钩子不变**的前提下追加"禁缓存"。
+
+    为什么不直接 `use(CallHook(disable_cache=True))`：`use` 是整体替换 `_VAR`，
+    在 `pm.testing.scope()` 里面那样做会把假后端的 structured/plain 一起丢掉，
+    表现是"自测忽然开始打真实端点"——比缓存污染严重得多。复现性测量必须绕缓存
+    （否则同一 prompt 第二次永远命中，测出来的极差恒为 0，是自欺），
+    但它恰好是最需要在假后端里被测试的功能，所以合成而不是替换。
+    """
+    cur = _VAR.get()
+    with use(
+        CallHook(
+            structured=cur.structured if cur is not None else None,
+            plain=cur.plain if cur is not None else None,
+            disable_cache=True,
+        )
+    ):
+        yield
+
+
 def carry_context(fn: Callable[..., Any]) -> Callable[..., Any]:
     """把提交侧线程的 ContextVar 快照带进线程池工作线程。
 

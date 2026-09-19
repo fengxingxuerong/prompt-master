@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import statistics
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,9 +37,10 @@ from pm.bootstrap import ensure_utf8_stdio
 
 ensure_utf8_stdio()
 
+from pm import backend  # noqa: E402
 from pm.llm import structured_call  # noqa: E402
 from pm.prompts import EVALUATOR_SYSTEM, EVALUATOR_USER, render  # noqa: E402
-from pm.schemas import EvaluationResult  # noqa: E402
+from pm.schemas import EvaluationResult, judge_disagreement_threshold  # noqa: E402
 
 DEFAULT_SAMPLES = Path(__file__).parent / "judge_calibration" / "samples.json"
 EXAMPLE_SAMPLES = Path(__file__).parent / "judge_calibration" / "samples.example.json"
@@ -207,6 +209,32 @@ def render_report(role: str, analysis: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_repeatability(rep: dict[str, Any]) -> str:
+    """复现性读数。它回答的是"这台仪表自己稳不稳"，与"准不准"是两件事。"""
+    lines = [
+        "",
+        f"## 复现性（同输入重复 {rep['times']} 次，已绕开评估缓存）",
+        "",
+        f"- 参与条数：{rep['n_items']}；极差均值 **{rep.get('range_mean')}**，最大 **{rep.get('range_max')}**"
+        f"（最差那条：`{rep.get('worst_id')}`）",
+        f"- 双评委分差阈值：{rep.get('disagreement_threshold')}",
+    ]
+    if rep.get("n_items"):
+        if rep.get("threshold_exceeded"):
+            lines.append(
+                "- ⚠️ **抖动已淹没阈值**：该评委对同一份输入的自我分歧就能越过分差阈值，"
+                "于是「双评委分歧 → 仲裁」有相当比例是在读它自己的抖动，不是在读用例的难度。"
+                "把判定角色换成自我极差更小的模型，或把阈值提到极差之上，再谈 Δ 的分辨率。"
+            )
+        else:
+            lines.append("- ✅ 自我极差未越过分差阈值：分歧信号目前多于仪表噪声。")
+        lines.append(
+            "- 注意 median-of-3 只对**围绕真值的单峰噪声**有效；若分数在两个模式之间跳"
+            "（实测评委 B / 仲裁就是这样），中位数是在两个口径之间投票，可能比单次更差。"
+        )
+    return "\n".join(lines)
+
+
 # --------------------------------------------------------------------------
 # 校准主流程（与 CLI 分离，便于测试注入假评委）
 # --------------------------------------------------------------------------
@@ -231,6 +259,63 @@ def calibrate(
 
 
 # --------------------------------------------------------------------------
+# 复现性：评委跟**自己**比（不与人工比）
+# --------------------------------------------------------------------------
+def repeatability(samples: list[dict[str, Any]], role: str, times: int = 3) -> dict[str, Any]:
+    """同一份渲染连续打 `times` 次，量极差。绕开评估缓存——否则第二次永远命中，
+    测出来的极差恒为 0，那是自欺而不是"很稳定"。
+
+    为什么要单列一个指标：bias / MAE / r 全是"与人工比"，一个每次调用在不同口径之间
+    跳变的模型在这些数字里可以看着完全正常（抖动甚至会把 MAE 摊平）。而双评委分差阈值、
+    仲裁触发率、Δ 的噪声带，全都隐含假设"同一个输入会给同一个分"。
+    实测（2026-09-19，真端点）：评委 A 同内容 3 次极差 0.25~0.70，评委 B 1.30~2.60，
+    仲裁一次给 4.45、一次给 8.88（极差 4.43）；**把 temperature 降到 0 并不改善**。
+    结论是这类抖动是"选中哪套口径"的双峰，不是围绕真值的噪声——median-of-3 救不了。
+    """
+    per_item: list[dict[str, Any]] = []
+    with backend.with_cache_disabled():
+        for s in samples:
+            sid = str(s.get("id") or "?")
+            scores: list[float] = []
+            err = ""
+            for _ in range(max(1, times)):
+                try:
+                    scores.append(float(evaluate_sample(role, s).weighted_score))
+                except Exception as e:  # noqa: BLE001 - 单条失败不影响整体测量
+                    err = f"{type(e).__name__}: {e}"
+                    break
+            if len(scores) < 2:
+                per_item.append({"id": sid, "n": len(scores), "error": err or "样本不足"})
+                continue
+            per_item.append(
+                {
+                    "id": sid,
+                    "n": len(scores),
+                    "scores": scores,
+                    "range": round(max(scores) - min(scores), 2),
+                    "median": round(statistics.median(scores), 2),
+                }
+            )
+    ok = [x for x in per_item if "range" in x]
+    if not ok:
+        return {"role": role, "times": times, "n_items": 0, "per_item": per_item}
+    ranges = [x["range"] for x in ok]
+    worst = max(ok, key=lambda x: x["range"])
+    return {
+        "role": role,
+        "times": times,
+        "n_items": len(ok),
+        "range_mean": round(sum(ranges) / len(ranges), 2),
+        "range_max": max(ranges),
+        "worst_id": worst["id"],
+        # 判定阈值的含义：分差阈值小于这个数时，"双评委分歧"主要在读评委自己的抖动
+        "disagreement_threshold": judge_disagreement_threshold(),
+        "threshold_exceeded": max(ranges) > judge_disagreement_threshold(),
+        "per_item": per_item,
+    }
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 def main() -> int:
@@ -238,6 +323,13 @@ def main() -> int:
     ap.add_argument("--samples", default=str(DEFAULT_SAMPLES), help="锚点样本 JSON 路径")
     ap.add_argument(
         "--judge", choices=list(JUDGE_ROLES), default="evaluator", help="要校准的评委角色"
+    )
+    ap.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="同一份输入连续打 N 次，量评委与**自己**的一致性（绕开评估缓存）。"
+        "代价是 N 倍调用；1=不测",
     )
     ap.add_argument(
         "--write-template",
@@ -273,6 +365,10 @@ def main() -> int:
         print("全部锚点评估失败，无法校准（先跑 run.py --preflight 检查端点）", file=sys.stderr)
         return 1
     print(render_report(args.judge, analysis))
+    if args.repeat >= 2:
+        rep = repeatability(samples, args.judge, args.repeat)
+        analysis["repeatability"] = rep
+        print(render_repeatability(rep))
     return 0
 
 

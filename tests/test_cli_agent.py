@@ -548,6 +548,164 @@ def test_calibrate_ledger_records_cohort_fingerprints(
     assert saved[-1]["anchors"] == "a1", "锚点集指纹漏记 = 下次没法判断是不是换了考卷"
 
 
+# ---------------------------------------------------------------------------
+# 复现性测量（calibrate --repeat）
+# ---------------------------------------------------------------------------
+def test_calibrate_repeat_lands_in_ledger_and_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--repeat 的读数必须进账本，否则换评委型号后没法区分"仪表换了"与"评委漂了"。"""
+    from test_cli_units import _patch_log_dir
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.2, "mae": 0.5, "r": 0.9})
+    monkeypatch.setattr(
+        calibrate_judge,
+        "repeatability",
+        lambda samples, judge, times: {
+            "role": judge,
+            "times": times,
+            "n_items": 2,
+            "range_mean": 1.4,
+            "range_max": 2.6,
+            "worst_id": "s1",
+            "disagreement_threshold": 2.0,
+            "threshold_exceeded": True,
+            "per_item": [],
+        },
+    )
+    assert cli_calibrate._calibrate_command(["--json", "--repeat", "3"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    rep = out["analysis"]["repeatability"]
+    assert rep["range_mean"] == 1.4 and rep["threshold_exceeded"] is True
+    saved = json.loads((tmp_path / "judge_calibration_history.json").read_text(encoding="utf-8"))
+    assert saved[-1]["rep_range_max"] == 2.6 and saved[-1]["rep_times"] == 3
+    assert saved[-1]["rep_threshold"] == 2.0
+
+
+def test_repeat_not_requested_does_not_measure_or_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """不带 --repeat 时一次都不许多打：复现性测量是 N×锚点 的真实花费。"""
+    from test_cli_units import _patch_log_dir
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.0, "mae": 0.3, "r": 0.9})
+
+    def _boom(*a, **k):
+        raise AssertionError("未请求 --repeat 却做了复现性测量")
+
+    monkeypatch.setattr(calibrate_judge, "repeatability", _boom)
+    assert cli_calibrate._calibrate_command(["--json"]) == 0
+    capsys.readouterr()
+    saved = json.loads((tmp_path / "judge_calibration_history.json").read_text(encoding="utf-8"))
+    assert "rep_range_mean" not in saved[-1]
+
+
+def test_repeatability_measures_variance_with_real_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真函数：同一输入打出 8.0 / 5.5 时极差必须是 2.5，并标出淹没阈值。"""
+    scores = iter([8.0, 5.5, 7.0])
+
+    class _Ev:
+        def __init__(self, v: float) -> None:
+            self.weighted_score = v
+
+    monkeypatch.setattr(calibrate_judge, "evaluate_sample", lambda role, s: _Ev(next(scores)))
+    monkeypatch.setenv("PM_JUDGE_DISAGREEMENT", "2.0")
+    rep = calibrate_judge.repeatability([{"id": "s1"}], "evaluator", times=3)
+    assert rep["n_items"] == 1
+    assert rep["range_max"] == 2.5
+    assert rep["per_item"][0]["scores"] == [8.0, 5.5, 7.0]
+    assert rep["per_item"][0]["median"] == 7.0
+    # 2.5 > 阈值 2.0 → 这台仪表的自我分歧足以自己触发仲裁
+    assert rep["threshold_exceeded"] is True
+
+
+def test_repeatability_bypasses_cache_but_keeps_the_injected_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """绕缓存的那层必须在**不丢掉假后端**的前提下生效。
+
+    两个坑各测一次：① 不绕缓存的话第二次永远命中，极差恒 0，等于自证"很稳定"；
+    ② 绕缓存若用 `backend.use(CallHook(disable_cache=True))` 整体替换，会把
+    testing.scope 注入的假后端一起丢掉，测试就会开始打真实端点。
+    """
+    from pm import backend, testing
+
+    seen: dict[str, bool] = {}
+
+    class _Ev:
+        def __init__(self, v: float) -> None:
+            self.weighted_score = v
+
+    def fake_eval(role: str, s: dict):
+        seen["cache_off"] = seen.get("cache_off", False) or backend.cache_disabled()
+        seen["hook_still_fake"] = (
+            backend.current() is not None and backend.current().structured is not None
+        )
+        return _Ev(7.0)
+
+    monkeypatch.setattr(calibrate_judge, "evaluate_sample", fake_eval)
+    with testing.scope("progress"):  # 假后端在册
+        calibrate_judge.repeatability([{"id": "s1"}], "evaluator", times=2)
+    assert seen["cache_off"] is True, "复现性测量必须绕开评估缓存"
+    assert seen["hook_still_fake"] is True, "绕缓存不许把假后端一起换掉"
+    assert backend.cache_disabled() is False, "退出上下文后必须恢复"
+
+
+def test_repeatability_survives_a_failing_item(monkeypatch: pytest.MonkeyPatch) -> None:
+    """端点抖到某条打不通时不能整体崩，标出来即可。"""
+
+    class _Ev:
+        def __init__(self, v: float) -> None:
+            self.weighted_score = v
+
+    def fake_eval(role: str, s: dict):
+        if s["id"] == "bad":
+            raise RuntimeError("engine is not available temporarily")
+        return _Ev(6.0)
+
+    monkeypatch.setattr(calibrate_judge, "evaluate_sample", fake_eval)
+    rep = calibrate_judge.repeatability([{"id": "bad"}, {"id": "ok"}], "arbiter", times=3)
+    assert rep["n_items"] == 1 and rep["range_max"] == 0.0
+    bad = next(x for x in rep["per_item"] if x["id"] == "bad")
+    assert "RuntimeError" in bad["error"]
+
+
+def test_disagreement_threshold_has_one_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """阈值只许有一个定义处，否则校准说"淹没阈值"而主管道用的是另一个数。"""
+    from pm.nodes import judge as judge_mod
+    from pm.schemas import judge_disagreement_threshold
+
+    monkeypatch.setenv("PM_JUDGE_DISAGREEMENT", "3.5")
+    assert judge_disagreement_threshold() == 3.5
+    assert judge_mod._judge_disagreement_threshold() == 3.5
+    monkeypatch.setenv("PM_JUDGE_DISAGREEMENT", "垃圾值")
+    assert judge_disagreement_threshold() == 2.0, "非法值回退默认而不是崩"
+
+
+def test_render_repeatability_wording_is_conditional() -> None:
+    """稳的时说"信号多于噪声"，抖的时候才告警——不许无脑印警告。"""
+    base = {
+        "times": 3,
+        "n_items": 2,
+        "range_mean": 0.4,
+        "range_max": 0.6,
+        "worst_id": "s1",
+        "disagreement_threshold": 2.0,
+        "per_item": [],
+    }
+    ok = calibrate_judge.render_repeatability({**base, "threshold_exceeded": False})
+    assert "✅" in ok and "⚠️" not in ok
+    bad = calibrate_judge.render_repeatability(
+        {**base, "range_max": 4.43, "threshold_exceeded": True}
+    )
+    assert "抖动已淹没阈值" in bad
+    assert "median-of-3" in bad
+
+
 def test_calibrate_anchor_set_change_is_not_judge_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

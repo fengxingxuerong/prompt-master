@@ -237,6 +237,94 @@ def test_delta_marked_untrustworthy_when_arm_has_no_valid_samples():
     assert "2 条用例" in text
 
 
+def test_self_report_equals_weighted_is_disclosed_as_inert():
+    """自报分与代码加权分**完全相等**时，那行"平均偏差"就不算独立证据，必须说出来。
+
+    实测 109 次原始评委调用：评委 A 80%、仲裁 88% 逐字复述加权结果——因为提示词给了
+    权重、示例示范怎么求加权，而该字段排在维度分之后生成。
+    """
+    ev = [
+        {"test_case_index": 0, "model_reported_score": 8.0, "weighted_score": 8.0, "issues": ["x"]},
+        {"test_case_index": 1, "model_reported_score": 7.5, "weighted_score": 9.0, "issues": ["y"]},
+    ]
+    text, _ = render_report(_state(evaluations=ev))
+    assert "1/2 条自报分与代码加权分**完全相等**" in text
+    assert "没放水" in text
+
+
+def test_no_inertness_warning_when_self_reports_diverge():
+    """两数真的分开时不许凭空印警告。"""
+    ev = [
+        {"test_case_index": 0, "model_reported_score": 6.0, "weighted_score": 9.0, "issues": ["x"]},
+        {"test_case_index": 1, "model_reported_score": 7.5, "weighted_score": 9.0, "issues": ["y"]},
+    ]
+    text, _ = render_report(_state(evaluations=ev))
+    assert "完全相等" not in text
+
+
+def test_perfect_scores_with_issues_flagged_as_contradiction():
+    """五维全 ≥9.5 却还列问题 = 自相矛盾，得在报告里点名。"""
+    ev = [
+        {
+            "test_case_index": 2,
+            "weighted_score": 9.8,
+            "model_reported_score": 9.8,
+            "dimension_scores": {
+                "task_completion": 10,
+                "format_adherence": 9.5,
+                "constraint_compliance": 10,
+                "robustness": 10,
+                "quality": 10,
+            },
+            "issues": ["表格里 Q4 数字无来源"],
+        }
+    ]
+    text, _ = render_report(_state(evaluations=ev))
+    assert "五维全 ≥9.5 却仍列出了问题" in text and "#2" in text
+
+
+def test_flawless_claim_is_surfaced_separately():
+    """五维全 ≥9.5 且 issues 为空：是"无可指摘"的强声明，措辞与上面那种不同。"""
+    ev = [
+        {
+            "test_case_index": 0,
+            "weighted_score": 9.6,
+            "model_reported_score": 9.0,
+            "dimension_scores": {
+                "task_completion": 9.5,
+                "format_adherence": 9.5,
+                "constraint_compliance": 9.5,
+                "robustness": 9.5,
+                "quality": 9.5,
+            },
+            "issues": [],
+        }
+    ]
+    text, _ = render_report(_state(evaluations=ev))
+    assert "宣称「无可指摘」" in text
+    assert "却仍列出了问题" not in text
+
+
+def test_normal_scores_trigger_neither_ceiling_warning():
+    ev = [
+        {
+            "test_case_index": 0,
+            "weighted_score": 7.9,
+            "model_reported_score": 7.0,
+            "dimension_scores": {
+                "task_completion": 8,
+                "format_adherence": 9,
+                "constraint_compliance": 7,
+                "robustness": 7,
+                "quality": 8,
+            },
+            "issues": ["缺一个来源"],
+        }
+    ]
+    text, _ = render_report(_state(evaluations=ev))
+    assert "无可指摘" not in text and "却仍列出了问题" not in text
+
+
 def test_arbitrated_cases_disclose_that_the_score_is_single_judge():
     """分差超阈值时采信的是第三方**一人**的分，报告必须说这不是双评委共识。
 

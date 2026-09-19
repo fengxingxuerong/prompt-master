@@ -17,13 +17,13 @@
 | [docs/design-notes.md](docs/design-notes.md) | 一、相对原文档修了什么；二、真实缺陷记录（C*/M*/H*/L* 编号定义在这里） |
 | [docs/agent-cli-guide.md](docs/agent-cli-guide.md) | 三之二、智能体调用指南（退出码协议 / 异步 submit-wait / 记忆层子命令 / MCP） |
 | [docs/rest-api.md](docs/rest-api.md) | 四、REST API 服务与容器化部署 |
-| [docs/evaluation.md](docs/evaluation.md) | 六、评估口径；六之二、测量层；七~十二、2026-09-18 口径修正、评委跨家族实测、移植自同类系统的四个机制、真实调用审计 |
+| [docs/evaluation.md](docs/evaluation.md) | 六、评估口径；六之二、测量层；七~十二、口径修正、评委跨家族实测（含**复现性**这一轴：同输入重复打的极差）、移植自同类系统的四个机制、真实调用审计 |
 | [docs/operations.md](docs/operations.md) | 七、验证方式与诚实边界；十三、发布与部署 |
 | [docs/fix-log.md](docs/fix-log.md) | 十~十二、按日期的测试修复 / 安全加固 / 提示词评审记录 |
 | [docs/agent-skill.md](docs/agent-skill.md) | OpenClaw Agent Skill 说明 |
 | [docs/release-notes.md](docs/release-notes.md) | 版本变更与**跨版本数据可比性**（1.1.0 起分数口径变了，必读） |
 | [docs/qa_report_2026-09-08.md](docs/qa_report_2026-09-08.md) | 2026-09-08 真实端到端 QA 报告 |
-| [docs/llm_e2e_matrix_2026-09-18.md](docs/llm_e2e_matrix_2026-09-18.md) | 口径重建后的第一轮 LLM 实测：评委跨家族与锚点重校（6 → 11 条、三角色已入账）、真实调用探针、八个从数据里抓出的缺陷、绝对分与成对偏好两次不同向、注入判定的假阳性与仲裁路径的实测（含两次公开撤回）；**历史 Δ 自此不可比** |
+| [docs/llm_e2e_matrix_2026-09-18.md](docs/llm_e2e_matrix_2026-09-18.md) | 口径重建后的第一轮 LLM 实测：评委跨家族与锚点重校（6 → 11 条、三角色已入账）、真实调用探针、十个从数据里抓出的缺陷、绝对分与成对偏好两次不同向、注入判定的假阳性与仲裁/复现性的实测（含三次公开撤回）；**历史 Δ 自此不可比** |
 
 ---
 
@@ -149,6 +149,10 @@ PM_FAKE_BACKEND=progress .venv/bin/python run_server.py --port 8080
 .venv/bin/python run.py calibrate                     # 校准评委 A（落漂移历史）
 .venv/bin/python run.py calibrate --judge evaluator_b
 .venv/bin/python run.py calibrate --judge evaluator_b --no-save   # 只看不动账本
+# 复现性（与"准不准"正交的一轴）：同一份输入绕开评估缓存连打 3 次
+# 实测：评委 A 极差 0.25~0.70、评委 B 1.30~2.60、仲裁最高 4.43，且 temperature=0 不改善。
+# 自我极差一旦越过 PM_JUDGE_DISAGREEMENT，"双评委分歧"就分不清在读用例还是读仪表抖动。
+.venv/bin/python run.py calibrate --judge evaluator_b --repeat 3  # 代价是 3×锚点 次调用
 bash examples/run_e2e_stub.sh          # Linux / macOS
 .venv\Scripts\python.exe -m pytest tests/ -q
 # Windows 等价的桩服务 e2e（自动挑端口、跑前清缓存、断言两条通道）：
@@ -264,7 +268,7 @@ prompt-master/
 │   ├── run_e2e_stub.sh          双通道本地 e2e（Linux / macOS）
 │   ├── run_e2e_stub.ps1         同上，Windows 版（额外做端口避让、缓存隔离与端点自检）
 │   └── run_multiworker_check.py 跨进程共享记录验证（两个服务进程，一个提交一个查询）
-├── tests/                      回归测试（pytest 663 项，以 `--collect-only` 为准；口径见 docs/operations.md 第七节）
+├── tests/                      回归测试（pytest 677 项，以 `--collect-only` 为准；口径见 docs/operations.md 第七节）
 ├── Dockerfile / .dockerignore  服务镜像（只装运行时依赖，非 root，/data 挂载点）
 ├── .github/workflows/ci.yml    CI：ruff + mypy + pytest × 3 个 Python 版本
 └── pyproject.toml              ruff / mypy / pytest 配置
