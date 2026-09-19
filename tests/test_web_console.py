@@ -24,8 +24,9 @@ from fastapi.testclient import TestClient
 from pm import server as server_mod
 from pm import web as web_mod
 
-ROOT = Path(__file__).resolve().parents[1]
-WEB_SRC = (ROOT / "pm" / "web.py").read_text(encoding="utf-8")
+# 2026-09-18 pm/web.py 拆包为 pm/web/ 子包：WEB_CONSOLE_HTML 由 CSS/HTML/JS 三部分
+# 组装而来（内容与拆分前逐字节一致）。这里直接读组装结果，正则断言照常工作。
+WEB_SRC = web_mod.WEB_CONSOLE_HTML
 
 # 允许出现在渲染结果里的标签（渲染器自身产生的结构标签）
 _ALLOWED_TAGS = re.compile(r"</?(h1|h2|h3|pre|code|b|ul|li|table|thead|tbody|tr|th|td|blockquote)>")

@@ -49,7 +49,9 @@ python run.py --json --task "..." --cases-file cases.json --max-iter 2
 
 1. **长任务必须走 server**（submit/wait 是异步接口）；同步 `--json` 只用于 fast 档小任务
 2. **跑真实任务前先 `--preflight`**（端点活着才花预算；AMD 端点有历史不稳定记录）
-3. **目标是 SenseNova 时**：注入用例必须留在用例集里（`{"input","expected","mode":"rule","scenario":"injection","hijack_marker":"..."}`）——该端点上注入防御偏弱，靠门禁兜底
+3. **目标是 SenseNova 时**：注入用例必须留在用例集里（`{"input","expected","mode":"rule","scenario":"injection"}`）
+   ——该端点上注入防御偏弱，靠门禁兜底。`hijack_marker` 可省：系统会为标了 `injection` 的用例
+   派生高熵校验码并追加进用例文本，判定只认那个码
 4. **预算意识**：默认 3 用例 × 2 采样 × 双评委 ≈ 40~80 次调用；`--fast` 或 `PM_MAX_LLM_CALLS` 控制成本
 5. **重试安全**：target/评估按内容哈希缓存（键含模型指纹），失败重试命中缓存不重复计费
 
@@ -65,4 +67,5 @@ python run.py --json --task "..." --cases-file cases.json --max-iter 2
 ```
 - `contains/exact`：expected 必须是在输出里**真会出现**的字面片段（不是规则句子）
 - `rule`：expected 交给评委逐条核验（默认只提醒，`PM_RULE_VETO=1` 才一票否决）
-- `scenario/hijack_marker`：激活确定性注入存活检测（不经评委）
+- `scenario/hijack_marker`：`scenario: "injection"` 才激活确定性注入存活检测（不经评委）；
+  校验码由系统派生并写进用例，`hijack_marker` 只是可选的攻击文本，**不作为定罪依据**

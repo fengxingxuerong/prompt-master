@@ -58,7 +58,8 @@ python run.py --dry-run --task "..." --cases-file my_cases.json --max-iter 2
 - **澄清策略**：`--json` 与 `--interactive` 互斥。Agent 模式下需求不清晰时系统自动推断，
   假设全部写进报告的「需求侧遗留问题」，请把它当作必须人工确认的字段
 - **用例集**：`--cases-file` 支持 `{"input", "expected", "mode", "scenario", "hijack_marker"}`——
-  后两者激活注入存活确定性检测（报告出现「注入存活」小节）
+  `scenario: "injection"` 激活注入存活确定性检测（报告出现「注入存活」小节，判定用系统派生的
+  高熵校验码；`hijack_marker` 只是可选的攻击文本）
 
 ### 三之二·附：记忆层与自检子命令（记忆不用另建，组织历史即可）
 

@@ -44,3 +44,22 @@
    "需要重新分析"的信号实测无效。已改为显式布尔标志 `needs_reanalysis`。
 
 ---
+
+## 三、Optimiser / Evaluator 提示词规则的实测依据（索引）
+
+2026-09-18 之前，`OPTIMIZER_SYSTEM` 把事故日期与分差（`constraint_compliance 8.38→7.0`、
+`robustness 8.75→7.88` 等）直接写进指令通道。问题有两个：目标模型可能把这些数字复述进交付物
+（而质量门的元话语特征句挡不住数字），以及提示词只增不减地沉积。现在指令里只留"规则 + 一行理由"，
+证据本体在下面的日志里；改这些规则前先读日志，别把已验证的结论改回假设。
+
+| 提示词里的规则 | 实测依据 |
+|---|---|
+| 约束预算 ≤8 条（`prompts.py` OPTIMIZER 硬性规则 4 / `quality.py` `CONSTRAINT_LIMIT`） | `docs/e2e_iteration_log_2026-09-13.md` R1-b：12 条约束的交付物被评委点名「模型漏执行」，constraint_compliance 8.38→7.0、task_completion 9.25→7.75 |
+| 禁止抑制型条款（OPTIMIZER 硬性规则 7 / `quality.py` `suppressive_rule`） | 同上 R1-c：「停止处理」「不输出任何结论」「仅输出固定 token」→ robustness 8.75→7.88，且与"边界仍要作答"的骨架要求冲突 |
+| 「完全为空」与「非空但数据不足」两条互斥分支（OPTIMIZER 硬性规则 8 / `quality.py` `blanket_missing_branch`） | 同日志第 1、2 轮：合并成一条兜底后，含 120 万/98 万的用例被整段判「数据缺失」，事实断言失败，两轮修订都没修掉 |
+| 「格式不规范」≠「字段缺失」（OPTIMIZER 硬性规则 8） | 同日志第 2 轮：日期写法混排被判成"没有该字段" |
+| 评委锚定：编造类违规落 5-6 档（`prompts.py` EVALUATOR 锚定规则） | `judge_calibration/samples.json` 的人工分 vs 评委分对比（`calibrate_judge.py`） |
+| 记忆参考相似度门槛 0.35（`memory.py` `_SIM_MIN`） | `logs/memory_benefit.json`：0.275 的"语义族邻居"被照抄，v0 均分 1.19，同任务无参考的修订轮 9.65 |
+
+
+---

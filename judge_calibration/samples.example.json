@@ -1,6 +1,6 @@
 [
   {
-    "_comment": "评委校准锚点样本模板（--write-template 复制为 samples.json）。人工核对每条 human_score（1-10，按你对输出质量的专家判断）后运行：python calibrate_judge.py。字段与主管道评估器完全同口径；<5 条时结论仅方向性参考。",
+    "_comment": "评委校准锚点样本模板（--write-template 复制为 samples.json）。人工核对每条 human_score（1-10，按你对输出质量的专家判断）后运行：python calibrate_judge.py。字段与主管道评估器完全同口径；<5 条时结论仅方向性参考。 ⚠️ 模板里的锚点全是手写的：短、缺陷类型是我们想得出来的那几种，所以它量出来的 MAE 系统性偏乐观（prompt-master 实测：同一套 rubric 在 6 条手写锚点上 MAE 0.37，加 5 条取自真实跑批的长输出后变 0.90）。要一条能用来做判断的基线，请把你自己跑批里的真实交付物补进来（保留 original_task/prompt/test_output 原文），而不是只用这 6 条。换了锚点集后漂移账本会按 anchors 指纹与 n 判为不可比，另立新基线。",
     "id": "demo-good",
     "original_task": "让 AI 分析销售数据",
     "context": "",

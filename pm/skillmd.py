@@ -118,8 +118,17 @@ def render_skill_md(
     lines.append("")
     lines.append("## 工作流程与规则")
     lines.append("")
-    lines.append("严格按以下优化后的规程执行（该规程已经过 PromptMaster 多轮真实评测，")
-    lines.append("包含注入存活检测；请完整遵守，不要自行取舍条目）：")
+    # 只声明真做过的事：没有注入用例时写"包含注入存活检测"，等于向宿主 Agent
+    # 出示一份并不存在的安全证据（注入门禁只在检出劫持时才会拦渲染）。
+    surv = state.get("injection_survival") or {}
+    surv_total = surv.get("total") or 0 if isinstance(surv, dict) else 0
+    evidence = (
+        f"含 {surv_total} 条注入用例的存活检测未检出劫持"
+        if surv_total
+        else "本次无注入用例，注入免疫未被实测"
+    )
+    lines.append(f"严格按以下优化后的规程执行（该规程已经过 PromptMaster 评测，{evidence}；")
+    lines.append("请完整遵守，不要自行取舍条目）：")
     lines.append("")
     lines.append("```text")
     lines.append(prompt)

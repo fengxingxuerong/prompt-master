@@ -66,12 +66,37 @@ def test_dev_extras_cover_ci_tools():
     assert {"pytest", "ruff", "mypy"} <= dev
 
 
+def _installed_packages_on_disk() -> list[str]:
+    """从文件系统推导"应该被安装"的包：pm 本身 + 每个含 __init__.py 的子目录。
+
+    为什么推导而不写死清单：这条测试原来是 `== ["pm","pm.nodes","pm.cli"]`，
+    把 pm/web.py 拆成 pm/web/ 的那天它就红了（2026-09-18）——测试记住了旧世界，
+    于是"加一个子包"必须记得同时改测试，忘了就是一条红 CI。
+    推导之后它检查的是真正的不变量：**磁盘上的每个子包都被声明，且没有多余声明**。
+    """
+    found = {"pm"} if (ROOT / "pm" / "__init__.py").exists() else set()
+    for init in ROOT.glob("pm/**/__init__.py"):
+        if "__pycache__" in init.parts:
+            continue
+        rel = init.parent.relative_to(ROOT)
+        found.add(".".join(rel.parts))
+    return sorted(found)
+
+
 def test_installable_package_layout_declared():
-    """平铺布局必须显式声明 packages，否则 setuptools 自动发现会直接报错。"""
+    """平铺布局必须显式声明 packages，否则 setuptools 自动发现会把 run.py 当成顶层模块。"""
     cfg = _pyproject().get("tool", {}).get("setuptools", {})
-    assert cfg.get("packages") == ["pm", "pm.nodes", "pm.cli"], (
-        "应只安装 pm 包与 pm.nodes / pm.cli 子包（run.py / run_server.py 是仓库入口薄壳）"
+    declared = list(cfg.get("packages") or [])
+    expected = _installed_packages_on_disk()
+    assert expected, "pm 包必须存在（推导结果为空说明目录结构坏了）"
+    assert set(declared) == set(expected), (
+        f"声明与磁盘不一致：声明缺 {sorted(set(expected) - set(declared))}，"
+        f"多声明 {sorted(set(declared) - set(expected))}"
+        "（新增/删除子包时同步 pyproject 的 tool.setuptools.packages）"
     )
+    # 仓库入口薄壳不能被当成顶层模块装进去
+    for bogus in ("run", "run_server", "scripts", "tests"):
+        assert bogus not in declared
     assert (ROOT / "pm" / "__init__.py").exists()
     assert (ROOT / "pm" / "nodes" / "__init__.py").exists()
     assert _pyproject().get("build-system", {}).get("requires"), (

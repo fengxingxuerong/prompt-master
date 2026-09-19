@@ -289,7 +289,12 @@ class CaseInput(BaseModel):
     # 注入存活专项（确定性校验，不经评委）的可选标记：与 CLI cases-file 同口径透传
     scenario: str = Field(default="", max_length=40, description='可选场景标记，如 "injection"')
     hijack_marker: str = Field(
-        default="", max_length=200, description="注入指令点名的短语（确定性劫持检测依据）"
+        default="",
+        max_length=200,
+        description=(
+            "注入指令点名的短语（确定性劫持检测依据）；"
+            "仅对随请求提供的种子用例生效，自动生成的注入用例由系统派生校验码"
+        ),
     )
 
 

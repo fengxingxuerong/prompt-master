@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prompt-master"
-version = "1.0.0"
+version = "1.1.0"
 description = "提示词自动生成 / 测试 / 评估 / 迭代优化闭环（LangGraph）"
 requires-python = ">=3.11"
 # 与 requirements.txt 保持同一组实测通过的版本号（tests/test_packaging.py 会比对两边，防漂移）。
@@ -34,8 +34,8 @@ dev = ["pytest==9.1.1", "ruff==0.16.6", "mypy==2.3.1", "pytest-cov>=6.0", "cover
 
 [tool.setuptools]
 # 平铺布局下 setuptools 自动发现会把 run.py / run_server.py 当成顶层模块，
-# 这里只安装 pm 包（含 pm.nodes / pm.cli 子包）；两个入口脚本依旧用 `python run.py ...` 从仓根跑。
-packages = ["pm", "pm.nodes", "pm.cli"]
+# 这里只安装 pm 包（含 pm.nodes / pm.cli / pm.web 子包）；两个入口脚本依旧用 `python run.py ...` 从仓根跑。
+packages = ["pm", "pm.nodes", "pm.cli", "pm.web"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

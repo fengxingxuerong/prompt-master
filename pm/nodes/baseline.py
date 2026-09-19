@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import random
 import re
 from typing import Any
 
@@ -18,6 +17,7 @@ from ..state import State
 from .common import _apply, _feature_enabled
 from .execute import (
     _case_ground_truth,
+    _injection_survival,
     _run_matrix,
     _samples_per_case,
     _target_concurrency,
@@ -86,29 +86,30 @@ def baseline_node(state: State) -> dict[str, Any]:
     logger.info(
         "基线结果：avg=%.2f min=%.2f（与优化版同口径，用于算 Δ）", agg.avg_score, agg.min_score
     )
+    # 注入存活同样跑在基线臂上：只有主路做检测的话，"门禁拦住了劫持"就缺少参照——
+    # 基线也被劫持时，说明测试数据本身就带指令，而不能把主路的劫持当成优化版的独有缺陷。
+    base_surv = _injection_survival(state, runs)
+    patch: dict[str, Any] = {
+        "baseline_runs": [r.model_dump() for r in runs],
+        "baseline_aggregate": agg.model_dump(),
+        "llm_calls": state.get("llm_calls", 0) + n_calls + n_eval_calls,
+        **({"errors": errors} if errors else {}),
+    }
+    if base_surv:
+        patch["baseline_injection_survival"] = base_surv
     return _apply(
         state,
         node,
-        {
-            "baseline_runs": [r.model_dump() for r in runs],
-            "baseline_aggregate": agg.model_dump(),
-            "llm_calls": state.get("llm_calls", 0) + n_calls + n_eval_calls,
-            **({"errors": errors} if errors else {}),
-        },
+        patch,
         "baseline_done",
         n_cases=len(cases),
         n_samples=k,
         avg=agg.avg_score,
         min=agg.min_score,
+        injection_hijacked_base=(
+            f"{base_surv['hijacked']}/{base_surv['total']}" if base_surv else None
+        ),
     )
-
-
-def _ab_flip(run_id: Any, idx: int) -> bool:
-    """成对盲评的 A/B 映射：True 表示把基线输出放在 A 侧。
-
-    用 run_id + 用例号做确定性随机：既消除模型的位置偏好，又保证断点续跑结果可复现。
-    """
-    return random.Random(f"{run_id}:{idx}").random() < 0.5
 
 
 # 保守枚举标记：出现越多，输出越接近「逐项枚举缺失/无法分析」的保守风格
@@ -202,47 +203,68 @@ def compare_node(state: State) -> dict[str, Any]:
     votes = {"better": 0, "worse": 0, "tie": 0}
     details: list[dict[str, Any]] = []
     n_calls = 0
+    n_position_flips = 0
+
+    def _judge_pair(a_out: str, a_label: str, b_out: str, idx: int) -> dict[str, Any]:
+        """一次成对判定，返回 {verdict, reason}；调用失败时 verdict=None（不计票）。"""
+        try:
+            pref, _meta = llm.structured_call(
+                "comparator",
+                PreferenceResult,
+                COMPARATOR_SYSTEM,
+                render(
+                    COMPARATOR_USER,
+                    original_task=task,
+                    test_input=str(cur[idx].get("test_input", "")),
+                    output_a=a_out,
+                    output_b=b_out,
+                ),
+            )
+        except Exception as e:  # noqa: BLE001 - 成对评失败不影响主流程
+            logger.warning("case#%d 成对比较失败：%s", idx, e)
+            errors.append(f"compare#{idx}: {e}")
+            return {"verdict": None, "reason": ""}
+        nonlocal n_calls
+        n_calls += 1
+        if pref.winner == "tie" or not pref.decisive:
+            chosen: str = "tie"
+        else:
+            chosen = "better" if (pref.winner == "A") == (a_label == "cur") else "worse"
+        return {"verdict": chosen, "reason": pref.reason}
 
     for idx in common:
         c_out = str(cur[idx].get("output", ""))
         b_out = str(base[idx].get("output", ""))
         if not c_out.strip() and not b_out.strip():
             continue
-        # 用 run_id + 用例号做确定性随机：既消除位置偏好，又保证断点续跑结果可复现
-        flip = _ab_flip(state.get("run_id"), idx)
-        a_out, b_label = (c_out, "cur") if not flip else (b_out, "base")
-        user_prompt = render(
-            COMPARATOR_USER,
-            original_task=task,
-            test_input=str(cur[idx].get("test_input", "")),
-            output_a=a_out,
-            output_b=c_out if flip else b_out,
-        )
-        try:
-            pref, _meta = llm.structured_call(
-                "comparator", PreferenceResult, COMPARATOR_SYSTEM, user_prompt
-            )
-            n_calls += 1
-        except Exception as e:  # noqa: BLE001 - 成对评失败不影响主流程
-            logger.warning("case#%d 成对比较失败：%s", idx, e)
-            errors.append(f"compare#{idx}: {e}")
+        # **双向评**：正序（优化版在 A）与反序（基线在 A）各判一次。
+        # 旧做法是"随机决定谁放 A"——它能平均掉位置偏好，却看不见位置偏好：
+        # 评委即使重测一致性 >0.95 也可能带着 >0.10 的位置偏置，而胜负只判一次时
+        # 那份偏置直接进结论。两序一致才算数，不一致就是"胜负由座位决定"→ 记 tie 并计数。
+        fwd = _judge_pair(c_out, "cur", b_out, idx)
+        rev = _judge_pair(b_out, "base", c_out, idx)
+        if fwd["verdict"] is None and rev["verdict"] is None:
             continue
-
-        if pref.winner == "tie" or not pref.decisive:
-            chosen = "tie"
-        elif (pref.winner == "A") == (b_label == "cur"):
-            chosen = "better"
-        else:
-            chosen = "worse"
-        votes[chosen] += 1
+        agree = fwd["verdict"] is not None and fwd["verdict"] == rev["verdict"]
+        if not agree:
+            n_position_flips += 1
+            logger.warning(
+                "case#%d 成对双向评不一致（正序=%s 反序=%s）→ 记 tie：位置偏置改写了结论",
+                idx,
+                fwd["verdict"],
+                rev["verdict"],
+            )
+        chosen = fwd["verdict"] if agree else "tie"
+        if chosen:
+            votes[chosen] += 1
         details.append(
             {
                 "test_case_index": idx,
-                "side_a": b_label,
-                "winner": pref.winner,
                 "verdict": chosen,
-                "decisive": pref.decisive,
-                "reason": pref.reason,
+                "forward": fwd["verdict"],
+                "swapped": rev["verdict"],
+                "position_flip": not agree,
+                "reason": fwd["reason"] or rev["reason"],
             }
         )
 
@@ -280,11 +302,18 @@ def compare_node(state: State) -> dict[str, Any]:
         "verdict": verdict,
         "votes": votes,
         "n_compared": len(details),
+        "position_flips": n_position_flips,
         "conflict": conflict,
         "details": details,
     }
     if attribution is not None:
         pairwise["attribution"] = attribution
+    if n_position_flips:
+        logger.warning(
+            "成对盲评有 %d/%d 条两序结论相反（位置偏置）→ 已记为 tie，未计入胜负",
+            n_position_flips,
+            len(details),
+        )
     return _apply(
         state,
         node,
@@ -297,5 +326,6 @@ def compare_node(state: State) -> dict[str, Any]:
         verdict=verdict,
         votes=votes,
         n_compared=len(details),
+        position_flips=n_position_flips,
         conflict=conflict or None,
     )

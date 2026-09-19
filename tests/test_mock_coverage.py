@@ -174,3 +174,24 @@ def test_single_case_degraded_marks_main_path():
         result = mock_node(_state(n=3))
     assert result["test_cases"] == ["分析销售数据"]  # 降级回退为原始需求
     assert any("mock: " in e for e in result.get("errors", []))
+
+
+def test_mockgen_sees_only_the_requirement_not_the_candidate():
+    """判据必须独立于候选：mockgen 一旦看到被测提示词，就会照着它定制用例，
+    基线（原始需求直喂）于是被污染性地打低，Δ 测的变成"用例偏向谁"。"""
+    seen: dict[str, str] = {}
+
+    def structured(role, model_cls, system, user, max_retries=3, overrides=None):
+        seen["user"] = user
+        seen["system"] = system
+        return _fake_structured(role, model_cls, system, user, max_retries, overrides)
+
+    state = _state()
+    state["prompt"] = "[约束] 这段只属于候选提示词，绝不该出现在 mockgen 上下文：XYZZY-CANDIDATE"
+    hook = backend.CallHook(structured=structured, plain=testing._fake_plain, disable_cache=True)
+    with backend.use(hook):
+        out = mock_node(state)
+
+    assert "分析销售数据" in seen["user"], "需求文本必须是用例的唯一来源"
+    assert "XYZZY-CANDIDATE" not in seen["user"] + seen["system"]
+    assert out["trace"][-1]["case_source"] == "task_only"

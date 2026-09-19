@@ -40,7 +40,7 @@ STRONG_META_MARKERS: list[str] = [
     "世界顶级的提示词工程师",  # OPTIMIZER_SYSTEM 自我定位
     "负责根据评估反馈修订提示词",  # REVISER_SYSTEM 自我定位
     "你是一位严格的 AI 输出质量评估专家",  # EVALUATOR_SYSTEM
-    "为给定提示词生成一批",  # MOCKGEN_SYSTEM
+    "生成一批（多条）模拟用户输入",  # MOCKGEN_SYSTEM
     "<输出前自检",  # OPTIMIZER_SYSTEM 的内部自检段
     "<修订流程（按序执行）",  # REVISER_SYSTEM
     "<评估流程（按序执行）",  # EVALUATOR_SYSTEM
@@ -67,6 +67,11 @@ MIN_PROMPT_LENGTH = 100
 # constraint_compliance 8.38→7.0、task_completion 9.25→7.75 —— 条目越多越执行不到位。
 CONSTRAINT_LIMIT = 8
 
+# 每轮修订的净增量上限：只写在 REVISER_USER 的 <size_budget> 散文里等于没有闸
+# （模型自觉，超标无人核对 → 交付物逐轮膨胀）。这里给出唯一口径，
+# 由 revise_node 做确定性核对并写进版本注记与报告。
+SIZE_GROWTH_RATIO = 1.3
+
 # 抑制型规则：让输出"少说/不说"的条款（停止处理、不输出结论、固定 token 兜底）。
 # 为什么单列一类：这类规则不违反字面约束，却直接压低 task_completion 与 robustness
 # （实测 8.75→7.88），且与"边界情况必须继续作答"的骨架要求相冲突。
@@ -78,7 +83,12 @@ _SUPPRESSIVE_RULE_RE = re.compile(
 # 约束条目只在「约束语义」的标签段里数：[任务]/[输出格式] 里的编号是交付物清单
 # （如"1. 趋势结论 2. 异常点"），把它们算进来会把合格提示词误杀。
 _SECTION_HEADER_RE = re.compile(r"^\s*\[([^\[\]]{1,8})\]\s*$")
-_CONSTRAINT_SECTION_RE = re.compile(r"约束|边界")
+# 段名同义词要覆盖全：只认「约束|边界」时，交付物把段名写成 [要求] / [规则]
+# 就能带着 20 条编号约束"合规"通过预算闸——绕过成本为零。
+_CONSTRAINT_SECTION_RE = re.compile(r"约束|边界|规则|要求|限制|禁止|规范|须知|注意")
+# 但这些段里的编号是交付物骨架而不是约束，即便段名撞上上面的词也不算（[输出要求]、
+# [格式规范] 里列的是"第一部分/第二部分"，数进来就是误杀）。
+_NON_CONSTRAINT_SECTION_RE = re.compile(r"任务|背景|角色|格式|输出|示例|骨架|流程|步骤|结构")
 _NUMBERED_ITEM_RE = re.compile(r"^\s*\d+\s*[.、)）]\s*\S")
 
 # 定界符配平：<输入>…<输入>（重复开标签）这类畸形会在真实调用里放大注入面 ——
@@ -154,8 +164,13 @@ def delimiter_problems(prompt: str) -> list[str]:
     return deduped
 
 
+def _is_constraint_section(name: str) -> bool:
+    """段名是否属于「约束语义」段（受 ≤CONSTRAINT_LIMIT 预算管）。"""
+    return bool(_CONSTRAINT_SECTION_RE.search(name)) and not _NON_CONSTRAINT_SECTION_RE.search(name)
+
+
 def count_constraints(prompt: str) -> dict[str, Any]:
-    """统计约束类标签段（[约束]/[关键约束]/[边界处理] 等）内的编号条目数。
+    """统计约束类标签段（[约束] / [规则] / [限制] / [边界处理] 等）内的编号条目数。
 
     返回 {"total": 总数, "sections": "段名1×a、段名2×b"}；无任何约束段时 total=0。
     无编号但确有约束段的（用破折号列条目）不做猜测——只数能确定性数出来的。
@@ -172,7 +187,7 @@ def count_constraints(prompt: str) -> dict[str, Any]:
             current = m.group(1)
             current_count = 0
             continue
-        if current is not None and _CONSTRAINT_SECTION_RE.search(current):
+        if current is not None and _is_constraint_section(current):
             if _NUMBERED_ITEM_RE.match(line):
                 current_count += 1
     if current is not None and current_count:

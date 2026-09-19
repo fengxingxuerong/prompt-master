@@ -430,18 +430,23 @@ def test_compare_node_all_comparator_calls_fail(monkeypatch: pytest.MonkeyPatch)
 def test_compare_node_conflict_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PM_BASELINE", "1")
     monkeypatch.setenv("PM_PAIRWISE", "1")
-    # 选一个 flip=True 的 run_id：A 侧=基线，winner="A" ⇒ 判定"更差"，与达标结果冲突
-    rid = next(r for r in ("a", "b", "c", "d") if baseline_mod._ab_flip(r, 0))
-    monkeypatch.setattr(baseline_mod.llm, "structured_call", lambda *a, **kw: (_pref("A"), None))
+
+    # 内容敏感的评委：谁带"基线输出"谁赢 ⇒ 两序一致判"更差"，与达标结果冲突
+    def pref(role, model_cls, system, user, max_retries=3, overrides=None):
+        a_block = user.split("<CANDIDATE_A>")[1].split("</CANDIDATE_A>")[0]
+        return (_pref("A" if "基线" in a_block else "B"), None)
+
+    monkeypatch.setattr(baseline_mod.llm, "structured_call", pref)
     out = baseline_mod.compare_node(
         _state(
-            run_id=rid,
+            run_id="any",
             aggregate={"passed": True, "avg_score": 8.5},
             baseline_runs=[{"test_case_index": 0, "output": "基线输出"}],
             test_runs=[{"test_case_index": 0, "output": "本轮输出"}],
         )
     )
     assert "结论存疑" in _jdump(out)
+    assert out["pairwise"]["position_flips"] == 0  # 两序一致：这是真差异，不是位置偏置
 
 
 # ---------------------------------------------------------------- nodes/revise

@@ -327,3 +327,217 @@ def test_early_stop_recovered_then_regressed():
     from pm.schemas import early_stop_reason
 
     assert early_stop_reason([6.0, 8.5, 8.4, 7.0]) is not None
+
+
+# --------------------------------------------------------------------------
+# 1b. 评委输出的取证字段形状容错（2026-09-18 实测：deepseek 把 issues 写成对象数组）
+# --------------------------------------------------------------------------
+def _dims(v: float) -> DimensionScores:
+    return DimensionScores(
+        task_completion=v,
+        format_adherence=v,
+        constraint_compliance=v,
+        robustness=v,
+        quality=v,
+    )
+
+
+def test_issues_as_object_items_still_parse():
+    """对象条目要压回字符串，而不是让整位评委的这条评估作废。"""
+    ev = EvaluationResult.model_validate(
+        {
+            "issues": [
+                {"issue": "第二段结论无数据支撑"},
+                {"text": "表格缺少「数据缺失」行"},
+                {"severity": "high", "note": "自造键名也要落到文本"},
+            ],
+            "suggestions": ["在 [约束] 段增加：每个结论必须附数据"],
+            "dimension_scores": _dims(6).model_dump(),
+            "model_reported_score": 6.0,
+            "should_revise": True,
+        }
+    )
+    assert ev.issues[0] == "第二段结论无数据支撑"
+    assert ev.issues[1] == "表格缺少「数据缺失」行"
+    assert "自造键名也要落到文本" in ev.issues[2]
+    assert all(isinstance(i, str) for i in ev.issues)
+
+
+def test_missing_evidence_keys_do_not_crash():
+    """端点省掉空数组是格式问题，不该被放大成"评委评估失败"。"""
+    ev = EvaluationResult.model_validate(
+        {
+            "dimension_scores": _dims(9).model_dump(),
+            "model_reported_score": 9.0,
+            "should_revise": False,
+        }
+    ).finalize()
+    assert ev.issues == [] and ev.suggestions == []
+    assert ev.weighted_score == 9.0
+
+
+# ---- 键名同义改写（2026-09-18 实测：仲裁把 quality 吐成 quality_depth） ----
+def test_paraphrased_dimension_key_is_adopted():
+    """`quality` 的 description 写「质量与深度」，模型照它造键名时不能整条报废。
+
+    这一轮仲裁前面已有 4 次计费调用，抛 ValidationError 等于把那些钱和取证内容一起丢掉。
+    """
+    ev = EvaluationResult.model_validate(
+        {
+            "issues": ["结论缺少数据支撑"],
+            "suggestions": ["要求每个结论附来源"],
+            "dimension_scores": {
+                "task_completion": 2.0,
+                "format_adherence": 3.0,
+                "constraint_compliance": 2.0,
+                "robustness": 2.0,
+                "quality_depth": 2.0,  # ← 唯一的偏离
+            },
+            "model_reported_score": 2.2,
+        }
+    ).finalize()
+    assert ev.dimension_scores.quality == 2.0
+    assert ev.weighted_score == compute_weighted_score(ev.dimension_scores)
+
+
+def test_top_level_paraphrased_key_adopted_but_optional_not_clobbered():
+    """顶层同理；但可选字段本有默认值，认错会把一次成功解析改成类型错误。"""
+    ev = EvaluationResult.model_validate(
+        {
+            "issue": ["单数键也要认"],
+            "scores": _dims(7).model_dump(),
+            "model_reported_score": 7.0,
+            "samples": [7.0, 8.0],  # 不该被塞进可选的 n_samples: int
+        }
+    ).finalize()
+    assert ev.issues == ["单数键也要认"]
+    assert ev.dimension_scores.quality == 7.0
+    assert ev.n_samples == 1
+
+
+def test_ambiguous_or_already_correct_key_is_never_guessed():
+    """候选不唯一就不认；模型已经写对的键也不被野键覆盖。"""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DimensionScores.model_validate(
+            {
+                "format_adherence": 5.0,
+                "constraint_compliance": 5.0,
+                "robustness": 5.0,
+                "quality": 5.0,
+                "task_completion_quality": 9.0,  # 同时命中两个维度 → 放弃
+            }
+        )
+    ok = DimensionScores.model_validate(
+        {
+            "task_completion": 8.0,
+            "format_adherence": 5.0,
+            "constraint_compliance": 5.0,
+            "robustness": 5.0,
+            "quality": 6.0,
+            "quality_depth": 1.0,  # 目标已存在 → 忽略野键，不覆盖 6.0
+        }
+    )
+    assert ok.quality == 6.0
+    assert compute_weighted_score(ok) == 5.9  # 野键 1.0 没混进加权
+
+
+def test_items_coerced_to_string_when_plain():
+    """普通字符串条目原样保留（容错不能把正常路径也改掉）。"""
+    ev = EvaluationResult(
+        issues=["a", "b"],
+        suggestions=[],
+        dimension_scores=_dims(7),
+        model_reported_score=7.0,
+        should_revise=True,
+    )
+    assert ev.issues == ["a", "b"]
+
+
+def test_trailing_key_omitted_still_parses():
+    """真端点回归（2026-09-18）：模型先吐大段取证，末尾的 should_revise 被漏掉。
+
+    should_revise 是咨询性建议（判定与"要不要修订"由代码按加权分决定），
+    缺它不能整条评估作废——那会把一个格式抖动放大成 1 分的结论。
+    """
+    ev = EvaluationResult.model_validate(
+        {
+            "issues": ["结论 2 无数据支撑"],
+            "suggestions": [],
+            "dimension_scores": _dims(6).model_dump(),
+            "model_reported_score": 6.0,
+        }
+    ).finalize()
+    assert ev.should_revise is False
+    assert ev.weighted_score == 6.0
+    assert ev.issues == ["结论 2 无数据支撑"]
+
+
+def test_should_revise_null_tolerated():
+    ev = EvaluationResult.model_validate(
+        {
+            "issues": [],
+            "suggestions": None,
+            "dimension_scores": _dims(8).model_dump(),
+            "model_reported_score": 8.0,
+            "should_revise": None,
+        }
+    ).finalize()
+    assert ev.should_revise is False and ev.suggestions == []
+
+
+def test_issues_wrapped_in_json_string_are_flattened():
+    """评委把 issues 写成"一个 JSON 字符串"时摊平成可读文本（真实数据回归）。"""
+    ev = EvaluationResult.model_validate(
+        {
+            "issues": [
+                '{"type": "constraint_violation", "scope": "趋势结论", '
+                '"description": "衍生指标被当作结论支撑"}'
+            ],
+            "suggestions": ["普通建议保持原样"],
+            "dimension_scores": _dims(5).model_dump(),
+            "model_reported_score": 5.0,
+        }
+    )
+    assert "衍生指标被当作结论支撑" in ev.issues[0]
+    assert "{" not in ev.issues[0] and '"' not in ev.issues[0]
+    assert ev.suggestions == ["普通建议保持原样"]
+
+
+def test_ci_lower_never_below_the_scale_floor():
+    """刻度是 1-10：SEM 大到让下界算成负数是纯噪声，印出来只会被当成 bug。"""
+    evals = [
+        EvaluationResult(
+            issues=["a"],
+            suggestions=[],
+            dimension_scores=DimensionScores(
+                task_completion=3,
+                format_adherence=3,
+                constraint_compliance=3,
+                robustness=3,
+                quality=3,
+            ),
+            model_reported_score=3.0,
+            should_revise=True,
+            test_case_index=0,
+        ).finalize(),
+        EvaluationResult(
+            issues=["b"],
+            suggestions=[],
+            dimension_scores=DimensionScores(
+                task_completion=9,
+                format_adherence=9,
+                constraint_compliance=9,
+                robustness=9,
+                quality=9,
+            ),
+            model_reported_score=9.0,
+            should_revise=False,
+            test_case_index=1,
+        ).finalize(),
+    ]
+    agg = AggregateScore.from_evaluations(evals, n_expected=2)
+    assert agg.sem > 1.5, "构造大 SEM 才有意义"
+    assert agg.ci_lower == 1.0, f"下界必须夹在量纲下限上，实际 {agg.ci_lower}"
+    assert agg.passed is False

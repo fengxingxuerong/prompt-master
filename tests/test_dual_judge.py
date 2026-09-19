@@ -246,3 +246,85 @@ def test_partial_judge_failure_degrades_to_single():
     assert n_calls == 1 and cache_hit is False
     assert len(errors) == 1
     assert errors[0].startswith("evaluate#0[evaluator]:")
+
+
+# --------------------------------------------------------------------------
+# 2.7 仲裁的出处账与失败回退（发现 13：35% 的判定轮出自仲裁者一人）
+# --------------------------------------------------------------------------
+def _arbiter_failing_structured():
+    """只让仲裁这一路抛错，其余角色仍走假后端。"""
+
+    def hook(role, model_cls, system, user, max_retries=3, overrides=None):
+        if role == "arbiter":
+            raise RuntimeError("engine is not available temporarily")
+        return testing._fake_structured(role, model_cls, system, user, max_retries, overrides)
+
+    return hook
+
+
+def test_arbiter_failure_falls_back_to_stricter_judge_with_full_provenance():
+    """仲裁调用失败：取较低分（安全侧），但出处账要和仲裁成功时一样齐。
+
+    报告新增的那行会告诉读者"逐评委的原始分在 `judge_scores`"——回退路径要是把它留空，
+    那句话就成了假的（真跑里端点抖动是常态，回退不是理论分支）。
+    """
+    a = _mk_ev(9.0)
+    b = _mk_ev(4.0)
+    with testing.scope("dispute", structured=_arbiter_failing_structured()):
+        merged = _merge_judge_results([("evaluator", a), ("evaluator_b", b)], 0, "P")
+    assert merged.judge == "conservative"
+    assert merged.weighted_score == 4.0, "安全侧=取较低分，不是均值"
+    assert merged.judge_scores == {"evaluator": 9.0, "evaluator_b": 4.0}
+    assert merged.judge_disagreement == 5.0
+
+
+def test_arbiter_is_shown_both_scores_only_because_it_is_told_to_ignore_them():
+    """把"给看分数 + 要求忽略"这对共生条件钉住（发现 13 第 3 条的锚定怀疑）。
+
+    只给分不要求独立 = 纯锚定，比现状更糟；只要求忽略却已经给了分 = 现状，可疑但至少声明了意图。
+    将来若按处置意见改成"不把两个分数给仲裁"，前半段断言随之反转，
+    但"仲裁仍拿到完整原始评审 prompt"这条不许跟着删——那是它能独立复核的前提。
+    """
+    seen: dict[str, str] = {}
+
+    def hook(role, model_cls, system, user, max_retries=3, overrides=None):
+        out = testing._fake_structured(role, model_cls, system, user, max_retries, overrides)
+        if role == "arbiter":
+            seen["user"] = user
+        return out
+
+    with testing.scope("dispute", structured=hook):
+        merged = _merge_judge_results(
+            [("evaluator", _mk_ev(9.0)), ("evaluator_b", _mk_ev(4.0))], 0, "<原始评审全文>"
+        )
+    assert merged.judge == "arbiter"
+    u = seen["user"]
+    assert "给出 9.0" in u and "给出 4.0" in u, "分数确实被摊给仲裁看了"
+    assert "忽略前两位评委的分数" in u, "既然给了分，就必须同时要求独立复核"
+    assert u.startswith("<原始评审全文>"), "仲裁拿到的原始评审内容不能因仲裁块而残缺"
+
+
+def test_provenance_literals_stay_consistent_across_judge_and_report():
+    """报告按字符串认"分数出处"，评委侧改了值就会静默不报——两边必须同源。
+
+    同一类缺陷在质量门 marker 上栽过（P9）：消费侧手抄字面量，生产侧改名后无人变红。
+    顺带检查 schema 里给模型看的那份枚举，别说漏了代码真会写的值。
+    """
+    import inspect
+    import re
+
+    from pm import report
+    from pm.nodes import judge as judge_mod
+    from pm.schemas import EvaluationResult
+
+    written = set(re.findall(r'\.judge = "([a-z_]+)"', inspect.getsource(judge_mod)))
+    written |= set(re.findall(r'judge="([a-z_]+)"', inspect.getsource(judge_mod)))
+    assert {"merged", "arbiter", "conservative"} <= written
+
+    counted = set(re.findall(r'e\.get\("judge"\) == "([a-z_]+)"', inspect.getsource(report)))
+    assert counted, "报告里数出处的那段没了就该改这条测试，而不是留着当摆设"
+    assert counted <= written, f"报告在数评委侧不会写的值：{counted - written}"
+
+    desc = EvaluationResult.model_fields["judge"].description
+    for v in sorted(written):
+        assert v in desc, f"给模型看的 judge 枚举漏了 {v}"

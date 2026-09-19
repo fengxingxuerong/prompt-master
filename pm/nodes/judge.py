@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from .. import llm
 from ..assertions import RULE_MODE
 from ..cache import eval_cache, key_for_eval
-from ..prompts import EVALUATOR_RULES, EVALUATOR_SYSTEM, EVALUATOR_USER, render
+from ..prompts import EVALUATOR_RULES, EVALUATOR_SYSTEM, EVALUATOR_USER, render, rubric_stamp
 from ..quality import evaluator_warning_block
 from ..schemas import (
     PASS_THRESHOLD,
@@ -50,14 +50,47 @@ def _judge_disagreement_threshold() -> float:
 
 
 def _judge_spec(judges: list[str]) -> str:
-    """评委组合标识，用于评估缓存键（评委模型变了缓存自然失效）。"""
+    """评委组合标识，用于评估缓存键（评委模型变了缓存自然失效）。
+
+    尾部带 rubric 指纹：评分提示词（锚点/权威顺序）一改，旧判定必须失效——
+    否则新标准汇报旧结果，而模型与输入输出三元组都没变，缓存会一直命中。
+    """
     parts = []
     for j in judges:
         try:
             parts.append(f"{j}:{llm.build_config(j).model}")
         except Exception:  # noqa: BLE001 - 配置读取失败不影响缓存键构造
             parts.append(j)
-    return "+".join(parts)
+    return "+".join(parts) + f"|rubric={rubric_stamp()}"
+
+
+def _judge_health(judges: list[str]) -> dict[str, Any]:
+    """评委配置体检：各评委角色实际解析到哪个模型，是否已经同源于同质化。
+
+    `llm._decorrelate_judge_b` 只在 B **未显式配置**时才去同质化；像默认 .env 那样
+    把 A/B/仲裁全配成同一模型同一温度，交叉验证就退化成同一分布采样两次，
+    而告警每进程只打一次、只进日志。这里把结论落到 state 与报告里。
+    """
+    specs: dict[str, str] = {}
+    for role in [*judges, "arbiter"]:
+        try:
+            cfg = llm.build_config(role)
+            specs[role] = f"{cfg.model}@{cfg.temperature}"
+        except Exception:  # noqa: BLE001 - 配置读取失败不影响主流程
+            specs[role] = f"{role}?(配置读取失败)"
+    voting = {r: specs[r] for r in judges}
+    same_judges = len(set(voting.values())) == 1 and len(judges) > 1
+    all_same = same_judges and len(set(specs.values())) == 1
+    note = ""
+    if same_judges:
+        note = (
+            f"{len(judges)} 位评委解析到同一模型与温度（{next(iter(voting.values()))}）："
+            "交叉验证退化为同一分布重复采样，防放水机制名存实亡。"
+            + ("仲裁评委也同源，分歧时无独立第三方。" if all_same else "")
+            + "请给 PM_EVALUATOR_B_MODEL 配置不同模型家族。"
+        )
+        logger.warning("评委同源：%s", note)
+    return {"models": specs, "homogeneous": same_judges, "note": note}
 
 
 def _call_evaluator(
@@ -185,6 +218,10 @@ def _merge_judge_results(
         logger.warning("仲裁调用失败，回退取较低分（安全侧）：%s", e)
         fallback = ev_a if ev_a.weighted_score <= ev_b.weighted_score else ev_b
         fallback.judge = "conservative"
+        # 出处账必须和仲裁成功时一样齐：报告那行「逐评委的原始分在 judge_scores」
+        # 在回退路径上也不能是空话（否则读者按单评委读，却无从复核是谁给的高分）。
+        fallback.judge_scores = judge_scores
+        fallback.judge_disagreement = round(diff, 2)
         return fallback
 
 
@@ -498,6 +535,69 @@ def _hard_failures(state: Any) -> list[str]:
     return out
 
 
+def _fixed_broken(
+    prev: dict[Any, Any] | None, cur: dict[int, bool], threshold: float
+) -> dict[str, Any]:
+    """本轮相对上一版**修好了哪几条、弄坏了哪几条**（GEPA / PRISM 的 fixed–broken 记账）。
+
+    为什么值得单列：均分是聚合量，"修好 3 条边缘用例、弄坏 1 条主路径"和
+    "全面变好"在均分上可能一模一样，而本项目反复出现的就是修订在两种解释之间
+    来回震荡（v0 8.63 → v1 8.93 → v2 8.02）。把逐条的得失直接摊给修订器，
+    它才知道自己上一次是净赚还是净赔。
+
+    只用**上一版与本版都评过的用例**（用例集首轮锁定，正常应完全一致；
+    仲裁/评委失败会让某条缺失，缺的两侧都不计入）。
+    """
+    if not isinstance(prev, dict) or not prev:
+        return {"fixed": [], "broken": [], "net": 0, "comparable": 0}
+    prev_pass = {
+        int(k): bool(v >= threshold)
+        for k, v in prev.items()
+        if isinstance(v, (int, float)) and str(k).lstrip("-").isdigit()
+    }
+    common = set(prev_pass) & set(cur)
+    fixed = sorted(i for i in common if cur[i] and not prev_pass[i])
+    broken = sorted(i for i in common if prev_pass[i] and not cur[i])
+    return {
+        "fixed": fixed,
+        "broken": broken,
+        "net": len(fixed) - len(broken),
+        "comparable": len(common),
+    }
+
+
+def _contrastive_slice(evals: list[EvaluationResult], runs: list[dict[str, Any]]) -> str:
+    """把"最好的一条通过用例"与"最差的一条失败用例"并排给修订器看。
+
+    只喂失败样本，模型会去猜"缺了什么规则"；同时看到同一份提示词在另一条输入上
+    是怎么成功的，它才可能定位到**输入差异**而不是全局加约束
+    （失败样本单独反思的实测收益远小于对比切片，见 docs 竞品调研）。
+    """
+    if not runs:
+        return ""
+    by_case: dict[int, dict[str, Any]] = {}
+    for r in runs:
+        if isinstance(r, dict) and not r.get("error"):
+            by_case.setdefault(int(r.get("test_case_index", 0) or 0), r)
+    scored = sorted(evals, key=lambda e: e.weighted_score)
+    worst, best = scored[0], scored[-1]
+    if best.weighted_score < PASS_THRESHOLD or worst.test_case_index == best.test_case_index:
+        return ""  # 没有"通过"的一侧，对比无从谈起
+    rw, rb = by_case.get(int(worst.test_case_index), {}), by_case.get(int(best.test_case_index), {})
+
+    def _clip(text: Any, n: int = 160) -> str:
+        return " ".join(str(text or "").split())[:n]
+
+    return (
+        f"同一份提示词，两条用例的分野在输入本身：\n"
+        f"  ✅ 通过（case#{best.test_case_index} {best.weighted_score}）输入：{_clip(rb.get('test_input'))}\n"
+        f"     它的输出：{_clip(rb.get('output'))}\n"
+        f"  ❌ 失败（case#{worst.test_case_index} {worst.weighted_score}）输入：{_clip(rw.get('test_input'))}\n"
+        f"     它的输出：{_clip(rw.get('output'))}\n"
+        f"  请针对**两条输入的差别**写规则，不要为了一条用例把全局约束加码。"
+    )
+
+
 def _build_feedback(agg: AggregateScore, evals: list[EvaluationResult], state: Any = None) -> str:
     """把聚合结果整理成 Reviser 可直接消费的反馈文本。"""
     if not evals:
@@ -514,6 +614,23 @@ def _build_feedback(agg: AggregateScore, evals: list[EvaluationResult], state: A
             lines.append(f"  - {h}")
         lines.append("")
 
+    # 上一版的得失账：净赔的改法要先止盈，再谈新约束
+    delta = (state or {}).get("revision_delta") if isinstance(state, dict) else None
+    if isinstance(delta, dict) and delta.get("comparable"):
+        fixed, broken = delta.get("fixed") or [], delta.get("broken") or []
+        if fixed or broken:
+            lines.append(
+                f"与上一版逐条对照：修好 {len(fixed)} 条（case#{', '.join(map(str, fixed)) or '-'}）"
+                f"／弄坏 {len(broken)} 条（case#{', '.join(map(str, broken)) or '-'}）"
+                f"，净值 {delta.get('net', 0)}"
+            )
+            if broken:
+                lines.append(
+                    "  → 被弄坏的那些**原本是通过的**：本轮先恢复它们，"
+                    "再加新约束；同一处来回改说明规则有两种读法，请写成互斥分支而不是加码。"
+                )
+            lines.append("")
+
     # 找出最薄弱维度，提示 Reviser 优先修
     from ..schemas import WEIGHTS
 
@@ -526,6 +643,26 @@ def _build_feedback(agg: AggregateScore, evals: list[EvaluationResult], state: A
     for dim, w, avg in weakest:
         lines.append(f"  - {dim}（权重 {w:.0%}）：{avg:.1f}")
     lines.append("")
+
+    # 采样不稳定 / 分数最低的用例优先反思（SIMBA 的 minibatch 选择口径：
+    # 方差大的用例才是"规则写不清"的证据，均分掩盖了它）
+    unstable = sorted(set(agg.unstable_cases or []))
+    hardest = sorted(evals, key=lambda e: (e.weighted_score, -e.score_spread))[:2]
+    if unstable or hardest:
+        lines.append("本轮最该反思的用例（分数最低 / 采样不稳定）：")
+        for e in hardest:
+            tag = f"，采样极差 {e.score_spread:.2f}＝不稳" if e.score_spread else ""
+            lines.append(f"  - case#{e.test_case_index} 加权 {e.weighted_score}{tag}")
+        if unstable:
+            lines.append(f"  - 被极差点名不稳的用例：{', '.join('#' + str(i) for i in unstable)}")
+        lines.append("")
+
+    slice_text = _contrastive_slice(
+        evals, (state or {}).get("test_runs", []) if isinstance(state, dict) else []
+    )
+    if slice_text:
+        lines.append(slice_text)
+        lines.append("")
 
     if agg.all_issues:
         lines.append("问题清单：")
@@ -620,9 +757,17 @@ def evaluate_node(state: State) -> dict[str, Any]:
     iteration = state.get("iteration", 0)
     max_iter = state.get("max_iterations", 3)
 
+    # 逐条得失账（GEPA / PRISM 的 fixed–broken）：均分相同的两轮，
+    # 一轮可能净修好 3 条、另一轮修好 4 条同时弄坏 3 条——后者该收敛了。
+    cur_pass = {int(e.test_case_index): e.passed for e in evals}
+    cur_scores = {int(e.test_case_index): e.weighted_score for e in evals}
+
     # 记下“本轮是针对什么反馈改出来的、结果如何”：修订器下一轮能看到，
     # 就不会在两种解释之间来回震荡（旧版只给本轮反馈，历史全靠模型记性）
     history = list(state.get("revision_history", []) or [])
+    revision_delta = _fixed_broken(
+        history[-1].get("case_scores") if history else None, cur_pass, PASS_THRESHOLD
+    )
     history.append(
         {
             "iteration": iteration,
@@ -630,6 +775,7 @@ def evaluate_node(state: State) -> dict[str, Any]:
             "min_score": agg.min_score,
             "ci_lower": agg.ci_lower,
             "noise": agg.noise,
+            "case_scores": cur_scores,  # 下一轮据此算 fixed / broken
             "feedback": _feedback_digest(state.get("revision_feedback", "")),
         }
     )
@@ -639,6 +785,8 @@ def evaluate_node(state: State) -> dict[str, Any]:
         "aggregate": agg.model_dump(),
         "prompt_versions": versions,
         "revision_history": history,
+        "revision_delta": revision_delta,
+        "judge_health": _judge_health(judges),
         "llm_calls": state.get("llm_calls", 0) + n_llm_calls,
     }
     if patch_runs:

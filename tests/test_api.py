@@ -201,3 +201,96 @@ def test_token_required_when_configured(client, monkeypatch):
         headers={"X-API-Key": "secret-token"},
     )
     assert ok.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 文档与模型同源：rest-api.md 的字段参考不许漂
+# ---------------------------------------------------------------------------
+def _doc_field_rows(section: str) -> dict[str, set[str]]:
+    """从「请求 / 响应字段参考」小节里抽出 `ModelName —— ...` 之后表格的首列字段名。"""
+    import re as _re
+
+    out: dict[str, set[str]] = {}
+    current: str | None = None
+    for line in section.splitlines():
+        m = _re.match(r"^`([A-Z][A-Za-z]+)`\s+——", line.strip())
+        if m:
+            current = m.group(1)
+            out.setdefault(current, set())
+            continue
+        if current is None:
+            continue
+        row = _re.match(r"^\|\s*`([a-z_][a-z0-9_]*)`\s*\|", line)
+        if row:
+            out[current].add(row.group(1))
+        elif line.strip() and not line.startswith("|") and not line.startswith(">"):
+            current = None  # 表格结束（说明段/白名单段）
+    return out
+
+
+def test_rest_field_reference_matches_models() -> None:
+    """改了 server.py 的字段忘了改文档（或反之）必须红。"""
+    import pathlib
+    import re as _re
+
+    from pm.server import CaseInput, OptimizeRequest, RaceRequest, StatusResponse
+
+    doc = (pathlib.Path(__file__).resolve().parents[1] / "docs" / "rest-api.md").read_text(
+        encoding="utf-8"
+    )
+    m = _re.search(r"### 请求 / 响应字段参考(.*)", doc, _re.S)
+    assert m, "rest-api.md 缺「请求 / 响应字段参考」小节"
+    section = m.group(1).split("### 容器化部署")[0]
+    tables = _doc_field_rows(section)
+    for name, model in (
+        ("OptimizeRequest", OptimizeRequest),
+        ("CaseInput", CaseInput),
+        ("RaceRequest", RaceRequest),
+    ):
+        assert tables.get(name) == set(model.model_fields), (
+            f"{name} 文档字段 {sorted(tables.get(name) or [])} ≠ 模型字段 {sorted(model.model_fields)}"
+        )
+    # 响应字段多行合并展示，只要求"每个模型字段都在小节里出现过"
+    missing = [f for f in StatusResponse.model_fields if f"`{f}`" not in section]
+    assert not missing, f"StatusResponse 字段未在文档中出现：{missing}"
+    # 断言模式白名单也要与模型里的 pattern 一致
+    whitelist = _re.search(r"断言模式白名单：(.+)", section)
+    assert whitelist, "缺断言模式白名单行"
+    for mode in ("exact", "contains", "regex", "rule"):
+        assert f"`{mode}`" in whitelist.group(1)
+    assert "custom:" in whitelist.group(1)
+
+
+def test_field_reference_guard_actually_catches_drift(tmp_path, monkeypatch) -> None:
+    """反向自检：这条守卫不是摆设（删掉文档里一个字段就必须红）。"""
+    import pathlib
+    import re as _re
+
+    doc = (pathlib.Path(__file__).resolve().parents[1] / "docs" / "rest-api.md").read_text(
+        encoding="utf-8"
+    )
+    broken = doc.replace("| `n_test_cases` |", "| `renamed_field` |", 1)
+    m = _re.search(r"### 请求 / 响应字段参考(.*)", broken, _re.S)
+    assert m
+    tables = _doc_field_rows(m.group(1).split("### 容器化部署")[0])
+    assert "n_test_cases" not in tables["OptimizeRequest"]
+
+
+def test_terminal_status_is_not_published_before_the_report_exists() -> None:
+    """`status` 在 evaluate 节点就变终态，`final_report` 要等 report 节点：
+
+    中间那一个 chunk 如果被轮询方读到，就会出现"任务已完成、报告 404"——
+    这曾在高负载下让 `test_report_available_immediately_when_terminal` 偶发变红
+    （不是测试脆弱，是真窗口）。进度视图因此规定：报告不存在时不发布终态。
+    """
+    from pm.scheduler import _progress_of
+
+    for st in ("passed", "max_iterations", "early_stopped", "failed"):
+        assert _progress_of({"run_id": "r", "status": st})["status"] == "running", (
+            f"{st} 没有报告时不该对外发布终态"
+        )
+    # 报告就绪后原样透出
+    done = {"run_id": "r", "status": "passed", "final_report": "# 报告"}
+    assert _progress_of(done)["status"] == "passed"
+    # 运行中不受影响
+    assert _progress_of({"run_id": "r", "status": "running"})["status"] == "running"

@@ -12,10 +12,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 # --------------------------------------------------------------------------
 # 评分权重：与原文档 <evaluation_criteria> 保持一致，但固化成可执行常量
@@ -109,6 +110,32 @@ def early_stop_reason(avg_scores: list[float], noise: float | None = 0.0) -> str
     return None
 
 
+def _unwrap_json_blob(text: str) -> str:
+    """把 `'{"type": "...", "description": "..."}'` 这种"字符串里装 JSON"摊回可读文本。
+
+    真实数据（2026-09-18，sales_mockgen 一轮）：评委把 issues 写成**一个 JSON 字符串**
+    而不是普通句子，修订器与报告里就出现一整段带引号花括号的噪声——取证内容本身是有用的。
+    只在"看起来确实是 JSON 对象"时才摊平，普通文本原样返回。
+    """
+    s = (text or "").strip()
+    if not (s.startswith("{") and s.endswith("}")):
+        return text
+    try:
+        data = json.loads(s)
+    except (ValueError, TypeError):
+        return text
+    if not isinstance(data, dict):
+        return text
+    bits = [
+        f"{k}：{data[k]}"
+        for k in ("description", "issue", "problem", "detail", "text")
+        if data.get(k)
+    ]
+    if not bits:
+        bits = [f"{k}：{v}" for k, v in data.items() if isinstance(v, (str, int, float))]
+    return "；".join(str(b) for b in bits) if bits else text
+
+
 def compute_weighted_score(dims: DimensionScores) -> float:
     """按固定权重计算总分。判定以本函数结果为准，不信任模型自报分。"""
     raw = {
@@ -163,6 +190,41 @@ class DimensionScores(BaseModel):
     robustness: float = Field(ge=1, le=10, description="鲁棒性：幻觉/矛盾/越界猜测")
     quality: float = Field(ge=1, le=10, description="质量与深度")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _adopt_paraphrased_keys(cls, data: Any) -> Any:
+        return _adopt_near_miss_keys(cls, data)
+
+
+def _adopt_near_miss_keys(cls: type[BaseModel], data: Any) -> Any:
+    """把模型改写过的键名认回规范名，别让一次同义替换作废整条评估。
+
+    实测（2026-09-18，deepseek-v4-flash 做仲裁）：`quality` 的 description 写的是
+    「质量与深度」，模型就把键吐成 `quality_depth` → 必填维度缺失 → ValidationError，
+    这一轮仲裁连同前面双评委的 4 次计费调用全部报废。description 是喂给模型的措辞，
+    它反过来被当成键名，是 schema 自身的产物，不是模型的随机错误——同类问题在
+    `issues`（对象数组）上已经用 `_flatten_evidence_items` 处理过。
+
+    三重收窄，缺一个就不认：
+    1. 目标必须是**必填**字段。可选字段本有默认值，认错了会把一次成功解析改成类型错误
+       （例如把 `samples: [...]` 塞进可选的 `n_samples: int`）；
+    2. 候选必须**唯一**（子串双向匹配）。"取第一个未知键"会把两个维度并成同一个数，
+       那才是把格式问题放大成结论错误；
+    3. 目标必须**当前缺失或为 null**，不覆盖模型已经写对的值。
+    """
+    if not isinstance(data, dict):
+        return data
+    names = {f for f, mi in cls.model_fields.items() if mi.is_required()}
+    extra = [k for k in data if k not in cls.model_fields and data[k] is not None]
+    if not extra:
+        return data
+    out = dict(data)
+    for key in extra:
+        candidates = [f for f in names if f != key and (f in key or key in f)]
+        if len(candidates) == 1 and out.get(candidates[0]) is None:
+            out[candidates[0]] = out.pop(key)
+    return out
+
 
 class RuleCheck(BaseModel):
     """评委对**语义规则**的逐条核验（`--assert-mode rule`）。
@@ -181,13 +243,93 @@ class RuleCheck(BaseModel):
 
 
 class EvaluationResult(BaseModel):
+    """评委的结构化输出。**字段声明顺序即生成顺序**，不要随手重排。
+
+    `issues` / `suggestions` 必须排在 `dimension_scores` 之前：自回归生成下，
+    JSON 属性按 schema 顺序逐字产出，若分数在前，评委就在拿到证据之前把分数 commit 了，
+    EVALUATOR_SYSTEM 的「先取证、后打分」流程在结构上无法执行（只能先给数再回头补取证）。
+
+    反向教训：**排在末尾的键不要设成必填**。把 issues 提成必填后模型先吐一大段取证文本，
+    尾部的键更容易被漏掉或被 max_tokens 截断（2026-09-18 真端点实测：`should_revise`
+    缺失 2 次、直接作废 1 条评估）。所以 `should_revise` 带默认值——它本就是咨询性建议，
+    是否修订由代码按加权分决定。
+    """
+
+    issues: list[str] = Field(
+        description="具体问题描述，每条含测试输出的原文证据；确实没有问题时给空列表"
+    )
+    suggestions: list[str] = Field(
+        description="可操作的改进建议，指向提示词层面的修改动作；没有则给空列表"
+    )
     dimension_scores: DimensionScores
     model_reported_score: float = Field(
         ge=1, le=10, description="模型自报总分，仅用于监控评分偏差，不参与判定"
     )
-    issues: list[str] = Field(default_factory=list, description="具体问题描述")
-    suggestions: list[str] = Field(default_factory=list, description="可操作的改进建议")
-    should_revise: bool = Field(description="是否需要修订")
+    should_revise: bool = Field(
+        default=False,
+        description="模型建议是否需要修订（咨询性）；未达标时代码会强制置为 True",
+    )
+
+    @field_validator("issues", "suggestions", mode="before")
+    @classmethod
+    def _flatten_evidence_items(cls, v: Any) -> Any:
+        """把 `[{"issue": "..."}]` 这类对象条目压回字符串。
+
+        实测（2026-09-18，deepseek-v4-flash 做评委）：把 issues 提到 schema 首位并设为必填后，
+        模型更爱把它"结构化"成对象数组——`list[str]` 直接 ValidationError，
+        整位评委的这条评估作废（judge.py 按异常计 1 分）。取证内容本身是好的，
+        不该因为包装形状丢掉，这里按常见文本键取一次。
+        """
+        if v is None:
+            return []  # 数组键写成 null 也是形状抖动，不是"没有结论"
+        if not isinstance(v, list):
+            return v
+        out: list[Any] = []
+        for item in v:
+            if isinstance(item, dict):
+                for key in (
+                    "issue",
+                    "text",
+                    "description",
+                    "detail",
+                    "problem",
+                    "content",
+                    "reason",
+                ):
+                    if isinstance(item.get(key), str) and item[key].strip():
+                        out.append(item[key].strip())
+                        break
+                else:
+                    parts = [str(x) for x in item.values() if isinstance(x, (str, int, float))]
+                    out.append("：".join(parts) if parts else str(item))
+            elif isinstance(item, str):
+                out.append(_unwrap_json_blob(item))
+            elif item is not None:
+                out.append(item)
+        return out
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tolerate_missing_evidence_keys(cls, data: Any) -> Any:
+        """必填是为了进骨架、逼模型先产证据；缺键不能在解析层炸。
+
+        两面都要顾：
+        - 声明为必填 → 出现在 `_schema_skeleton` 的照抄骨架里，且排在维度分之前，
+          评委在两条通道上都是"先写证据再打分"；
+        - 但有些端点的结构化输出会直接省掉空数组，或模型在长输出后被截断——
+          此时按"没有问题"处理即可。让它抛 ValidationError 会让整位评委的评估
+          报废（judge.py 按异常计入 errors 并给 1 分），把一个格式问题放大成结论错误。
+
+        进来先做一次同义键认领（`dimension_scores` 被写成 `scores` 之类），
+        理由与 `_adopt_near_miss_keys` 相同。
+        """
+        if isinstance(data, dict):
+            data = _adopt_near_miss_keys(cls, data)
+            data = dict(data)
+            data.setdefault("issues", [])
+            data.setdefault("suggestions", [])
+        return data
+
     test_case_index: int = Field(default=0, description="本条评估对应的测试用例序号")
     rule_checks: list[RuleCheck] = Field(
         default_factory=list,
@@ -213,7 +355,7 @@ class EvaluationResult(BaseModel):
     # --- 双评委/仲裁元信息（P0: 单一 LLM 自评防放水） ---
     judge: str = Field(
         default="evaluator",
-        description="最终评定来源：evaluator / evaluator_b / merged / arbiter",
+        description="最终评定来源：evaluator / evaluator_b / merged / arbiter / conservative / system",
     )
     judge_scores: dict[str, float] = Field(
         default_factory=dict, description="各评委的加权分（评委名 → 加权分），用于追溯"
@@ -223,7 +365,9 @@ class EvaluationResult(BaseModel):
     )
     cache_hit: bool = Field(default=False, description="本条评估是否命中本地缓存")
 
-    @field_validator("judge", "judge_scores", "cache_hit", "sample_index", mode="before")
+    @field_validator(
+        "judge", "judge_scores", "cache_hit", "sample_index", "should_revise", mode="before"
+    )
     @classmethod
     def _coerce_code_side_fields(cls, v: Any, info: ValidationInfo) -> Any:
         """代码侧派生字段容错。
@@ -239,6 +383,9 @@ class EvaluationResult(BaseModel):
                 "judge_scores": {},
                 "cache_hit": False,
                 "sample_index": 0,
+                # should_revise 是咨询性建议：合并时按"任一评委说要修就修"取 OR，
+                # 且未达标的用例会被代码强制置 True，所以 null 回退默认值不丢判定。
+                "should_revise": False,
             }.get(info.field_name)
         return v
 
@@ -404,7 +551,9 @@ class AggregateScore(BaseModel):
         noise = round(sum(spreads) / len(spreads), 3) if spreads else 0.0
         unstable = [e.test_case_index for e in evals if e.score_spread >= UNSTABLE_SPREAD]
         # 下界 = 均值 - 1.96·SEM - 半个采样噪声；单用例单次采样时退化为点估计（向后兼容）
-        ci_lower = round(avg - 1.96 * sem - 0.5 * noise, 2)
+        # 但不低于量纲下限 1.0：分数刻度是 1-10，跑出来一个 -0.82 的"下界"是纯噪声
+        # （SEM 1.9 的真实一轮就这么印在报告里），读者只会以为是 bug。
+        ci_lower = round(max(1.0, avg - 1.96 * sem - 0.5 * noise), 2)
         bias = [e.model_reported_score - e.weighted_score for e in evals]
         judge_bias = round(sum(bias) / len(bias), 2) if bias else 0.0
         bias_warning = judge_bias >= JUDGE_BIAS_ALERT
@@ -474,7 +623,11 @@ class MockInputSet(BaseModel):
     # 代码侧拿它做确定性劫持检测：目标输出中出现该短语 = 注入得手。
     hijack_marker: list[str] = Field(
         default_factory=list,
-        description="仅 injection 用例填写被注入指令要求输出的字面短语，其余条目为空字符串",
+        description=(
+            "仅 injection 用例有意义，且**由代码填写**：mock_node 会派生高熵校验码、"
+            "追加进用例并覆盖本字段的模型自拟值（高频词会被复述输入命中）。"
+            "用户种子用例路径仍可直接提供，用于自带注入形态的用例。"
+        ),
     )
 
 

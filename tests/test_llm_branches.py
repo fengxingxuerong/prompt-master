@@ -626,14 +626,33 @@ def test_schema_skeleton_lists_only_required_keys_and_is_valid_json():
 
 
 def test_model_required_fields_excludes_derived():
-    """必填字段判定：只认 is_required()，派生字段（有 default）必须被排除。"""
+    """必填字段判定：只认 is_required()，派生字段（有 default）必须被排除。
+
+    `issues` / `suggestions` 反过来是**故意必填**的：它们要进照抄骨架，
+    且排在 dimension_scores 前面，评委才会"先取证、后打分"（缺键由 schema 层的
+    model_validator 兜成空列表，不会因为端点省掉空数组而报废整位评委）。
+    """
     cls = _eval_cls()
     required = L._model_required_fields(cls)
     assert "dimension_scores" in required
     assert "model_reported_score" in required
-    assert "should_revise" in required
-    for derived in ("issues", "suggestions", "judge", "weighted_score", "n_samples"):
+    # should_revise 故意**不**必填：排在尾部又是必填，就会被漏掉/截断（真端点实测），
+    # 而它只是咨询性建议，判定由代码按加权分决定
+    assert "should_revise" not in required
+    for derived in ("judge", "weighted_score", "n_samples", "cache_hit"):
         assert derived not in required
+    assert required.index("issues") < required.index("dimension_scores")
+    assert required.index("suggestions") < required.index("dimension_scores")
+
+
+def test_evaluator_skeleton_leads_with_evidence():
+    """骨架键序 = 产出先后：证据必须在分数之前被 commit，否则「先取证后打分」是空话。"""
+    import json
+
+    skeleton = json.loads(L._schema_skeleton(_eval_cls()))
+    keys = list(skeleton)
+    assert keys.index("issues") < keys.index("dimension_scores")
+    assert keys[0] == "issues"
 
 
 def test_repair_shape_collapses_flat_subkeys_into_nested():

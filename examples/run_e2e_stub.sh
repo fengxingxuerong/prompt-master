@@ -39,7 +39,7 @@ COMMON_ENV=(
   PM_MODEL=stub-model
   PM_TARGET_MODEL=stub-model
 )
-for role in CLARIFIER OPTIMIZER MOCKGEN EVALUATOR EVALUATOR_B ARBITER REVISER TARGET; do
+for role in CLARIFIER OPTIMIZER MOCKGEN EVALUATOR EVALUATOR_B ARBITER REVISER TARGET COMPARATOR; do
   COMMON_ENV+=(
     "PM_${role}_API_KEY=stub-key"
     "PM_${role}_BASE_URL=$STUB_BASE"
@@ -71,7 +71,8 @@ assert_all_local() {
   local bad
   bad=$(env "${COMMON_ENV[@]}" "$PY" -c '
 from pm.llm import build_config
-roles = ("clarifier","optimizer","mockgen","evaluator","evaluator_b","arbiter","reviser","target")
+roles = ("clarifier","optimizer","mockgen","evaluator","evaluator_b",
+       "arbiter","reviser","target","comparator")
 bad = [r for r in roles if not (build_config(r).base_url or "").startswith("http://127.0.0.1:")]
 print("ALL_LOCAL" if not bad else "LEAK:" + ",".join(bad))
 ')

@@ -636,7 +636,10 @@ def _model_required_fields(model: type[BaseModel]) -> list[str]:
     for name, fld in (getattr(model, "model_fields", None) or {}).items():
         if fld.is_required():
             required.append(name)
-    return sorted(required)
+    # 声明顺序而非字母序：骨架是模型「照抄的样例」，其键序就是产出的先后顺序。
+    # 排序会让评委骨架把 dimension_scores 顶到 issues 前面，等于用样例否定了
+    # 「先取证、后打分」——EvaluationResult 的字段序是有意设计的。
+    return required
 
 
 def _unwrap_optional(anno: Any) -> Any:
@@ -1055,7 +1058,19 @@ def structured_call(
             raw = resp.content if isinstance(resp.content, str) else str(resp.content)
             data = extract_json_object(raw)
             if data is None:
-                raise ValueError("未在输出中找到合法 JSON 对象")
+                # 只报形状事实，不回显模型文本：这段错误信息会被拼进下一次重试的
+                # user 段（`<previous_error>`），把被测内容原样搬回去等于自增注入面。
+                # 而"没有 JSON"有三种截然不同的成因，不区分就会让人去改提示词：
+                stripped = (raw or "").strip()
+                if not stripped:
+                    why = "空内容——通常是 reasoning 耗尽 max_tokens（调大 PM_<ROLE>_MAX_TOKENS）"
+                elif not stripped.startswith("{") and stripped.count("{") == 0:
+                    why = f"输出是散文/解释，完全没有 JSON（{len(stripped)} 字符）"
+                elif stripped.count("{") > stripped.count("}"):
+                    why = f"JSON 未闭合，疑似被 max_tokens 截断（{len(stripped)} 字符）"
+                else:
+                    why = f"有花括号但解析失败（{len(stripped)} 字符，可能是围栏/前后缀噪声）"
+                raise ValueError(f"未在输出中找到合法 JSON 对象：{why}")
             # 先修"形状误解"（平铺 → 嵌套），再校验；修不了就照旧抛 ValidationError
             data = _repair_shape(model_cls, data)
             validated = model_cls.model_validate(data)

@@ -141,7 +141,11 @@ def test_mock_regenerates_until_enough():
     state["prompt"] = "p"
     with testing.scope("progress", structured=structured):
         out = mock_node(state)  # type: ignore[arg-type]
-    assert out["test_cases"] == ["a", "b", "c"]
+    cases = out["test_cases"]
+    # 末条是 injection 场景：代码会往用例里追加校验码指令，所以只断言前缀与码在位
+    assert cases[:2] == ["a", "b"]
+    assert cases[2].startswith("c")
+    assert out["hijack_markers"][2] in cases[2]
     assert "errors" not in out
 
 

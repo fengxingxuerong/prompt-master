@@ -17,6 +17,8 @@ from pm.nodes import _generate_prompt_with_gate, optimize_node
 from pm.prompts import EVALUATOR_RULES, EVALUATOR_SYSTEM, MOCKGEN_SYSTEM
 from pm.quality import (
     CONSTRAINT_LIMIT,
+    STRONG_META_MARKERS,
+    WEAK_META_MARKERS,
     blanket_missing_branch,
     check_prompt_quality,
     count_constraints,
@@ -142,6 +144,27 @@ def test_constraint_unnumbered_bullets_not_guessed():
     assert check_prompt_quality(prompt).ok
 
 
+def test_constraint_section_renamed_still_counted():
+    """绕过成本必须为零：把段名从 [约束] 改成 [规则]/[限制]/[要求] 不能躲过预算闸。"""
+    for name in ("约束", "关键约束", "规则", "限制", "要求", "禁止事项", "边界处理"):
+        body = "\n".join(f"{i}. 条目{i}" for i in range(1, CONSTRAINT_LIMIT + 2))
+        counted = count_constraints(f"[角色] 资深数据分析师。\n[{name}]\n{body}\n")
+        assert counted["total"] == CONSTRAINT_LIMIT + 1, f"[{name}] 未被计入约束语义段"
+
+
+def test_delivery_skeleton_sections_never_counted():
+    """[输出要求]/[格式规范] 里列的是交付物骨架，段名撞词也不算约束（误杀防线）。"""
+    prompt = (
+        "[角色] 资深数据分析师，擅长结构化抽取，严格遵守数据完整性规则。\n"
+        "[任务] 分析销售数据并给出结论。\n"
+        "[输出要求]\n1. 第一部分\n2. 第二部分\n3. 第三部分\n4. 第四部分\n5. 第五部分\n"
+        "6. 第六部分\n7. 第七部分\n8. 第八部分\n9. 第九部分\n"
+        "[边界] 数据缺失时显式标注「数据缺失」。"
+    )
+    assert count_constraints(prompt)["total"] == 0
+    assert not any(i.code == "constraint_overload" for i in check_prompt_quality(prompt).issues)
+
+
 # --------------------------------------------------------------------------
 # 1c. 元提示词防漂移（评审修复：错别字 / 注入契约）
 # --------------------------------------------------------------------------
@@ -191,6 +214,28 @@ def test_meta_templates_free_of_typos():
         assert "抄原文" in tpl
     assert "琓疵" not in EVALUATOR_SYSTEM
     assert "瑕疵" in EVALUATOR_SYSTEM
+
+
+def _all_templates() -> str:
+    """pm/prompts.py 里全部 *_SYSTEM / *_USER 模板拼成一段文本。"""
+    import pm.prompts as P
+
+    return "\n".join(
+        v
+        for k, v in vars(P).items()
+        if (k.endswith("_SYSTEM") or k.endswith("_USER")) and isinstance(v, str)
+    )
+
+
+@pytest.mark.parametrize("marker", STRONG_META_MARKERS + WEAK_META_MARKERS)
+def test_meta_marker_still_exists_in_our_templates(marker: str):
+    """特征句必须真的能在模板里找到原文——否则质量门是"看着在防、其实防不到"。
+
+    泄漏检测的原理是"交付物里出现我们 system 的原句 = 模型复读了自己"。
+    改了模板而忘了同步 marker 时，那条 marker 永远不会再命中任何东西，
+    却仍然可能在正常交付物上误报（它已经不代表我们的提示词了）。
+    """
+    assert marker in _all_templates(), f"{marker!r} 已从 pm/prompts.py 模板消失，质量门失效"
 
 
 def test_mockgen_template_has_injection_contract():
@@ -384,6 +429,56 @@ def test_constraint_budget_is_eight():
 
 
 # --------------------------------------------------------------------------
+# 1g. 修订净增量（旧版只写在 REVISER_USER 的 <size_budget> 散文里，无人核对）
+# --------------------------------------------------------------------------
+def test_revise_records_size_budget_breach(monkeypatch):
+    """超预算的修订必须在版本注记与 trace 里留下确定性证据。"""
+    from pm.nodes.revise import revise_node
+    from pm.quality import SIZE_GROWTH_RATIO
+    from pm.state import initial_state
+
+    grown = (
+        GOOD_PROMPT
+        + "\n"
+        + "\n".join(
+            f"补充说明 {i}：把这一段的措辞再展开一点，用于把长度推过预算线。" for i in range(20)
+        )
+    )
+    assert len(grown) > len(GOOD_PROMPT) * SIZE_GROWTH_RATIO
+
+    monkeypatch.setattr(
+        "pm.llm.plain_call", lambda role, system, user, overrides=None: (grown, _fake_meta())
+    )
+    state = initial_state(task="分析销售数据", target_model="fake")
+    state["prompt"] = GOOD_PROMPT
+    state["iteration"] = 1
+    state["revision_feedback"] = "缺少边界处理"
+    patch = revise_node(state)
+
+    assert patch["prompt"] == grown
+    assert patch["prompt_versions"][-1]["iteration"] == 2
+    assert "超" in patch["prompt_versions"][-1]["note"]
+    trace = patch["trace"][-1]
+    assert trace["size_budget_exceeded"] is True
+    assert trace["growth_pct"] > (SIZE_GROWTH_RATIO - 1) * 100
+
+
+def test_revise_within_budget_note_clean(monkeypatch):
+    """没超预算就不要在注记里制造噪声。"""
+    from pm.nodes.revise import revise_node
+    from pm.state import initial_state
+
+    monkeypatch.setattr(
+        "pm.llm.plain_call", lambda role, system, user, overrides=None: (GOOD_PROMPT, _fake_meta())
+    )
+    state = initial_state(task="分析销售数据", target_model="fake")
+    state["prompt"] = GOOD_PROMPT
+    patch = revise_node(state)
+    assert "超" not in patch["prompt_versions"][-1]["note"]
+    assert patch["trace"][-1]["size_budget_exceeded"] is False
+
+
+# --------------------------------------------------------------------------
 # 1f. blanket 闸的精度（正负样本全部来自真实运行，防误杀回归）
 # 第 2 轮实测教训：误杀会触发无谓重写 —— v0 5.78 → v1 4.76 且提前终止。
 # --------------------------------------------------------------------------
@@ -412,3 +507,29 @@ def test_blanket_gate_true_positive_still_fires():
         )
         is True
     )
+
+
+def test_revise_growth_note_sane_for_degenerate_base(monkeypatch):
+    """基准只有十几字符时（优化器空返回残留骨架）不许报"净增量 74100%"这种荒谬数字。
+
+    真实跑里出现过：v0=12 字符 → v1=8900 字符，注记写成"净增量 74100%"，
+    反而把"v0 根本是空的"这个真问题盖住了。此时只报绝对长度。
+    """
+    from pm.nodes.revise import revise_node
+    from pm.state import initial_state
+
+    tiny = "[角色] 分析师\n[任务] 分析"
+    assert len(tiny) < 200
+    monkeypatch.setattr(
+        "pm.llm.plain_call",
+        lambda role, system, user, overrides=None: (GOOD_PROMPT * 4, _fake_meta()),
+    )
+    state = initial_state(task="分析销售数据", target_model="fake")
+    state["prompt"] = tiny
+    patch = revise_node(state)
+    note = patch["prompt_versions"][-1]["note"]
+    trace = patch["trace"][-1]
+    assert "长度" in note and "字符" in note
+    assert "净增量" not in note, f"退化基准不该报百分比：{note}"
+    assert trace["growth_pct"] is None
+    assert trace["size_budget_exceeded"] is True

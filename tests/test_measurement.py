@@ -278,16 +278,56 @@ def test_ab_randomisation_cannot_flip_the_conclusion(monkeypatch):
     pw = out["pairwise"]
     assert pw["verdict"] == "better"
     assert pw["votes"] == {"better": 6, "worse": 0, "tie": 0}
-    assert {d["side_a"] for d in pw["details"]} == {"cur", "base"}, "A/B 必须被随机映射"
+    # 双向评：两序一致才计胜负，所以位置偏置计数必须是 0
+    assert pw["position_flips"] == 0
+    assert all(d["forward"] == d["swapped"] == "better" for d in pw["details"])
 
 
-def test_ab_flip_is_balanced_and_reproducible():
-    from pm.nodes import _ab_flip
+def test_position_biased_judge_is_neutralised(monkeypatch):
+    """只会选 A 侧的评委（纯位置偏置）必须被双向评打成全平，而不是白送 6 胜。
 
-    flips = [_ab_flip("run-x", i) for i in range(24)]
-    assert 6 <= sum(flips) <= 18, "随机映射应大致均衡，不能退化成永远同一侧"
-    assert flips == [_ab_flip("run-x", i) for i in range(24)], "同一 run 内必须可复现"
-    assert [_ab_flip("a", i) for i in range(8)] != [_ab_flip("b", i) for i in range(8)]
+    旧协议（随机决定谁放 A、只判一次）对这类评委毫无办法：它的偏向会被
+    "运气好的那半"直接计进胜负。两序对照才是可观测的偏置。
+    """
+    from pm.nodes import compare_node
+
+    monkeypatch.setenv("PM_PAIRWISE", "1")
+
+    def always_a(role, model_cls, system, user, max_retries=3, overrides=None):
+        return (
+            PreferenceResult(winner="A", reason="A 更完整", decisive=True),
+            {"model": "f", "channel": "fake", "attempts": 1, "latency_ms": 1},
+        )
+
+    st = initial_state(task="t", target_model="fake", n_test_cases=3)
+    st["run_id"] = "bias"
+    st["test_cases"] = [f"i{i}" for i in range(3)]
+    st["test_runs"] = [
+        {
+            "test_case_index": i,
+            "sample_index": 0,
+            "test_input": f"i{i}",
+            "prompt": "p",
+            "output": "X",
+        }
+        for i in range(3)
+    ]
+    st["baseline_runs"] = [
+        {
+            "test_case_index": i,
+            "sample_index": 0,
+            "test_input": f"i{i}",
+            "prompt": "t",
+            "output": "Y",
+        }
+        for i in range(3)
+    ]
+    with backend.use(backend.CallHook(structured=always_a, disable_cache=True)):
+        out = compare_node(st)  # type: ignore[arg-type]
+    pw = out["pairwise"]
+    assert pw["votes"] == {"better": 0, "worse": 0, "tie": 3}
+    assert pw["position_flips"] == 3
+    assert all(d["position_flip"] and d["forward"] != d["swapped"] for d in pw["details"])
 
 
 def test_baseline_can_be_disabled(monkeypatch):

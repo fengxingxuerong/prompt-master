@@ -80,5 +80,6 @@ def __getattr__(name: str) -> Any:
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
+
 if __name__ == "__main__":
     sys.exit(main())

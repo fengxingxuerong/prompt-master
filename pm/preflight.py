@@ -142,6 +142,9 @@ def preflight_roles() -> list[str]:
         n_judges = 2
     if n_judges >= 2:
         roles.append("evaluator_b")
+        # 仲裁评委必须在预检里：它平时不被调用，只在双评委分差超阈值时才出场——
+        # 配置写错（模型名/额度/端点）会正好在跑批中途、最贵的那一刻才暴露。
+        roles.append("arbiter")
     if (_env("PM_PAIRWISE") or "1") != "0":
         roles.append("comparator")
     return roles

@@ -158,7 +158,8 @@ sys.path.insert(0, sys.argv[1])
 expected = sys.argv[2]
 from pm.llm import build_config
 
-ROLES = ("clarifier", "optimizer", "mockgen", "evaluator", "evaluator_b", "arbiter", "reviser", "target")
+ROLES = ("clarifier", "optimizer", "mockgen", "evaluator", "evaluator_b", "arbiter",
+         "reviser", "target", "comparator")
 bad = []
 for role in ROLES:
     cfg = build_config(role)
@@ -231,13 +232,16 @@ function Set-PmEnv {
     $env:PM_MODEL               = 'stub-model'
     $env:PM_TARGET_MODEL        = 'stub-model'
     $env:PM_TIMEOUT             = '30'
-    # 双评委 / 仲裁评委：桩联调下也必须走本地，不能沿用 .env 里的真实端点
-    $env:PM_EVALUATOR_B_API_KEY  = 'stub-key'
-    $env:PM_EVALUATOR_B_BASE_URL = $base
-    $env:PM_EVALUATOR_B_MODEL    = 'stub-model'
-    $env:PM_ARBITER_API_KEY      = 'stub-key'
-    $env:PM_ARBITER_BASE_URL     = $base
-    $env:PM_ARBITER_MODEL        = 'stub-model'
+    # 逐角色钉死到桩：只设全局 PM_BASE_URL 是不够的——load_dotenv 不覆盖已存在的变量，
+    # 但 .env 里任何一条 `PM_<ROLE>_BASE_URL` 都会原样注回来，"本地联调"于是
+    # 静默变成真打付费端点（2026-09-18 实测：新加的 PM_COMPARATOR_BASE_URL 漏钉，
+    # 桩 e2e 里 comparator 直接去打了真端点）。列全角色，新角色默认进表。
+    foreach ($role in 'CLARIFIER','OPTIMIZER','MOCKGEN','EVALUATOR','EVALUATOR_B',
+                      'ARBITER','REVISER','TARGET','COMPARATOR') {
+        Set-Item -Path "Env:PM_${role}_API_KEY"  -Value 'stub-key'
+        Set-Item -Path "Env:PM_${role}_BASE_URL" -Value $base
+        Set-Item -Path "Env:PM_${role}_MODEL"    -Value 'stub-model'
+    }
     # 关掉结果缓存：保证每一步都真的发一次 HTTP
     $env:PM_EVAL_CACHE          = '0'
     $env:PM_TARGET_CACHE        = '0'

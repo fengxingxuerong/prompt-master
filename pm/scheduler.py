@@ -54,13 +54,21 @@ def _progress_of(state: dict[str, Any]) -> dict[str, Any]:
 
     旧版只裁了薄薄一层（status/iteration/aggregate/版本数/调用数），够轮询状态用，
     但富 UI 要做节点级流水线、提示词版本/diff、维度雷达图——这些数据本就存在于图状态，
-    只是没有对外暴露。这里补齐：不动旧字段（向后兼容旧控制台），只追加富视图字段。
+    只是没有对外暴露。这里补齐：字段保持不变（向后兼容旧控制台），只追加富视图字段；
+    唯一例外是 status——终态必须与报告同时可见，见下面的收紧逻辑。
     """
     versions = state.get("prompt_versions", [])
     pv_list = versions if isinstance(versions, list) else []
+    status = state.get("status", "running")
+    # 终态必须与报告同时可见：`status` 在 evaluate 节点就定了，`final_report` 要等
+    # report 节点——中间那一个 chunk 里轮询方读到"已终态"却取不到报告（404）。
+    # 未就绪就继续报 running；图真死掉时由记录级 status="failed" 兜底（见 get_status），
+    # 所以这里收紧不会让任务卡在 running。
+    if status in TERMINAL_STATUS and not state.get("final_report"):
+        status = "running"
     out = {
         "run_id": state.get("run_id"),
-        "status": state.get("status", "running"),
+        "status": status,
         "iteration": state.get("iteration", 0),
         "aggregate": state.get("aggregate"),
         # 容忍两种输入：完整图状态（list）与已经裁过的进度快照（int）

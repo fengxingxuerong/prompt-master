@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 from ..prompts import REVISER_SYSTEM, REVISER_USER, render
+from ..quality import MIN_PROMPT_LENGTH, SIZE_GROWTH_RATIO
 from ..schemas import PromptVersion
 from ..state import State
 from .common import _apply
@@ -47,7 +48,7 @@ def revise_node(state: State) -> dict[str, Any]:
         attempted=_attempted_text(state),
         n=len(state.get("test_cases", [])),
         prev_len=len(prev_prompt),
-        max_len=int(len(prev_prompt) * 1.3) + 1,
+        max_len=int(len(prev_prompt) * SIZE_GROWTH_RATIO) + 1,
     )
 
     try:
@@ -82,12 +83,31 @@ def revise_node(state: State) -> dict[str, Any]:
             calls=calls,
         )
 
+    # 净增量核对：<size_budget> 里的"≤30%"原本只是给模型看的散文，超标无人验证，
+    # 交付物就逐轮膨胀（而约束越多、目标模型漏执行越多）。这里做确定性核对，
+    # 把超标写进版本注记让报告可见——不自动重写：为长度重写可能换来内容回归。
+    prev_len, new_len = len(prev_prompt), len(new_prompt)
+    # 百分比只在基准有意义时才报：真实跑里出过 v0 只有 12 字符（优化器空返回后残留的
+    # 骨架）的情况，对这种基准算净增量得到 74100% 这种荒谬数字，反而掩盖真问题。
+    # 门槛直接沿用质量门的"提示词过短"口径（MIN_PROMPT_LENGTH）：低于它就已经不是
+    # 一份能拿来对比长度的交付物了。
+    growth_pct = round((new_len / prev_len - 1) * 100, 1) if prev_len >= MIN_PROMPT_LENGTH else None
+    max_len = int(prev_len * SIZE_GROWTH_RATIO)
+    over_budget = new_len > max_len
+    if over_budget:
+        logger.warning("修订净增量超预算：%d → %d 字符（预算 %d 字符）", prev_len, new_len, max_len)
+
     versions = list(state.get("prompt_versions", []))
+    note = f"第 {state.get('iteration', 0) + 1} 轮修订"
+    if over_budget:
+        note += f"（长度 {prev_len}→{new_len} 字符，超 {max_len} 预算" + (
+            f"，净增量 {growth_pct:.0f}%" if growth_pct is not None else "）"
+        )
     versions.append(
         PromptVersion(
             iteration=state.get("iteration", 0) + 1,
             prompt=new_prompt,
-            note=f"第 {state.get('iteration', 0) + 1} 轮修订",
+            note=note,
         ).model_dump()
     )
 
@@ -110,7 +130,10 @@ def revise_node(state: State) -> dict[str, Any]:
         node,
         patch,
         "revise_done",
-        new_prompt_chars=len(new_prompt),
+        new_prompt_chars=new_len,
+        prev_prompt_chars=prev_len,
+        growth_pct=growth_pct,
+        size_budget_exceeded=over_budget,
         quality_ok=q_report.ok,
         quality_issues=q_report.describe() or None,
         retried=calls > 1,

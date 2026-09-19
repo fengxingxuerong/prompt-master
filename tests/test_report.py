@@ -190,3 +190,80 @@ def test_pick_best_honest_about_no_score():
     empty, note2 = pick_best(_state(prompt_versions=[], aggregate={}))
     assert note2 == "无可用版本" and empty["prompt"] == ""
     assert "## 评分总览" in render_report(_state(prompt_versions=[], aggregate={}))[0]
+
+
+def test_delta_marked_untrustworthy_when_arm_has_no_valid_samples():
+    """整臂有"零有效样本"的用例时，Δ 必须被标注为不可采信（端点抖动会冒充质量差）。"""
+    from pm.report import _infra_invalid_cases, render_report
+    from pm.state import initial_state
+
+    state = initial_state(task="t", target_model="fake", n_test_cases=3)
+    state["test_runs"] = [
+        {"test_case_index": 0, "sample_index": 0, "output": "", "error": "empty_output"},
+        {"test_case_index": 0, "sample_index": 1, "output": "", "error": "empty_output"},
+        {"test_case_index": 1, "sample_index": 0, "output": "正常输出", "error": None},
+        {"test_case_index": 2, "sample_index": 0, "output": "", "error": "timeout"},
+    ]
+    assert _infra_invalid_cases(state) == 2  # case0 与 case2 没有任何有效样本
+    state["prompt_versions"] = [{"iteration": 0, "prompt": "P", "note": ""}]
+    state["aggregate"] = {
+        "avg_score": 2.9,
+        "min_score": 1.0,
+        "max_score": 2.9,
+        "n_cases": 3,
+        "n_passed": 0,
+        "passed": False,
+        "ci_lower": 1.0,
+        "sem": 1.9,
+        "noise": 0.0,
+        "n_samples": 2,
+        "judge_bias": 0.0,
+        "all_issues": [],
+        "all_suggestions": [],
+        "cases_complete": True,
+        "n_cases_expected": 3,
+    }
+    state["baseline_aggregate"] = {
+        "avg_score": 7.71,
+        "min_score": 6.03,
+        "max_score": 8.0,
+        "n_cases": 3,
+        "n_passed": 3,
+        "passed": True,
+        "ci_lower": 6.5,
+    }
+    text, _ = render_report(state)
+    assert "本轮 Δ 不可采信" in text
+    assert "2 条用例" in text
+
+
+def test_arbitrated_cases_disclose_that_the_score_is_single_judge():
+    """分差超阈值时采信的是第三方**一人**的分，报告必须说这不是双评委共识。
+
+    真跑实测 9/26 轮走了仲裁（两个已完成 run 的冻结口径），比例不低；在此之前 n_arbitrated 只进 trace，
+    交付报告里读者看到的仍是"双评委"口径的表。
+    """
+    state = _state(
+        evaluations=[
+            {"test_case_index": 0, "judge": "merged"},
+            {"test_case_index": 1, "judge": "arbiter"},
+            {"test_case_index": 2, "judge": "arbiter"},
+            {"test_case_index": 3, "judge": "conservative"},
+        ]
+    )
+    text, _ = render_report(state)
+    assert "2/4 例出自**仲裁者一人**" in text
+    assert "1/4 例因仲裁调用失败取了两评委较低分" in text
+    assert "不是**双评委共识" in text
+
+
+def test_no_provenance_line_when_every_case_is_a_consensus():
+    """全走合并路径时不要凭空多一行警告（没有的事不许写）。"""
+    state = _state(
+        evaluations=[
+            {"test_case_index": 0, "judge": "merged"},
+            {"test_case_index": 1, "judge": "merged"},
+        ]
+    )
+    text, _ = render_report(state)
+    assert "分数出处" not in text

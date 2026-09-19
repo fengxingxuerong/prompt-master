@@ -30,7 +30,7 @@
 - report.py    Node 7 交付报告
 """
 
-from .baseline import _ab_flip, baseline_node, compare_node
+from .baseline import baseline_node, compare_node
 from .clarify import ask_user_node, clarify_node
 from .common import _apply, _feature_enabled, _strip_code_fence, dumps
 from .execute import (
@@ -74,7 +74,6 @@ from .revise import _attempted_text, revise_node
 __all__ = [
     "TARGET_CONCURRENCY_CAP",
     "_MODEL_PROFILES",
-    "_ab_flip",
     "_active_judges",
     "_apply",
     "_attach_assertion",

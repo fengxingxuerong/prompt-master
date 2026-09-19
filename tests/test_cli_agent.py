@@ -450,3 +450,143 @@ def test_selftest_command_passes(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert "自检通过" in out
     assert "[FAIL]" not in out, "三场景任一检查失败都算自检失败"
+
+
+def _seed_history(tmp_path: Path, rows: list[dict]) -> None:
+    (tmp_path / "judge_calibration_history.json").write_text(json.dumps(rows), encoding="utf-8")
+
+
+def test_calibrate_drift_ignores_records_from_another_rubric(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """改了评分提示词（锚点收紧）之后的 MAE 阶跃不是漂移：基线要跳过不可比的那条。"""
+    from test_cli_units import _patch_log_dir  # tests 无包结构，顶层互导
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cli_calibrate, "_calib_fingerprints", lambda role, samples: ("glm-5.2", "r2", "a1")
+    )
+    _seed_history(
+        tmp_path,
+        [
+            {
+                "ts": "t0",
+                "judge": "evaluator",
+                "n": 5,
+                "bias": 0.1,
+                "mae": 0.4,
+                "r": 0.9,
+                "model": "glm-5.2",
+                "rubric": "r2",
+            },  # 同口径，可比
+            {
+                "ts": "t1",
+                "judge": "evaluator",
+                "n": 5,
+                "bias": 1.3,
+                "mae": 1.3,
+                "r": 0.98,
+                "model": "glm-5.2",
+                "rubric": "r1",
+            },  # 旧 rubric，不可比且更新
+        ],
+    )
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.2, "mae": 0.5, "r": 0.95})
+    assert cli_calibrate._calibrate_command(["--json"]) == 0
+    d = json.loads(capsys.readouterr().out)["drift"]
+    assert d["prev_ts"] == "t0", "应跳过不可比的 t1，与同口径的 t0 比"
+    assert d["delta_mae"] == 0.1 and d["drifted"] is False
+
+
+def test_calibrate_reports_no_comparable_baseline_instead_of_fake_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """只有旧口径记录时：说清"尺子变了"，不当成评委漂移告警。"""
+    from test_cli_units import _patch_log_dir
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cli_calibrate, "_calib_fingerprints", lambda role, samples: ("glm-5.2", "r2", "a1")
+    )
+    _seed_history(
+        tmp_path,
+        [
+            {
+                "ts": "t1",
+                "judge": "evaluator",
+                "n": 5,
+                "bias": 1.3,
+                "mae": 1.3,
+                "r": 0.98,
+                "model": "glm-5.2",
+                "rubric": "r1",
+            }
+        ],
+    )
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.2, "mae": 0.5, "r": 0.95})
+    assert cli_calibrate._calibrate_command(["--json"]) == 0
+    d = json.loads(capsys.readouterr().out)["drift"]
+    assert d["comparable"] is False and d["drifted"] is False
+    assert "评分提示词已改动" in d["why_not_comparable"]
+
+
+def test_calibrate_ledger_records_cohort_fingerprints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """新记录必须带上模型与 rubric 指纹，否则下次没法判断可不可比。"""
+    from test_cli_units import _patch_log_dir
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cli_calibrate, "_calib_fingerprints", lambda role, samples: ("glm-5.2", "abc123", "a1")
+    )
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.0, "mae": 0.3, "r": 0.9})
+    assert cli_calibrate._calibrate_command(["--json"]) == 0
+    capsys.readouterr()
+    saved = json.loads((tmp_path / "judge_calibration_history.json").read_text(encoding="utf-8"))
+    assert saved[-1]["model"] == "glm-5.2" and saved[-1]["rubric"] == "abc123"
+    assert saved[-1]["anchors"] == "a1", "锚点集指纹漏记 = 下次没法判断是不是换了考卷"
+
+
+def test_calibrate_anchor_set_change_is_not_judge_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """换考卷不是评委漂移：6 条手写锚点的基线不能拿来判 11 条含真实锚点的读数。
+
+    老记录连模型/rubric 指纹都没有（账本里确实存在这种行），所以 `n` 是这里唯一的信号；
+    而 `_comparable` 对"缺指纹"是宽松放行的，因此放行条件必须同时看 n。
+    """
+    from test_cli_units import _patch_log_dir
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cli_calibrate, "_calib_fingerprints", lambda role, samples: ("glm-5.2", "r2", "a2")
+    )
+    _seed_history(
+        tmp_path,
+        [{"ts": "legacy", "judge": "evaluator", "n": 6, "bias": 1.24, "mae": 1.32, "r": 0.907}],
+    )
+    _patch_calib(monkeypatch, {"n": 11, "bias": 0.41, "mae": 0.9, "r": 0.925})
+    assert cli_calibrate._calibrate_command(["--json"]) == 0
+    d = json.loads(capsys.readouterr().out)["drift"]
+    assert d["comparable"] is False, "6 条 → 11 条是换考卷，MAE 1.32→0.9 不是评委变好"
+    assert "锚点条数不同" in d["why_not_comparable"]
+
+
+def test_anchors_stamp_tracks_scores_not_just_ids() -> None:
+    """人工分被重新核对过就是换了尺子，指纹必须跟着变。"""
+    a = [{"id": "x", "human_score": 6}, {"id": "y", "human_score": 8}]
+    b = [{"id": "y", "human_score": 8}, {"id": "x", "human_score": 6}]  # 顺序无关
+    c = [{"id": "x", "human_score": 5}, {"id": "y", "human_score": 8}]  # 改了一个分
+    assert cli_calibrate._anchors_stamp(a) == cli_calibrate._anchors_stamp(b)
+    assert cli_calibrate._anchors_stamp(a) != cli_calibrate._anchors_stamp(c)
+
+
+def test_calibrate_real_fingerprints_are_populated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """没被 monkeypatch 时，指纹要真的取到模型名与 rubric 哈希（不是占位符）。"""
+    model, rubric, anchors = cli_calibrate._calib_fingerprints(
+        "evaluator", [{"id": "a", "human_score": 5}]
+    )
+    assert model and model != "(unknown)"
+    assert len(rubric) == 10
+    assert len(anchors) == 10

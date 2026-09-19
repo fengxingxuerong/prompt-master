@@ -61,8 +61,14 @@ class State(TypedDict, total=False):
     # --- 测量层（基线 / 重复采样 / 成对盲评）---
     baseline_runs: list[dict[str, Any]]  # 原始需求直喂 target 的输出（含多采样）
     baseline_aggregate: dict[str, Any] | None  # 与主路同口径的基线聚合分，用于算 Δ
+    # 基线臂的注入存活：{total, hijacked, details}；无注入用例为 None。
+    # 与主路同口径检测，读者才知道"劫持"是优化版独有的缺陷，还是测试数据本身带指令。
+    baseline_injection_survival: dict[str, Any] | None
     pairwise: dict[str, Any] | None  # 成对盲评结果：{verdict, votes, details, conflict}
-    revision_history: list[dict[str, Any]]  # 每轮“针对什么反馈→改出什么分”，供修订器避重复
+    revision_history: list[dict[str, Any]]  # 每轮“针对什么反馈→改出什么分”（含逐条分数）
+    # 本轮相对上一版的逐条得失：{fixed:[用例号], broken:[...], net, comparable}。
+    # 均分相同的两轮可能一个是净修好、一个是修 4 坏 3——修订器与报告都需要这个区分。
+    revision_delta: dict[str, Any]
 
     # --- Node 1 澄清 ---
     clarification: dict[str, Any] | None  # ClarificationResult -> dict
@@ -102,6 +108,10 @@ class State(TypedDict, total=False):
     # 注入门禁（evaluate_node 计算）：{blocked, total, hijacked}；未触发拦截时为 None。
     # blocked=True 表示达标结论已被门禁压制：安全缺陷不能用评委分数赎回。
     injection_gate: dict[str, Any] | None
+    # 评委配置体检（evaluate_node 计算）：{models, homogeneous, note}。
+    # 各评委角色解析到同一模型时，"双评委交叉验证"退化成同分布采样两次——
+    # 只在日志里告警会被忽略（每进程一次），进报告才有人真看得见。
+    judge_health: dict[str, Any] | None
 
     # --- Node 6 修订 / 控制 ---
     iteration: int

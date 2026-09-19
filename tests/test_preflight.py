@@ -51,6 +51,7 @@ def test_conditional_roles_respect_env(monkeypatch):
     monkeypatch.setenv("PM_PAIRWISE", "0")
     roles = preflight_roles()
     assert "evaluator_b" not in roles
+    assert "arbiter" not in roles, "单评委配置下不会有分歧仲裁，不必探测"
     assert "comparator" not in roles
     assert "evaluator" in roles and "target" in roles
 
@@ -58,6 +59,7 @@ def test_conditional_roles_respect_env(monkeypatch):
     monkeypatch.setenv("PM_PAIRWISE", "1")
     roles2 = preflight_roles()
     assert "evaluator_b" in roles2
+    assert "arbiter" in roles2, "仲裁评委只在跑批中途出场，预检必须提前发现它配错"
     assert "comparator" in roles2
 
 
@@ -153,6 +155,7 @@ def test_run_py_preflight_wiring(tmp_path):
         "MOCKGEN_",
         "EVALUATOR_",
         "EVALUATOR_B_",
+        "ARBITER_",
         "REVISER_",
         "TARGET_",
         "COMPARATOR_",

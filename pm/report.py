@@ -58,6 +58,24 @@ def _verdict_conflict(d_avg: float | None, pw: dict[str, Any]) -> str | None:
     return None
 
 
+def _infra_invalid_cases(state: Mapping[str, Any]) -> int:
+    """本臂有多少条用例**没有任何有效样本**（目标模型空输出 / 调用失败）。
+
+    为什么必须单独报：这类用例在评分层被记 1.0（否则用例会凭空消失），于是
+    "优化版比基线差 4.81 分"可能测的只是**两次调用之间端点抖动的相位差**——
+    2026-09-18 的 sales_mockgen 一轮就是这样：优化臂 8 次 empty_output、
+    基线臂全成功，Δ 完全没有质量含义。不写出来就会被当成结论读。
+    """
+    by_case: dict[int, bool] = {}
+    for r in state.get("test_runs") or []:
+        if not isinstance(r, dict):
+            continue
+        i = int(r.get("test_case_index", 0) or 0)
+        ok = not r.get("error") and bool(str(r.get("output") or "").strip())
+        by_case[i] = by_case.get(i, False) or ok
+    return sum(1 for ok in by_case.values() if not ok)
+
+
 def _cases_short_note(agg: dict[str, Any]) -> str:
     """用例数不足时在报告里显式标注（C1）：避免“分数很高”被当成“结论可靠”。"""
     if agg.get("cases_complete", True):
@@ -144,6 +162,38 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
                 else ""
             )
         )
+        # 评委配置体检：同源评委 = 同一分布采样两次，交叉验证不提供独立证据
+        jh = state.get("judge_health") or {}
+        if jh.get("homogeneous"):
+            lines.append(f"- ⚠️ **评委同源**：{jh.get('note', '')}")
+        elif jh.get("models"):
+            lines.append(f"- 评委模型：{'、'.join(sorted(set(jh['models'].values())))}")
+        # 分数出自谁：双评委分差超阈值时采信的是**第三方单评委**，两位原评委的分只留在
+        # judge_scores 里。真跑实测占 9/26 轮（两个已完成 run，冻结口径；见 llm_e2e_matrix 发现 13），不是边角情况，但报告此前从不说明，
+        # 读者会以为表里每个数都是两位评委的共识（n_arbitrated 只进过 trace）。
+        evals = [e for e in (state.get("evaluations") or []) if isinstance(e, dict)]
+        n_arb = sum(1 for e in evals if e.get("judge") == "arbiter")
+        n_cons = sum(1 for e in evals if e.get("judge") == "conservative")
+        if evals and (n_arb or n_cons):
+            parts = []
+            if n_arb:
+                parts.append(f"{n_arb}/{len(evals)} 例出自**仲裁者一人**")
+            if n_cons:
+                parts.append(f"{n_cons}/{len(evals)} 例因仲裁调用失败取了两评委较低分（安全侧）")
+            lines.append(
+                "- ⚠️ 分数出处：" + "；".join(parts) + "——这些数**不是**双评委共识，"
+                "逐评委的原始分在 `judge_scores`，跨轮对比时按单评委读。"
+            )
+        # 逐条得失：均分看不出的"修 4 坏 3"必须让读者看见（震荡的直接证据）
+        delta = state.get("revision_delta") or {}
+        if isinstance(delta, dict) and (delta.get("fixed") or delta.get("broken")):
+            lines.append(
+                f"- 与上一版逐条对照：修好 {len(delta['fixed'])} 条"
+                f"（{'、'.join('#' + str(i) for i in delta['fixed'])}）"
+                f"／弄坏 {len(delta['broken'])} 条"
+                f"（{'、'.join('#' + str(i) for i in delta['broken'])}）"
+                f"，净值 {delta.get('net', 0)}"
+            )
         lines.append("")
 
     # ---- 基线对比：没有参照点，“分数很高”本身不构成结论 ----
@@ -163,6 +213,17 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         lines.append("|---|---|---|---|")
         lines.append(f"| 平均分 | {base.get('avg_score')} | {agg.get('avg_score')} | {d_avg:+} |")
         lines.append(f"| 最低分 | {base.get('min_score')} | {agg.get('min_score')} | {d_min:+} |")
+        # 基础设施有效性：本臂有整条用例没有任何有效样本时，Δ 测的是端点抖动不是质量
+        n_invalid = _infra_invalid_cases(state)
+        if n_invalid:
+            lines.append("")
+            lines.append(
+                f"> ⚠️ **本轮 Δ 不可采信**：优化臂有 {n_invalid} 条用例**没有任何有效样本**"
+                "（目标模型空输出或调用失败，评分层按刻度下限记账以免用例凭空消失）。"
+                "两臂是在不同时间窗打的，端点抖动会直接冒充成质量差——先错峰重跑本臂"
+                "（或调大 `PM_TARGET_MAX_TOKENS`，空输出多半是 reasoning 耗尽预算），"
+                "再谈优化有没有变好。"
+            )
         lines.append(
             f"| 断言未通过 | {base.get('n_assertions_failed', 0)}/{base.get('n_assertions', 0)} "
             f"| {agg.get('n_assertions_failed', 0)}/{agg.get('n_assertions', 0)} | - |"
@@ -204,7 +265,13 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         lines.append(f"- 结论：{verdict_text}")
         lines.append(
             f"- 投票：优化版胜 {votes.get('better', 0)} / 基线胜 {votes.get('worse', 0)} "
-            f"/ 持平 {votes.get('tie', 0)}（共 {pw.get('n_compared', 0)} 例，A/B 已随机映射）"
+            f"/ 持平 {votes.get('tie', 0)}（共 {pw.get('n_compared', 0)} 例，每例双向评：正序 + 交换 A/B）"
+            + (
+                f"\n- ⚠️ 位置偏置：{pw['position_flips']}/{pw.get('n_compared', 0)} 例两序结论相反"
+                "，已一律记为持平（这类用例的胜负由座位决定，不计入结论）"
+                if pw.get("position_flips")
+                else ""
+            )
         )
         if pw.get("conflict"):
             lines.append(f"- ⚠️ 结论冲突：{pw['conflict']}")
@@ -361,6 +428,18 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             f"- 注入用例：{shown_total} 条；被劫持：{hijacked} 条"
             "（输出执行了注入指令，判定为确定性包含检查，不经评委）"
         )
+        # 基线臂同口径检测：给出"劫持是优化版引入的，还是这份数据本来就能劫持"的参照
+        base_surv = state.get("baseline_injection_survival")
+        if isinstance(base_surv, dict) and base_surv.get("total"):
+            lines.append(
+                f"- 同一批用例打基线（原始需求直喂）：被劫持 "
+                f"{_report_safe_int(base_surv.get('hijacked'))}/{base_surv['total']} 条"
+                + (
+                    "——基线未中招而优化版中招，说明劫持由这版提示词自己引入"
+                    if not _report_safe_int(base_surv.get("hijacked")) and hijacked
+                    else ""
+                )
+            )
         for d in ((surv or {}).get("details") or [])[:10]:
             lines.append(f"- ❌ {d}")
         if hijacked:
