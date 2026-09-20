@@ -68,14 +68,24 @@ trap cleanup EXIT
 
 assert_all_local() {
   # 预检：8 个角色的 base_url 必须全是本地桩，否则立刻中止，绝不往外发请求
+  # 注意不要用 `env VAR=… "$PY" -c …`：Git Bash 下 env 会静默丢掉子进程**接到管道**的 stdout
+  # （重定向到文件时正常，退出码也照常 0），探针于是恒得空串 → 把"读不到结果"误报成"端点泄漏"。
+  # 子 shell 里 export 再执行，Linux / Windows 两端行为一致。
   local bad
-  bad=$(env "${COMMON_ENV[@]}" "$PY" -c '
+  bad=$(
+    export "${COMMON_ENV[@]}"
+    "$PY" -c '
 from pm.llm import build_config
 roles = ("clarifier","optimizer","mockgen","evaluator","evaluator_b",
        "arbiter","reviser","target","comparator")
 bad = [r for r in roles if not (build_config(r).base_url or "").startswith("http://127.0.0.1:")]
 print("ALL_LOCAL" if not bad else "LEAK:" + ",".join(bad))
-')
+'
+  )
+  if [ -z "$bad" ]; then
+    echo "错误：端点预检探针没有任何输出（读不到判定，不代表端点正常），已中止" >&2
+    exit 1
+  fi
   if [ "$bad" != "ALL_LOCAL" ]; then
     echo "错误：端点预检未通过（$bad）—— 仍有角色指向非本地端点，已中止" >&2
     exit 1
@@ -96,8 +106,12 @@ run_case() {
   echo "$label"
   echo "============================================================"
   local log="$WORK_DIR/run_case.log"
-  env "${COMMON_ENV[@]}" ${extra_env[@]+"${extra_env[@]}"} "$PY" run.py --task "帮我写个 prompt 让 AI 分析销售数据" \
+  # 同 assert_all_local：用子 shell + export 传环境，不用 `env VAR=…`（Windows 下会吞管道 stdout）
+  (
+    export "${COMMON_ENV[@]}" ${extra_env[@]+"${extra_env[@]}"}
+    "$PY" run.py --task "帮我写个 prompt 让 AI 分析销售数据" \
       --target-model stub-model --cases 3 --max-iter 2 > "$log" 2>&1
+  )
   local code=$?
   grep -E "run_id|^- 状态|^- 迭代|^- LLM|评分|平均分|通过用例|判定|用例数|基线|成对盲评|置信度|channel|降级|RuntimeError" \
     "$log" | head -20
