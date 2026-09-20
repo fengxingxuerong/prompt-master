@@ -161,7 +161,7 @@ python run.py --selftest
 
 ```bash
 ruff check . && ruff format --check . && mypy pm
-pytest tests/ -q                                   # 677 全绿
+pytest tests/ -q                                   # 683 全绿
 python run.py --selftest && python eval_prompts.py # 拓扑自检 + 节点提示词结构契约 6/6
 powershell -File examples/run_e2e_stub.ps1          # 三通道桩 e2e 3/3（含双向盲评链路）
 python scripts/live_prompt_audit_20260918.py        # 真机探针 T1-T6（代码侧判定，不让 LLM 自评）

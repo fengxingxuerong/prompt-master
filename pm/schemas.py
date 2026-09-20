@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from typing import Any, Literal
 
@@ -43,6 +44,44 @@ def _env_float(name: str, default: float, *, positive_only: bool = False) -> flo
 
 
 PASS_THRESHOLD = _env_float("PM_PASS_THRESHOLD", 8.0, positive_only=True)  # >= 阈值视为生产可用
+
+# 评委抖动（复现性）：同一份输入重复打分时量到的**最大极差**。
+# 只有 `run.py calibrate --judge X --repeat 3` 量出来之后才填得进去；不填=0，行为与旧版一致。
+JUDGE_JITTER = _env_float("PM_JUDGE_JITTER", 0.0)
+# n=3 时"极差→标准差"的换算因子（d2）。填进来的是极差，合成方差要先换成 sd。
+_RANGE_TO_SD = 1.693
+
+
+def measurement_noise(target_noise: float | None) -> float | None:
+    """把目标模型采样噪声与**评委打分噪声**合成一条噪声带。
+
+    两者独立，按方差相加。评委这一项此前完全没进不确定度：报告的 `ci_lower` 只吸收
+    "同一用例重复采样"的极差，而实测同一份输入让评委 B 重复打能差 2.60、仲裁差 4.43，
+    且 `temperature=0` 不改善——所以"保守下界"其实不保守。
+    `None`（采样次数不足以估计噪声）原样传回，调用方据此走退化路径。
+    """
+    if JUDGE_JITTER <= 0:
+        return target_noise
+    if target_noise is None:
+        return JUDGE_JITTER
+    return round(math.hypot(target_noise, JUDGE_JITTER), 3)
+
+
+def effective_disagreement_threshold() -> float:
+    """仲裁的真实触发线：取"配置值"与"评委自我分歧能造出的分差"之中较大者。
+
+    两位独立评委各带 sd 的抖动时，其**差**的 sd 是 √2·sd；越过 2σ 才算真分歧
+    （1σ 会有约 32% 误触）。极差换成 sd 要除以 d2(n=3)=1.693。
+    默认 JUDGE_JITTER=0 ⇒ 结果完全等于 `PM_JUDGE_DISAGREEMENT`；填了实测值只会让门更严，
+    绝不会把已经存在的仲裁放松。门一旦被抬到无穷高，等于宣布"这套评委测不出分歧信号"，
+    报告里会说破，不会让人误以为双评委在交叉验证。
+    """
+    if JUDGE_JITTER <= 0:
+        return judge_disagreement_threshold()
+    return max(
+        judge_disagreement_threshold(), round(2.0 * math.sqrt(2.0) * JUDGE_JITTER / _RANGE_TO_SD, 2)
+    )
+
 
 # --------------------------------------------------------------------------
 # P3: 修订提前终止（回退 / 平台期）—— 来自真实 revise 收敛实验的教训
@@ -452,6 +491,13 @@ class AggregateScore(BaseModel):
     n_samples: int = 1
     sem: float = Field(default=0.0, description="用例间标准误差：stdev(用例中位分)/sqrt(n_cases)")
     noise: float = Field(default=0.0, description="同一用例重复采样的平均极差（采样噪声）")
+    noise_total: float = Field(
+        default=0.0,
+        description="合成噪声带（目标采样极差 ⊕ 评委复现性抖动）；ci_lower 用的是这个",
+    )
+    judge_jitter: float = Field(
+        default=0.0, description="评委复现性极差（PM_JUDGE_JITTER，未测则为 0）"
+    )
     ci_lower: float = Field(default=0.0, description="均分的保守下界；passed 看这个而不是看点估计")
     unstable_cases: list[int] = Field(
         default_factory=list, description="采样间极差过大的用例序号：这些用例的结论不稳"
@@ -579,11 +625,14 @@ class AggregateScore(BaseModel):
             sem = 0.0
         spreads = [e.score_spread for e in evals if e.score_spread > 0]
         noise = round(sum(spreads) / len(spreads), 3) if spreads else 0.0
+        # 评委自己重复打同一份输入的抖动也是噪声，而且此前**完全没有**进不确定度。
+        # 两项独立，按方差合成（`PM_JUDGE_JITTER` 未填时完全等于旧口径）。
+        noise_all = measurement_noise(noise)
         unstable = [e.test_case_index for e in evals if e.score_spread >= UNSTABLE_SPREAD]
-        # 下界 = 均值 - 1.96·SEM - 半个采样噪声；单用例单次采样时退化为点估计（向后兼容）
+        # 下界 = 均值 - 1.96·SEM - 半个噪声带；单用例单次采样时退化为点估计（向后兼容）
         # 但不低于量纲下限 1.0：分数刻度是 1-10，跑出来一个 -0.82 的"下界"是纯噪声
         # （SEM 1.9 的真实一轮就这么印在报告里），读者只会以为是 bug。
-        ci_lower = round(max(1.0, avg - 1.96 * sem - 0.5 * noise), 2)
+        ci_lower = round(max(1.0, avg - 1.96 * sem - 0.5 * (noise_all or 0.0)), 2)
         bias = [e.model_reported_score - e.weighted_score for e in evals]
         judge_bias = round(sum(bias) / len(bias), 2) if bias else 0.0
         bias_warning = judge_bias >= JUDGE_BIAS_ALERT
@@ -622,6 +671,8 @@ class AggregateScore(BaseModel):
             n_samples=max((e.n_samples for e in evals), default=1),
             sem=sem,
             noise=noise,
+            noise_total=noise_all if noise_all is not None else 0.0,
+            judge_jitter=JUDGE_JITTER,
             ci_lower=ci_lower,
             unstable_cases=unstable,
             judge_bias=judge_bias,

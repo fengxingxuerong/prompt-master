@@ -498,3 +498,67 @@ def test_empty_target_output_is_marked_not_silently_scored(monkeypatch):
     )
     assert run.output == ""
     assert run.error == "empty_output", "空输出必须被标记，否则会被静默计入均分"
+
+
+# ---------------------------------------------------------------------------
+# 评委复现性进不确定度（PM_JUDGE_JITTER）
+# ---------------------------------------------------------------------------
+def test_measurement_noise_combines_in_quadrature(monkeypatch):
+    import math
+
+    from pm import schemas
+
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.0)
+    assert schemas.measurement_noise(1.0) == 1.0, "未填抖动时完全等于旧口径"
+    assert schemas.measurement_noise(None) is None, "噪声不可估的语义不许被改写"
+
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.0)
+    assert schemas.measurement_noise(None) == 2.0, "只有评委抖动时也进带"
+    got = schemas.measurement_noise(1.5)
+    assert got == round(math.hypot(1.5, 2.0), 3)
+    assert got > max(1.5, 2.0), "合成必须比任何单独一项更宽（保守方向）"
+
+
+def test_effective_gate_never_relaxes_and_rises_with_jitter(monkeypatch):
+    import math
+
+    from pm import schemas
+
+    monkeypatch.setenv("PM_JUDGE_DISAGREEMENT", "2.0")
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.0)
+    assert schemas.effective_disagreement_threshold() == 2.0
+
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
+    gate = schemas.effective_disagreement_threshold()
+    # 2·√2·极差/d2(3)：两位各自抖 2.6 的评委，其差要越过这条线才算真分歧
+    assert gate > 2.6 and abs(gate - round(2.0 * math.sqrt(2.0) * 2.6 / 1.693, 2)) < 0.01
+
+    # 抖动很小时不许把已配置的线放松
+    monkeypatch.setenv("PM_JUDGE_DISAGREEMENT", "9.0")
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.3)
+    assert schemas.effective_disagreement_threshold() == 9.0
+
+
+def test_ci_lower_widens_with_judge_jitter(monkeypatch):
+    from pm import schemas
+
+    evals = [_ev(8.0, spread=0.4), _ev(8.4, spread=0.6), _ev(7.6, spread=0.2)]
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.0)
+    tight = AggregateScore.from_evaluations(evals, n_expected=3)
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
+    wide = AggregateScore.from_evaluations(evals, n_expected=3)
+
+    assert wide.ci_lower < tight.ci_lower, "评委抖动必须让下界更保守"
+    assert wide.noise_total > wide.noise and wide.judge_jitter == 2.6
+    assert tight.noise_total == tight.noise, "未测抖动时不引入任何新数值"
+
+
+def test_plateau_margin_uses_the_combined_noise(monkeypatch):
+    """回退/平台期余量必须看合成噪声：否则"评委这次手抖"会被当成版本回退而提前停。"""
+    from pm import schemas
+
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.0)
+    assert schemas.noise_margin(schemas.measurement_noise(0.5)) == 1.0
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
+    combined = schemas.measurement_noise(0.5)
+    assert schemas.noise_margin(combined) > 1.0

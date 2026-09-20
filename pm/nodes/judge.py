@@ -25,7 +25,9 @@ from ..schemas import (
     EvaluationResult,
     RuleCheck,
     early_stop_reason,
+    effective_disagreement_threshold,
     judge_disagreement_threshold,
+    measurement_noise,
 )
 from ..state import State
 from .common import _apply
@@ -155,7 +157,9 @@ def _merge_judge_results(
         ev.judge_scores = dict(judge_scores)
         ev.judge_disagreement = round(diff, 2)
 
-    if diff <= _judge_disagreement_threshold():
+    # 触发线取"配置值"与"评委自我分歧能量出的分差"之中较大者：抖动大的评委不该被当成信号
+    gate = effective_disagreement_threshold()
+    if diff <= gate:
         dims = DimensionScores(
             task_completion=(
                 ev_a.dimension_scores.task_completion + ev_b.dimension_scores.task_completion
@@ -192,7 +196,11 @@ def _merge_judge_results(
         # 保守：任一评委要求修订，或均值未达标，都进入修订
         merged.should_revise = merged.should_revise or not merged.passed
         logger.info(
-            "case#%d 双评委分差 %.2f ≤ 阈值 → merged=%.2f", idx, diff, merged.weighted_score
+            "case#%d 双评委分差 %.2f ≤ 有效阈值 %.2f → merged=%.2f",
+            idx,
+            diff,
+            gate,
+            merged.weighted_score,
         )
         return merged
 
@@ -210,7 +218,11 @@ def _merge_judge_results(
         arb.judge_scores = judge_scores
         arb.judge_disagreement = round(diff, 2)
         logger.warning(
-            "case#%d 双评委分差 %.2f > 阈值 → 仲裁得分 %.2f", idx, diff, arb.weighted_score
+            "case#%d 双评委分差 %.2f > 有效阈值 %.2f → 仲裁得分 %.2f",
+            idx,
+            diff,
+            gate,
+            arb.weighted_score,
         )
         return arb
     except Exception as e:  # noqa: BLE001
@@ -836,7 +848,10 @@ def evaluate_node(state: State) -> dict[str, Any]:
         avg_scores = [v["avg_score"] for v in versions if v.get("avg_score") is not None]
         # 单次采样时极差恒为 0，那不是“没噪声”而是“测不出噪声”：传 None 让余量放宽
         # 并关掉平台期规则（M4）——否则一次运气好的采样就能把修订提前卡死。
-        noise = agg.noise if (agg.n_samples or 1) >= 2 else None
+        target_noise = agg.noise if (agg.n_samples or 1) >= 2 else None
+        # 评委对同一份输入重复打也能差出 2-4 分（实测），只算目标模型的采样极差会把
+        # "版本回退了"和"评委这次手抖"混为一谈，所以回退/平台期的余量用合成噪声带。
+        noise = measurement_noise(target_noise)
         stop_reason = early_stop_reason(avg_scores, noise=noise)
 
         # 成本闸（PM_MAX_LLM_CALLS）：下一轮修订的预估调用数会突破任务预算 →

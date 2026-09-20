@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import pytest
 from pm.report import pick_best, render_report
 
 
@@ -355,3 +356,26 @@ def test_no_provenance_line_when_every_case_is_a_consensus():
     )
     text, _ = render_report(state)
     assert "分数出处" not in text
+
+
+def test_report_shows_combined_noise_and_the_effective_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """填了评委抖动，报告必须说清"下界用的是合成噪声"和"仲裁触发线被抬到哪"。
+
+    后半句尤其重要：抬线之后**双评委分歧会变少**，那是噪声感知的结果，
+    不能让人误读成"交叉验证变强了"。
+    """
+    from pm import schemas
+
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
+    st = _state(aggregate=_agg(noise=0.5, noise_total=2.65, judge_jitter=2.6, ci_lower=6.1))
+    text, _ = render_report(st)
+    assert "评委复现性抖动 2.6" in text and "合成噪声带 2.65" in text
+    assert "仲裁有效触发线" in text and "不是交叉验证变强了" in text
+
+
+def test_report_stays_silent_about_jitter_when_it_was_never_measured() -> None:
+    """没测过抖动就不许凭空造一个数出来（默认 0 = 与旧口径逐字一致）。"""
+    text, _ = render_report(_state(aggregate=_agg(noise=0.5)))
+    assert "评委复现性抖动" not in text and "仲裁有效触发线" not in text

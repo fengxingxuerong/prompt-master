@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .schemas import PASS_THRESHOLD
+from .schemas import PASS_THRESHOLD, effective_disagreement_threshold, judge_disagreement_threshold
 
 # 用例区分度自检阈值：基线均分达到该值以上时，判定「用例对优化不敏感」。
 # 基线 = 原始需求直喂 target：它都拿到接近满分，说明这批用例太简单，
@@ -146,7 +146,20 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         lines.append(f"- 每条用例重复采样：{agg.get('n_samples', 1)} 次（`PM_SAMPLES_PER_CASE`）")
         lines.append(
             f"- 用例间标准误差 SEM：{agg.get('sem', 0.0)}；采样噪声（平均极差）：{agg.get('noise', 0.0)}"
+            + (
+                f"；⊕ 评委复现性抖动 {agg.get('judge_jitter')} → 合成噪声带 "
+                f"{agg.get('noise_total')}（`ci_lower` 用的是合成值）"
+                if agg.get("judge_jitter")
+                else ""
+            )
         )
+        if agg.get("judge_jitter"):
+            lines.append(
+                f"- 仲裁有效触发线：{effective_disagreement_threshold()}"
+                f"（配置值 {judge_disagreement_threshold()}，按评委自我分歧抬高——"
+                "低于这条线的分差当成仪表抖动而不是用例难度，所以**双评委分歧变少了**，"
+                "不是交叉验证变强了）"
+            )
         lines.append(
             f"- 均分保守下界：**{agg.get('ci_lower')}**（判定看这个而不是看点估计 {agg.get('avg_score')}）"
         )
