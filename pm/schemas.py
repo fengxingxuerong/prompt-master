@@ -50,6 +50,22 @@ PASS_THRESHOLD = _env_float("PM_PASS_THRESHOLD", 8.0, positive_only=True)  # >= 
 JUDGE_JITTER = _env_float("PM_JUDGE_JITTER", 0.0)
 # n=3 时"极差→标准差"的换算因子（d2）。填进来的是极差，合成方差要先换成 sd。
 _RANGE_TO_SD = 1.693
+# 三把评委的复现性差着数量级（实测平均极差：A 0.475、B 1.9、仲裁 2.5），一个全局数
+# 会把最抖那把的误差棒套在所有人头上。`PM_<ROLE>_JITTER` 单独测过再填，只用于
+# **仲裁触发线**（那条线读的就是两位各自的手抖）；`ci_lower` 仍用全局值，取保守口径。
+_JITTER_SEATS = ("evaluator", "evaluator_b", "arbiter")
+
+
+def judge_jitter(seat: str = "") -> float:
+    """该评委座位的复现性极差；没单独测过就回退全局 `PM_JUDGE_JITTER`。
+
+    显式填了 `PM_<ROLE>_JITTER=0` 按 0 处理（"这把测过、确实不抖"），与"没填"不同。
+    """
+    if seat in _JITTER_SEATS:
+        own = _env_float(f"PM_{seat.upper()}_JITTER", -1.0)
+        if own >= 0:
+            return own
+    return JUDGE_JITTER
 
 
 def measurement_noise(target_noise: float | None) -> float | None:
@@ -70,17 +86,22 @@ def measurement_noise(target_noise: float | None) -> float | None:
 def effective_disagreement_threshold() -> float:
     """仲裁的真实触发线：取"配置值"与"评委自我分歧能造出的分差"之中较大者。
 
-    两位独立评委各带 sd 的抖动时，其**差**的 sd 是 √2·sd；越过 2σ 才算真分歧
+    两位独立评委各带 sd 的抖动时，其**差**的 sd 是 √(sdA²+sdB²)；越过 2σ 才算真分歧
     （1σ 会有约 32% 误触）。极差换成 sd 要除以 d2(n=3)=1.693。
-    默认 JUDGE_JITTER=0 ⇒ 结果完全等于 `PM_JUDGE_DISAGREEMENT`；填了实测值只会让门更严，
+    默认两座位都是 0 ⇒ 结果完全等于 `PM_JUDGE_DISAGREEMENT`；填了实测值只会让门更严，
     绝不会把已经存在的仲裁放松。门一旦被抬到无穷高，等于宣布"这套评委测不出分歧信号"，
     报告里会说破，不会让人误以为双评委在交叉验证。
+
+    为什么按座位分别取数（2026-09-20）：三把评委的复现性差着数量级，只填一个全局值时
+    最抖的那把会替所有人决定这条线——实测 A 0.475 / B 1.9 时，全局按 2.6 会把触发线
+    抬到 4.35（几乎不再仲裁），而按两位各自的抖动算只有 3.18。
     """
-    if JUDGE_JITTER <= 0:
+    sd_a = judge_jitter("evaluator")
+    sd_b = judge_jitter("evaluator_b")
+    if sd_a <= 0 and sd_b <= 0:
         return judge_disagreement_threshold()
-    return max(
-        judge_disagreement_threshold(), round(2.0 * math.sqrt(2.0) * JUDGE_JITTER / _RANGE_TO_SD, 2)
-    )
+    diff_sd = math.sqrt(sd_a**2 + sd_b**2)
+    return max(judge_disagreement_threshold(), round(2.0 * diff_sd / _RANGE_TO_SD, 2))
 
 
 # --------------------------------------------------------------------------

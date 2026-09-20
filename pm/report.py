@@ -10,7 +10,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .schemas import PASS_THRESHOLD, effective_disagreement_threshold, judge_disagreement_threshold
+from .schemas import (
+    PASS_THRESHOLD,
+    effective_disagreement_threshold,
+    judge_disagreement_threshold,
+    judge_jitter,
+)
 
 # 用例区分度自检阈值：基线均分达到该值以上时，判定「用例对优化不敏感」。
 # 基线 = 原始需求直喂 target：它都拿到接近满分，说明这批用例太简单，
@@ -154,9 +159,16 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             )
         )
         if agg.get("judge_jitter"):
+            jit_a = judge_jitter("evaluator")
+            jit_b = judge_jitter("evaluator_b")
+            seat_note = (
+                f"；两位座位各自的实测极差 {jit_a}/{jit_b}"
+                if {jit_a, jit_b} != {agg.get("judge_jitter")}
+                else ""
+            )
             lines.append(
                 f"- 仲裁有效触发线：{effective_disagreement_threshold()}"
-                f"（配置值 {judge_disagreement_threshold()}，按评委自我分歧抬高——"
+                f"（配置值 {judge_disagreement_threshold()}，按评委自我分歧抬高{seat_note}——"
                 "低于这条线的分差当成仪表抖动而不是用例难度，所以**双评委分歧变少了**，"
                 "不是交叉验证变强了）"
             )

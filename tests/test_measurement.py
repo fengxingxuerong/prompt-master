@@ -524,6 +524,8 @@ def test_effective_gate_never_relaxes_and_rises_with_jitter(monkeypatch):
 
     from pm import schemas
 
+    for seat in ("PM_EVALUATOR_JITTER", "PM_EVALUATOR_B_JITTER", "PM_ARBITER_JITTER"):
+        monkeypatch.delenv(seat, raising=False)
     monkeypatch.setenv("PM_JUDGE_DISAGREEMENT", "2.0")
     monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.0)
     assert schemas.effective_disagreement_threshold() == 2.0
@@ -537,6 +539,43 @@ def test_effective_gate_never_relaxes_and_rises_with_jitter(monkeypatch):
     monkeypatch.setenv("PM_JUDGE_DISAGREEMENT", "9.0")
     monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.3)
     assert schemas.effective_disagreement_threshold() == 9.0
+
+
+def test_gate_reads_each_judge_seat_own_jitter(monkeypatch):
+    """三把评委的复现性差着数量级，触发线不许由最抖的那把替所有人定。
+
+    实测：评委 A 平均自我极差 0.475、评委 B 1.9、仲裁 2.5。只填全局值时
+    门被 B/仲裁的抖动抬到 4.35，等于宣布"这对评委不再仲裁"。
+    """
+    import math
+
+    from pm import schemas
+
+    monkeypatch.setenv("PM_JUDGE_DISAGREEMENT", "2.0")
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
+    monkeypatch.setenv("PM_EVALUATOR_JITTER", "0.7")
+    monkeypatch.setenv("PM_EVALUATOR_B_JITTER", "2.6")
+    per_seat = schemas.effective_disagreement_threshold()
+    assert abs(per_seat - round(2.0 * math.hypot(0.7, 2.6) / 1.693, 2)) < 0.01
+    monkeypatch.setenv("PM_EVALUATOR_JITTER", "2.6")
+    assert schemas.effective_disagreement_threshold() > per_seat, "A 也变抖时门必须更严"
+
+    # 没单独测过的座位回退全局值，不引入任何新口径
+    monkeypatch.delenv("PM_EVALUATOR_JITTER")
+    monkeypatch.delenv("PM_EVALUATOR_B_JITTER")
+    assert schemas.judge_jitter("evaluator") == 2.6
+    assert schemas.judge_jitter("merged") == 2.6, "未知座位一律回退，绝不静默当 0"
+
+
+def test_explicit_zero_jitter_is_not_treated_as_unmeasured(monkeypatch):
+    """`PM_EVALUATOR_JITTER=0` 是"这把测过、确实不抖"，与"没填"必须可区分。"""
+    from pm import schemas
+
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
+    monkeypatch.setenv("PM_EVALUATOR_JITTER", "0")
+    assert schemas.judge_jitter("evaluator") == 0.0
+    monkeypatch.setenv("PM_EVALUATOR_JITTER", "")
+    assert schemas.judge_jitter("evaluator") == 2.6, "空串才是没填"
 
 
 def test_ci_lower_widens_with_judge_jitter(monkeypatch):

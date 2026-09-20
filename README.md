@@ -177,7 +177,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File examples/run_e2e_stub.ps1
 | `PM_FORCE_JSON_CHANNEL` | 关 | 置 1 则跳过原生结构化输出通道（不置也行：撞过 400 后会记住端点指纹自动跳过） |
 | `PM_STRUCT_METHOD` | 空 | 结构化输出方法：空 = langchain 默认（`json_schema`）；端点只认 function calling 时设 `function_calling`（trace 的 `channel` 会如实标为 `function_calling`） |
 | `PM_JUDGES` / `PM_JUDGE_DISAGREEMENT` | `2` / `2.0` | 评委数与分差阈值 |
-| `PM_JUDGE_JITTER` | `0.0` | 评委复现性极差，由 `calibrate --repeat 3` 量出后填入。**填了它**：`ci_lower` 改用"目标采样噪声 ⊕ 评委抖动"的合成带（更早），且仲裁触发线抬到 `max(配置值, 2√2·jitter/1.69)`（分差不越过它就不算分歧）。不填=旧行为 |
+| `PM_JUDGE_JITTER` | `0.0` | 评委复现性极差，由 `calibrate --repeat 3` 量出后填入。**填了它**：`ci_lower` 改用"目标采样噪声 ⊕ 评委抖动"的合成带（更早），且仲裁触发线抬到 `max(配置值, 2·√(sdA²+sdB²)/1.69)`（分差不越过它就不算分歧）。不填=旧行为 |
+| `PM_EVALUATOR_JITTER` / `PM_EVALUATOR_B_JITTER` / `PM_ARBITER_JITTER` | 未设=沿用 `PM_JUDGE_JITTER` | **按座位**分别填实测极差（三把评委差着数量级：A 平均 0.475、B 1.9、仲裁 2.5）。只影响仲裁触发线（它读的就是这两位各自的手抖），`ci_lower` 仍用全局值取保守口径。填了它，报告那一行会点名"用的是 0.7/2.6 这两个数" |
 | `PM_TARGET_MAX_CONCURRENCY` | `4` | 目标模型并发上限（硬上限 32，超出自动封顶并告警） |
 | `PM_EVAL_CACHE` / `PM_TARGET_CACHE` / `PM_CACHE_DIR` | 开 / `logs/` | 本地结果缓存（键含模型与采样参数指纹） |
 | `PM_CACHE_BACKEND` | `json` | 缓存存储后端：`json`（默认，本地文件）/ `sqlite`（多 worker 共享同一份缓存，见「已知限制」多 worker 条目） |

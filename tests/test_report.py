@@ -368,11 +368,30 @@ def test_report_shows_combined_noise_and_the_effective_gate(
     """
     from pm import schemas
 
+    for seat in ("PM_EVALUATOR_JITTER", "PM_EVALUATOR_B_JITTER", "PM_ARBITER_JITTER"):
+        monkeypatch.delenv(seat, raising=False)
     monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
     st = _state(aggregate=_agg(noise=0.5, noise_total=2.65, judge_jitter=2.6, ci_lower=6.1))
     text, _ = render_report(st)
     assert "评委复现性抖动 2.6" in text and "合成噪声带 2.65" in text
     assert "仲裁有效触发线" in text and "不是交叉验证变强了" in text
+    assert "两位座位各自的实测极差" not in text, "只有一个全局值时不许凭空造出按座位的读数"
+
+
+def test_report_names_each_seat_when_their_jitter_differs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """按座位填了抖动，触发线那一行必须交代它用的是哪两个数——
+    否则读者看到一个没填过的 3.18，会以为代码自己估了个新噪声。
+    """
+    from pm import schemas
+
+    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
+    monkeypatch.setenv("PM_EVALUATOR_JITTER", "0.7")
+    monkeypatch.setenv("PM_EVALUATOR_B_JITTER", "2.6")
+    st = _state(aggregate=_agg(noise=0.5, noise_total=2.65, judge_jitter=2.6, ci_lower=6.1))
+    text, _ = render_report(st)
+    assert "两位座位各自的实测极差 0.7/2.6" in text
 
 
 def test_report_stays_silent_about_jitter_when_it_was_never_measured() -> None:
