@@ -880,6 +880,256 @@
      "note": "pytest"
     }
    ]
+  },
+  {
+   "order_id": "LOB-20260922-4520",
+   "created_at": "2026-09-22 21:35:01",
+   "name": "pytest",
+   "phone": "13800138001",
+   "spec": "A",
+   "spec_label": "澳龙 600–800g（1 只装）",
+   "ref_price_cny": 399,
+   "qty": 1,
+   "amount_cny": 399,
+   "deliver_date": "",
+   "note": "",
+   "status": "pending",
+   "history": [
+    {
+     "ts": "2026-09-22 21:35:01",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    }
+   ]
+  },
+  {
+   "order_id": "LOB-20260922-B092",
+   "created_at": "2026-09-22 21:35:01",
+   "name": "trans",
+   "phone": "13800138003",
+   "spec": "B",
+   "spec_label": "澳龙 800g–1.2kg（1 只装）",
+   "ref_price_cny": 599,
+   "qty": 1,
+   "amount_cny": 599,
+   "deliver_date": "",
+   "note": "",
+   "status": "confirmed",
+   "history": [
+    {
+     "ts": "2026-09-22 21:35:01",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    },
+    {
+     "ts": "2026-09-22 21:35:01",
+     "action": "状态流转",
+     "status": "confirmed",
+     "note": "pytest"
+    }
+   ]
+  },
+  {
+   "order_id": "LOB-20260922-6370",
+   "created_at": "2026-09-22 22:14:30",
+   "name": "pytest",
+   "phone": "13800138001",
+   "spec": "A",
+   "spec_label": "澳龙 600–800g（1 只装）",
+   "ref_price_cny": 399,
+   "qty": 1,
+   "amount_cny": 399,
+   "deliver_date": "",
+   "note": "",
+   "status": "pending",
+   "history": [
+    {
+     "ts": "2026-09-22 22:14:30",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    }
+   ]
+  },
+  {
+   "order_id": "LOB-20260922-CCFD",
+   "created_at": "2026-09-22 22:14:30",
+   "name": "trans",
+   "phone": "13800138003",
+   "spec": "B",
+   "spec_label": "澳龙 800g–1.2kg（1 只装）",
+   "ref_price_cny": 599,
+   "qty": 1,
+   "amount_cny": 599,
+   "deliver_date": "",
+   "note": "",
+   "status": "confirmed",
+   "history": [
+    {
+     "ts": "2026-09-22 22:14:30",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    },
+    {
+     "ts": "2026-09-22 22:14:30",
+     "action": "状态流转",
+     "status": "confirmed",
+     "note": "pytest"
+    }
+   ]
+  },
+  {
+   "order_id": "LOB-20260922-EDE1",
+   "created_at": "2026-09-22 22:17:05",
+   "name": "pytest",
+   "phone": "13800138001",
+   "spec": "A",
+   "spec_label": "澳龙 600–800g（1 只装）",
+   "ref_price_cny": 399,
+   "qty": 1,
+   "amount_cny": 399,
+   "deliver_date": "",
+   "note": "",
+   "status": "pending",
+   "history": [
+    {
+     "ts": "2026-09-22 22:17:05",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    }
+   ]
+  },
+  {
+   "order_id": "LOB-20260922-2A58",
+   "created_at": "2026-09-22 22:17:05",
+   "name": "trans",
+   "phone": "13800138003",
+   "spec": "B",
+   "spec_label": "澳龙 800g–1.2kg（1 只装）",
+   "ref_price_cny": 599,
+   "qty": 1,
+   "amount_cny": 599,
+   "deliver_date": "",
+   "note": "",
+   "status": "confirmed",
+   "history": [
+    {
+     "ts": "2026-09-22 22:17:05",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    },
+    {
+     "ts": "2026-09-22 22:17:05",
+     "action": "状态流转",
+     "status": "confirmed",
+     "note": "pytest"
+    }
+   ]
+  },
+  {
+   "order_id": "LOB-20260922-312D",
+   "created_at": "2026-09-22 22:19:19",
+   "name": "pytest",
+   "phone": "13800138001",
+   "spec": "A",
+   "spec_label": "澳龙 600–800g（1 只装）",
+   "ref_price_cny": 399,
+   "qty": 1,
+   "amount_cny": 399,
+   "deliver_date": "",
+   "note": "",
+   "status": "pending",
+   "history": [
+    {
+     "ts": "2026-09-22 22:19:19",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    }
+   ]
+  },
+  {
+   "order_id": "LOB-20260922-9141",
+   "created_at": "2026-09-22 22:19:19",
+   "name": "trans",
+   "phone": "13800138003",
+   "spec": "B",
+   "spec_label": "澳龙 800g–1.2kg（1 只装）",
+   "ref_price_cny": 599,
+   "qty": 1,
+   "amount_cny": 599,
+   "deliver_date": "",
+   "note": "",
+   "status": "confirmed",
+   "history": [
+    {
+     "ts": "2026-09-22 22:19:19",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    },
+    {
+     "ts": "2026-09-22 22:19:19",
+     "action": "状态流转",
+     "status": "confirmed",
+     "note": "pytest"
+    }
+   ]
+  },
+  {
+   "order_id": "LOB-20260922-76ED",
+   "created_at": "2026-09-22 22:23:07",
+   "name": "pytest",
+   "phone": "13800138001",
+   "spec": "A",
+   "spec_label": "澳龙 600–800g（1 只装）",
+   "ref_price_cny": 399,
+   "qty": 1,
+   "amount_cny": 399,
+   "deliver_date": "",
+   "note": "",
+   "status": "pending",
+   "history": [
+    {
+     "ts": "2026-09-22 22:23:07",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    }
+   ]
+  },
+  {
+   "order_id": "LOB-20260922-26AF",
+   "created_at": "2026-09-22 22:23:07",
+   "name": "trans",
+   "phone": "13800138003",
+   "spec": "B",
+   "spec_label": "澳龙 800g–1.2kg（1 只装）",
+   "ref_price_cny": 599,
+   "qty": 1,
+   "amount_cny": 599,
+   "deliver_date": "",
+   "note": "",
+   "status": "confirmed",
+   "history": [
+    {
+     "ts": "2026-09-22 22:23:07",
+     "action": "创建订单",
+     "status": "pending",
+     "note": "demo 模拟数据"
+    },
+    {
+     "ts": "2026-09-22 22:23:07",
+     "action": "状态流转",
+     "status": "confirmed",
+     "note": "pytest"
+    }
+   ]
   }
  ]
 }

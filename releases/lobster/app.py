@@ -56,7 +56,7 @@ def _load() -> dict:
     try:
         data = json.loads(ORDERS.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"台账文件损坏：{e}（可用 backups 恢复，见交接文档）")
+        raise HTTPException(status_code=500, detail=f"台账文件损坏：{e}（可用 backups 恢复，见交接文档）") from e
     return data
 
 
@@ -167,7 +167,7 @@ def update_status(oid: str, request: Request, s: StatusIn | None = None):
     if s is None:
         raise HTTPException(status_code=422, detail="缺少请求体")
     if s.status not in STATUSES:
-        raise HTTPException(status_code=422, detail=f"无效状态 {s.status!r}，可选：{sorted(STATUSES)}")
+        raise HTTPException(status_code=422, detail=f"无效状态 {s.status!r}，可选：{sorted(STATUSES)}") from None
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     with _LOCK:
         data = _load()

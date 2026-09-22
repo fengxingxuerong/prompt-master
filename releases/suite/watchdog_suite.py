@@ -10,8 +10,13 @@
 告警写 releases/suite/watchdog_log.jsonl（含拉起动作留痕）。
 """
 import sys
+
 sys.stdout.reconfigure(encoding="utf-8")
-import json, time, subprocess, urllib.request, argparse
+import argparse
+import json
+import subprocess
+import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(r"D:\projects\prompt-master\releases")
@@ -46,7 +51,7 @@ def notify(source: str, message: str) -> None:
             f.write(_json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                  "source": source, "message": message},
                                 ensure_ascii=False) + "\n")
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 def _check_stale_tasks() -> None:
     """M2.2：任务台账 pending/处理中超 24h → 落提醒通知（每次巡检最多提醒一次/任务）。"""
@@ -60,7 +65,7 @@ def _check_stale_tasks() -> None:
         if marker.exists():
             try:
                 seen = json.loads(marker.read_text(encoding="utf-8"))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 seen = {}
         changed = False
         for t in data.get("tasks", []):
@@ -71,7 +76,7 @@ def _check_stale_tasks() -> None:
             due = t.get("due") or ""
             try:
                 overdue_h = (now - time.mktime(time.strptime(due, "%Y-%m-%d"))) / 3600.0
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
             if overdue_h >= 24 and seen.get(tid) != due:
                 notify("watchdog", f"任务 {tid} 已到期超 24h 未处理（due={due}）：{t.get('title', '')[:40]}", level="warn",
@@ -80,7 +85,7 @@ def _check_stale_tasks() -> None:
                 changed = True
         if changed:
             marker.write_text(json.dumps(seen, ensure_ascii=False, indent=1), encoding="utf-8")
-    except Exception as e:  # noqa: BLE001 - 提醒失败不影响巡检
+    except Exception as e:
         print(f"[watchdog] stale-task check failed: {e}")
 
 def _rotate_ledgers() -> None:
@@ -90,7 +95,7 @@ def _rotate_ledgers() -> None:
         ns: dict = {}
         exec(compile(rot.read_text(encoding="utf-8"), str(rot), "exec"), ns)
         ns["rotate"]()
-    except Exception as exc:  # noqa: BLE001 - 轮转失败不影响巡检
+    except Exception as exc:
         print(f"[watchdog] rotate check failed: {exc}")
 
 def patrol() -> list[str]:

@@ -78,7 +78,7 @@ def stream_upstream(
             model_out = str(model)
 
             def synth() -> Iterator[bytes]:
-                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode("utf-8")
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode()
                 yield b"data: [DONE]\n\n"
 
             return model_out, synth()

@@ -24,9 +24,9 @@ import json
 import os
 import threading
 import time
-import uuid
-import urllib.request
 import urllib.error
+import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
 

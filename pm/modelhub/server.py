@@ -25,8 +25,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response  # noqa: E402
-from fastapi.responses import StreamingResponse, HTMLResponse  # noqa: E402
+from fastapi import FastAPI, Header, HTTPException, Response  # noqa: E402
+from fastapi.responses import HTMLResponse, StreamingResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -40,7 +40,7 @@ from pm.modelhub.pool import (  # noqa: E402
     ModelPoolExhaustedError,
 )
 from pm.modelhub.streaming import stream_upstream  # noqa: E402
-from pm.modelhub.usage_store import record_call, load_daily  # noqa: E402
+from pm.modelhub.usage_store import load_daily, record_call  # noqa: E402
 from pm.modelhub.vkeys import get_agent_store, get_vkey_store  # noqa: E402
 
 app = FastAPI(title="ModelHub Gateway", version="1.1.0")
@@ -144,10 +144,10 @@ def _resolve_role_and_messages(req: ChatRequest) -> tuple[list[dict], str | None
         try:
             system_prompt = registry.render_system_prompt(role_name)
         except ConfigError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+            raise HTTPException(status_code=422, detail=str(e)) from e
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
     if system_prompt and not any(m.get("role") == "system" for m in messages):
-        messages = [{"role": "system", "content": system_prompt}] + messages
+        messages = [*({"role": "system", "content": system_prompt},), *messages]
     return messages, agent, role_name
 
 
@@ -177,7 +177,7 @@ def list_models(
     try:
         models = _hub_instance().list_models()
     except ConfigError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     return {
         "object": "list",
         "data": [
@@ -206,11 +206,9 @@ def chat_completions(
     except HTTPException:
         raise
     vk_agent = (vk_rec or {}).get("agent")
-    agent = (req.agent or "").strip() or vk_agent
     # 用 vk- 时 agent 以密钥归属为准（防伪造归属）
     if vk_rec is not None and vk_agent:
         req.agent = vk_agent
-        agent = vk_agent
 
     messages, agent_resolved, role_name = _resolve_role_and_messages(req)
     params = _params_of(req)
@@ -224,14 +222,14 @@ def chat_completions(
             messages, model=req.model, agent=agent_resolved, role=role_name, stream=False, **params
         )
     except ConfigError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except ModelPoolExhaustedError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
     except GatewayError as e:
         raise HTTPException(
             status_code=(e.http_status if e.http_status and e.http_status >= 400 else 502),
             detail=str(e),
-        )
+        ) from e
 
     record_call(model=result["model"], agent=agent_resolved or "(unattributed)",
                 role=role_name or "", success=True, latency_ms=result["latency_ms"],
@@ -307,7 +305,7 @@ def _stream_response(
             else:
                 append_switch = False
             try:
-                upstream_model, gen = stream_upstream(
+                _upstream_model, gen = stream_upstream(
                     entry.base_url, entry.api_key,
                     {"model": entry.upstream_model, "messages": messages, **params},
                     timeout,
@@ -335,7 +333,6 @@ def _stream_response(
 
     try:
         entry, first, gen = attempt_stream()
-        degraded = False
     except ModelPoolExhaustedError as stream_err:
         # 降级兑底：全部模型流式失败（常见为上游对 stream=true 能力性拒绝）→
         # 改走非流式（带 D-009 重试/切换全语义），把整段正文合成为 SSE 分块。
@@ -353,12 +350,12 @@ def _stream_response(
                 error_type="ModelPoolExhaustedError", error_msg=f"stream+fallback both failed: {e}"[:300],
                 agent=agent, role=role, content_chars=None,
             )
-            raise HTTPException(status_code=502, detail=str(e))
+            raise HTTPException(status_code=502, detail=str(e)) from None
         except GatewayError as e:
             raise HTTPException(
                 status_code=(e.http_status if e.http_status and e.http_status >= 400 else 502),
                 detail=str(e),
-            )
+            ) from e
         from pm.modelhub.ledger import append_call_event
 
         append_call_event(
@@ -369,7 +366,6 @@ def _stream_response(
             content_chars=len(result["content"]),
         )
         entry = None
-        degraded = True
         stream_err_text = str(stream_err)[:200]
 
         cid = "chatcmpl-" + uuid.uuid4().hex[:20]
@@ -383,15 +379,16 @@ def _stream_response(
             "model": result["model"],
             "choices": [{"index": 0, "delta": {"content": result["content"]}, "finish_reason": None}],
         }
+        _degraded_info = {"modelhub": {"degraded": True, "note": "upstream rejected stream=true; "
+                          "served non-stream + synthesized SSE", "last_stream_error": stream_err_text,
+                          "request_id": request_id}}
         done_note = (
-            f"data: {json.dumps({'modelhub': {'degraded': True, 'note': 'upstream rejected stream=true; '
-                                      f'served non-stream + synthesized SSE', 'last_stream_error': stream_err_text,
-                                      'request_id': request_id}}, ensure_ascii=False)}\n\n"
+            "data: " + json.dumps(_degraded_info, ensure_ascii=False) + "\n\n"
         )
 
         def synth_gen():
-            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode("utf-8")
-            yield f"data: {json.dumps(body_chunk, ensure_ascii=False)}\n\n".encode("utf-8")
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode()
+            yield f"data: {json.dumps(body_chunk, ensure_ascii=False)}\n\n".encode()
             yield done_note.encode("utf-8")
             yield b"data: [DONE]\n\n"
 
@@ -412,7 +409,7 @@ def _stream_response(
         import queue
         import threading
 
-        q: "queue.Queue[bytes | None | str]" = queue.Queue()
+        q: queue.Queue[bytes | str | None] = queue.Queue()
         HEARTBEAT = 15.0
 
         def pump():
@@ -427,7 +424,7 @@ def _stream_response(
         threading.Thread(target=pump, daemon=True, name=f"sse-pump-{request_id}").start()
 
         def hb_comment() -> bytes:
-            return f": keep-alive {int(time.time())}\n\n".encode("utf-8")
+            return f": keep-alive {int(time.time())}\n\n".encode()
 
         try:
             while True:
@@ -456,7 +453,7 @@ def _stream_response(
             yield (
                 "data: " + json.dumps(
                     {"error": {"message": f"stream interrupted: {err_in_stream}"}}, ensure_ascii=False)
-                ) + "\n\n".encode("utf-8")
+                ) + b"\n\n"
         finally:
             if ok:
                 hub._mark_success(entry)
@@ -493,7 +490,7 @@ def issue_key(
     try:
         rec = get_vkey_store().issue(req.agent, note=req.note)
     except ConfigError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e)) from e
     return {"ok": True, "key": rec}
 
 
@@ -507,7 +504,7 @@ def patch_key(
     try:
         rec = get_vkey_store().set_enabled(key, req.enabled)
     except ConfigError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     return {"ok": True, "key": rec}
 
 
@@ -700,7 +697,7 @@ def list_roles(
     try:
         names = registry.role_names()
     except ConfigError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     return {"roles": names, "note": "角色系统提示词固定在 config/roles.json，模型切换不影响"}
 
 

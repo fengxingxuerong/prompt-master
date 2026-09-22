@@ -1,5 +1,6 @@
 """JSONL 台账轮转 v2（修复 with_suffix 误用：直接用文件名字符串拼接）。"""
 import sys
+
 sys.stdout.reconfigure(encoding="utf-8")
 from pathlib import Path
 

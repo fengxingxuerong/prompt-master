@@ -25,6 +25,6 @@ __all__ = [
     "ModelEntry",
     "ModelHub",
     "ModelPoolExhaustedError",
-    "query_ledger",
     "ledger_stats",
+    "query_ledger",
 ]

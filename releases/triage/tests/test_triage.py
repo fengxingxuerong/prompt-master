@@ -169,3 +169,60 @@ def test_sse_emits_progress_and_done(client):
         assert resp.status_code == 200
         body = b"".join(resp.iter_raw()).decode("utf-8")
     assert "event: done" in body and '"status": "done"' in body
+
+
+def test_api_notifications_endpoint(client, tmp_path, monkeypatch):
+    """通知列表端点：notify 落盘后可经 API 回读。"""
+    from notify_center import notify
+
+    monkeypatch.setattr(triage, "APP_DIR", tmp_path)
+    monkeypatch.setattr(triage, "DATA", tmp_path)
+    notify("triage", "端点通知演练", base_dir=tmp_path / "data")
+    r = client.get("/api/notifications?limit=10")
+    assert r.status_code == 200
+    assert any(i["message"] == "端点通知演练" for i in r.json()["items"])
+
+
+def test_api_notify_test_and_config(client):
+    r = client.post("/api/notify-test", json={"message": "链路自检"})
+    assert r.status_code == 200 and r.json()["file"] is True
+    cfg = client.get("/api/notify-config")
+    assert cfg.status_code == 200 and cfg.json()["enabled"] is False
+
+
+def test_api_gateway_metrics_proxy(client):
+    """代理端点：网关正常→透传；离线→offline 标记（两态都算通过）。"""
+    r = client.get("/api/gateway-metrics")
+    assert r.status_code == 200
+    d = r.json()
+    assert ("modelhub_calls_total" in d) or (d.get("offline") is True)
+
+
+def test_health_file_corrupt_fallback(tmp_path, monkeypatch):
+    """健康度文件损坏 → bump 从坏状态恢复写（D-013 教训）。"""
+    p = tmp_path / "reviewer_health.json"
+    p.write_text("bad{", encoding="utf-8")
+    monkeypatch.setattr(triage, "HEALTH_FILE", p)
+    triage.bump_health("评委Z", True)
+    assert triage.load_health()["评委Z"]["streak_fail"] == 0
+
+
+def test_reviewer_health_endpoint(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(triage, "HEALTH_FILE", tmp_path / "h.json")
+    triage.bump_health("评委W", True)
+    r = client.get("/api/reviewer_health")
+    assert r.status_code == 200 and r.json()["评委W"]["total_ok"] == 1
+
+
+def test_session_404(client):
+    assert client.get("/api/sessions/SES-NOPE").status_code == 404
+
+
+def test_static_file_404(client):
+    """静态路由：不存在的文件→404；路径穿越被拒。"""
+    assert client.get("/static/nope.html").status_code == 404
+    assert client.get("/static/..%2Fapp.py").status_code in (404, 307)
+
+
+def test_static_cost_board_served(client):
+    assert client.get("/static/cost-board.html").status_code == 200

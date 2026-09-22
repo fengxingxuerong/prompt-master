@@ -12,9 +12,8 @@ from __future__ import annotations
 import json
 import threading
 import time
-from pathlib import Path
-
 import urllib.request
+from pathlib import Path
 
 _lock = threading.Lock()
 
@@ -51,7 +50,7 @@ def notify(source: str, message: str, level: str = "info", base_dir: Path | None
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "source": source,
            "level": level, "message": message}
     base = base_dir or Path(__file__).resolve().parent / "data"
-    ledger, cfg_path = _paths(base)
+    ledger, _cfg_path = _paths(base)
 
     file_ok = False
     with _lock:

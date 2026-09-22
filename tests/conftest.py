@@ -24,7 +24,7 @@ import pytest
 # ---------------------------------------------------------------------------
 _os.environ.pop("PM_JUDGE_JITTER", None)
 
-from pm import schemas as _pm_schemas  # noqa: E402
+from pm import schemas as _pm_schemas
 
 _pm_schemas.JUDGE_JITTER = 0.0
 

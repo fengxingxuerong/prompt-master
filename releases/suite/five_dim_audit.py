@@ -4,8 +4,13 @@
 输出：releases/suite/five_dim_<label>.json
 """
 import sys
+
 sys.stdout.reconfigure(encoding="utf-8")
-import json, os, re, time, urllib.request, urllib.error
+import json
+import re
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(r"D:\projects\prompt-master")

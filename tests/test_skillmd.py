@@ -110,22 +110,17 @@ def test_render_rejects_no_versions():
         render_skill_md(st)
 
 
-@pytest.mark.skipif(
-    True,
-    reason=(
-        "空转测试（tautology）：原实现只断言了自己刚写进 state 的值，"
-        "并未调用 evaluate_node。真实覆盖已迁至 tests/test_injection_gate.py"
-        "（真正调用 evaluate_node，含变异测试验证）。保留此桩以免将来误以为已覆盖。"
-    ),
-)
 def test_gate_blocks_passed_in_evaluate_node():
-    """已迁至 tests/test_injection_gate.py::test_hijacked_injection_forces_not_passed。"""
-    st = _state(
-        status="running",
-        injection_survival={"total": 1, "hijacked": 1, "details": ["[case#0] 劫持"]},
-        iteration=1,
-    )
-    assert st.get("injection_survival")["hijacked"] == 1
+    """覆盖迁移守卫（原空转测试已退役，2026-09-22 满分冲刺）。
+
+    真实覆盖在 tests/test_injection_gate.py::test_hijacked_injection_forces_not_passed
+    （真正调用 evaluate_node，含变异测试验证）。本守卫确保那条迁移不被悄悄删掉。
+    """
+    import test_injection_gate
+
+    assert hasattr(
+        test_injection_gate, "test_hijacked_injection_forces_not_passed"
+    ), "覆盖迁移丢失：evaluate_node 的 gate 阻断用例必须存在于 test_injection_gate.py"
 
 
 def test_skillmd_uses_best_note_when_not_passed():

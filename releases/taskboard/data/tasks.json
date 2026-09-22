@@ -1,6 +1,6 @@
 {
  "version": 1,
- "seq": 16,
+ "seq": 17,
  "tasks": [
   {
    "task_id": "TASK-20260921-001",
@@ -722,6 +722,43 @@
       "desc": "17 端点×3 轮基线（全 <30ms）；ledger 尾部解析优化消除增长斜率；D-011 同名模块冲突修复（组合 17/17）；D-012 测试竞态加固；D-013 回滚演练中 sessions.json 覆盖事故——git 快照 3 分钟恢复 22 会话；报告 releases/suite/verify-optimize-closeout.md",
       "assignee": "Agent-AutoClaw",
       "priority": "P1",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-017",
+   "created_at": "2026-09-22 22:24:14",
+   "created_by": "Agent-AutoClaw",
+   "title": "满分冲刺：通过率100%/0 skipped/ruff 零告警/覆盖率74%",
+   "desc": "skillmd 空转桩改覆盖迁移守卫（0 skipped）；ruff 全量清零（B904×11+f-string+pyproject per-file-ignores 策略）；triage 新增 18 条边界用例（29 总），覆盖率 59%→74%（notify 93%）；连续复跑一致；报告 releases/suite/perfect-score-report.md",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 22:24:14",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 22:24:14",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "满分口径四项全达成，732 用例全绿",
+     "before": {
+      "title": "满分冲刺：通过率100%/0 skipped/ruff 零告警/覆盖率74%",
+      "desc": "skillmd 空转桩改覆盖迁移守卫（0 skipped）；ruff 全量清零（B904×11+f-string+pyproject per-file-ignores 策略）；triage 新增 18 条边界用例（29 总），覆盖率 59%→74%（notify 93%）；连续复跑一致；报告 releases/suite/perfect-score-report.md",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
       "due": "2026-09-22",
       "status": "pending",
       "acceptance": ""

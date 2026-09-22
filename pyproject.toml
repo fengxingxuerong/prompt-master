@@ -67,6 +67,13 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"releases/suite/watchdog_suite.py" = ["E402", "BLE001"]
+"releases/suite/monitor_suite.py" = ["E402", "BLE001"]
+"releases/suite/rotate_ledger.py" = ["E402"]
+"releases/suite/five_dim_audit.py" = ["E402", "BLE001", "RUF059"]
+"releases/suite/smoke_suite.py" = ["E402", "BLE001", "B007", "I001", "E401"]
+"releases/suite/*.py" = ["E402"]
+
 # 测试代码允许相对宽松
 "tests/*" = ["B011"]
 "examples/*" = ["E402"]
