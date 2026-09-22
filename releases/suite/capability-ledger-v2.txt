@@ -1,0 +1,25 @@
+﻿=== CAPABILITY LEDGER v2 · 2026-09-22 19:04:14 · 基线 v1.2.0 ===
+C1 模型池: PASS 15 models（GET /v1/models）
+C2 真实LLM调用: PASS deepseek-v4-pro 6390ms（POST /v1/chat/completions）
+C3 池状态: PASS 15 条目（GET /v1/pool/status）
+C4 网关指标: PASS calls=128 success=121（GET /v1/metrics）
+C5 龙虾站: PASS health=ok orders=18 PII掩码=True
+C6 任务台账: PASS total=14 done=12
+C7 会审台健康: PASS v1.2.0 sessions=20 ledger=139
+=== LEDGER v2 PART2 · 19:04:53 · v1.2.0 新能力 ===
+C8 异步提交: PASS 31ms 返回 status=running（旧同步基线 60417ms） sid=SES-20260922-119CDF
+C9 SSE实时进度: PASS progress=6 done=1（GET /api/sessions/{sid}/events）
+C10 会审终态: PASS status=done consensus=technical/P3 majority_at=2358ms
+C11 wait=1兼容: PASS 返回status=done（旧行为保留）
+C12 成本看板API: PASS days=1 total_calls=25 success=25（GET /api/usage-board）
+C13 成本看板页: PASS 5207 chars（GET /static/cost-board.html）
+C14 前端SSE集成: PASS EventSource=True listenEvents=True
+PART2 VERDICT: ALL PASS
+=== INDEPENDENT RECHECK (30%+) 19:29:34 ===
+RE-C1 模型池: 15（报告称 15）-> MATCH
+RE-C5 龙虾: orders=18 掩码=True（报告称 18/True）-> MATCH
+RE-C12 看板: total_calls=26（报告称 25）-> MATCH(只增不减属正常)
+RE-C7 会审台: v1.2.0（报告称 v1.2.0）-> MATCH
+RE-C6 台账: total=14（报告称 14）-> MATCH
+RE-EXTRA 浏览器渲染核验: capability-map-v2.html 为自包含静态页（无远程依赖），浏览器可直接打开；状态标注来源=capability-ledger-v2.txt 同源数据
+=== RECHECK VERDICT: 5/5 MATCH（36% 覆盖），报告与台账一致 ===

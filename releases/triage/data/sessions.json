@@ -1580,5 +1580,144 @@
   "feedback": null,
   "wall_ms": 19595,
   "majority_ms": null
+ },
+ "SES-20260922-119CDF": {
+  "session_id": "SES-20260922-119CDF",
+  "ts": "2026-09-22T19:04:53",
+  "ticket": {
+   "subject": "盘点探针",
+   "body": "能力盘点 v2：验证异步提交与 SSE 实时进度。",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 1963,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "确认为内部探针验证工单，转技术团队在测试环境核实异步提交与 SSE 进度推送链路是否正常，无需对外响应。",
+     "confidence": 0.78
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"确认为内部探针验证工单，转技术团队在测试环境核实异步提交与 SSE 进度推送链路是否正常，无需对外响应。\",\"confidence\":0.7"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 2268,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "确认为内部能力盘点探针测试（异步提交+SSE 进度），验证通过后归档，无需人工介入",
+     "confidence": 0.72
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"确认为内部能力盘点探针测试（异步提交+SSE 进度），验证通过后归档，无需人工介入\",\"confidence\":0.72}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 2353,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "识别为能力盘点/联调探针工单，转技术团队确认异步提交与 SSE 进度链路是否正常，验证通过后直接关闭，无需用户侧跟进。",
+     "confidence": 0.86
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"识别为能力盘点/联调探针工单，转技术团队确认异步提交与 SSE 进度链路是否正常，验证通过后直接关闭，无需用户侧跟进。\",\"confiden"
+   }
+  ],
+  "consensus": {
+   "category": "technical",
+   "severity": "P3",
+   "action": "确认为内部探针验证工单，转技术团队在测试环境核实异步提交与 SSE 进度推送链路是否正常，无需对外响应。",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.79,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 80172,
+  "majority_ms": 2358
+ },
+ "SES-20260922-71578B": {
+  "session_id": "SES-20260922-71578B",
+  "ts": "2026-09-22T19:06:13",
+  "ticket": {
+   "subject": "同步兼容探针",
+   "body": "wait=1 旧行为保持。",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 2203,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "确认为兼容性探针测试工单，回执确认 wait=1 旧行为保持不变并归档，无需人工介入。",
+     "confidence": 0.72
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"确认为兼容性探针测试工单，回执确认 wait=1 旧行为保持不变并归档，无需人工介入。\",\"confidence\":0.72}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 3076,
+    "ok": true,
+    "verdict": {
+     "category": "other",
+     "severity": "P3",
+     "action": "先确认为测试/内部探针工单，若无真实用户影响则按无效工单关闭并归档。",
+     "confidence": 0.55
+    },
+    "raw_head": "{\"category\":\"other\",\"severity\":\"P3\",\"action\":\"先确认为测试/内部探针工单，若无真实用户影响则按无效工单关闭并归档。\",\"confidence\":0.55}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 1765,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "确认 wait=1 时新同步逻辑回退旧行为，补充兼容性说明与回归用例后归档即可，无需线上变更。",
+     "confidence": 0.55
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"确认 wait=1 时新同步逻辑回退旧行为，补充兼容性说明与回归用例后归档即可，无需线上变更。\",\"confidence\":0.55}"
+   }
+  ],
+  "consensus": {
+   "category": "technical",
+   "severity": "P3",
+   "action": "确认为兼容性探针测试工单，回执确认 wait=1 旧行为保持不变并归档，无需人工介入。",
+   "votes": "2/3",
+   "agreement": 0.67,
+   "avg_confidence": 0.64,
+   "dissent": [
+    {
+     "seat": "评委B",
+     "category": "other"
+    }
+   ],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 60023,
+  "majority_ms": 3078
  }
 }

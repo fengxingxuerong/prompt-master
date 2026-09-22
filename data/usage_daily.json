@@ -1,10 +1,10 @@
 {
  "2026-09-22": {
-  "calls": 13,
-  "success": 13,
-  "latency_ms_sum": 262627,
-  "content_chars_sum": 1068,
-  "failovers_sum": 2,
+  "calls": 26,
+  "success": 26,
+  "latency_ms_sum": 539957,
+  "content_chars_sum": 2372,
+  "failovers_sum": 6,
   "by_model": {
    "deepseek-v4-flash": {
     "calls": 4,
@@ -19,12 +19,16 @@
     "success": 3
    },
    "step-step-5-preview": {
-    "calls": 2,
-    "success": 2
+    "calls": 4,
+    "success": 4
    },
    "amd-qwen3.8-27b": {
-    "calls": 2,
-    "success": 2
+    "calls": 4,
+    "success": 4
+   },
+   "deepseek-v4-pro": {
+    "calls": 9,
+    "success": 9
    }
   }
  }
