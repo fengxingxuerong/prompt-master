@@ -1,0 +1,26 @@
+{
+ "ts": "2026-09-22T23:14:08",
+ "note": "no gzip, no cache headers",
+ "endpoints": {
+  "GET / (index)": {
+   "median_ms": 18.5,
+   "median_bytes": 12304
+  },
+  "GET /static/cost-board.html": {
+   "median_ms": 3.2,
+   "median_bytes": 6763
+  },
+  "GET /api/ledger?limit=50": {
+   "median_ms": 4.4,
+   "median_bytes": 15294
+  },
+  "GET /api/sessions": {
+   "median_ms": 2.8,
+   "median_bytes": 2601
+  },
+  "GET /api/usage-board": {
+   "median_ms": 2.3,
+   "median_bytes": 820
+  }
+ }
+}

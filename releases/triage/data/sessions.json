@@ -1719,5 +1719,72 @@
   "feedback": null,
   "wall_ms": 60023,
   "majority_ms": 3078
+ },
+ "SES-20260922-607987": {
+  "session_id": "SES-20260922-607987",
+  "ts": "2026-09-22T23:16:12",
+  "ticket": {
+   "subject": "gzip后SSE验证",
+   "body": "验证压缩中间件不影响 SSE 流式推送。",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 2546,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "运行压缩中间件与SSE联调测试，确认流式推送未被缓冲，输出测试报告",
+     "confidence": 0.8
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"运行压缩中间件与SSE联调测试，确认流式推送未被缓冲，输出测试报告\",\"confidence\":0.8}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 3475,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "转交技术支持团队验证gzip中间件对SSE流式推送的影响并反馈结果",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"转交技术支持团队验证gzip中间件对SSE流式推送的影响并反馈结果\",\"confidence\":0.9}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 3799,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "转交技术团队在24小时内完成gzip压缩中间件对SSE流式推送影响的验证测试并反馈结果",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"转交技术团队在24小时内完成gzip压缩中间件对SSE流式推送影响的验证测试并反馈结果\",\"confidence\":0.95}"
+   }
+  ],
+  "consensus": {
+   "category": "technical",
+   "severity": "P3",
+   "action": "运行压缩中间件与SSE联调测试，确认流式推送未被缓冲，输出测试报告",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.88,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 60177,
+  "majority_ms": 3878
  }
 }

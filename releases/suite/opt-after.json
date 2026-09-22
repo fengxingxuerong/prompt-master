@@ -1,0 +1,35 @@
+{
+ "ts": "2026-09-22T23:15:50",
+ "endpoints": {
+  "GET / (index)": {
+   "median_ms": 17.1,
+   "wire_bytes": 4667,
+   "encoding": "gzip",
+   "cache": "no-cache"
+  },
+  "GET /static/cost-board.html": {
+   "median_ms": 3.1,
+   "wire_bytes": 2860,
+   "encoding": "gzip",
+   "cache": "public, max-age=300"
+  },
+  "GET /api/ledger?limit=50": {
+   "median_ms": 16.1,
+   "wire_bytes": 1694,
+   "encoding": "gzip",
+   "cache": "-"
+  },
+  "GET /api/sessions": {
+   "median_ms": 12.2,
+   "wire_bytes": 647,
+   "encoding": "gzip",
+   "cache": "-"
+  },
+  "GET /api/usage-board": {
+   "median_ms": 12.5,
+   "wire_bytes": 820,
+   "encoding": "identity",
+   "cache": "-"
+  }
+ }
+}

@@ -22,7 +22,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from notify_center import list_notifications, load_config, notify
 from pydantic import BaseModel, Field
@@ -61,8 +60,7 @@ MAJORITY = 3          # ≥3 有效票即提前汇总
 UNHEALTHY_STREAK = 2  # 连续失败 2 次即视为不健康（不阻塞汇总）
 
 _lock = threading.Lock()
-app = FastAPI(title="Triage Panel", version="1.3.1")
-app.add_middleware(GZipMiddleware, minimum_size=1024)
+app = FastAPI(title="Triage Panel", version="1.1.0")
 
 
 # ---------- 基础设施 ----------
@@ -73,26 +71,13 @@ def append_ledger(rec: dict) -> None:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
-_sessions_cache: dict = {"mtime": 0.0, "data": {}}
-
-
 def load_sessions() -> dict:
-    """perf：mtime 缓存——文件未变时直接返回内存副本（perf-opt 2026-09-22）。"""
-    try:
-        mtime = SESSIONS.stat().st_mtime if SESSIONS.exists() else 0.0
-    except OSError:
-        mtime = 0.0
-    if mtime and mtime == _sessions_cache["mtime"]:
-        return _sessions_cache["data"]
     if not SESSIONS.exists():
         return {}
     try:
-        data = json.loads(SESSIONS.read_text(encoding="utf-8"))
+        return json.loads(SESSIONS.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {}
-    _sessions_cache["mtime"] = mtime
-    _sessions_cache["data"] = data
-    return data
 
 
 def save_sessions(all_sessions: dict) -> None:
@@ -537,23 +522,14 @@ def health():
     led_n = 0
     if LEDGER.exists():
         led_n = len(LEDGER.read_text(encoding="utf-8").strip().splitlines())
-    return {"status": "ok", "service": "triage-panel", "version": "1.3.1",
+    return {"status": "ok", "service": "triage-panel", "version": "1.3.0",
             "reviewers": len(REVIEWERS), "ledger_entries": led_n,
             "sessions": len(load_sessions())}
 
 
 @app.get("/")
 def index():
-    return FileResponse(APP_DIR / "static" / "index.html", headers={"Cache-Control": "no-cache"})
-
-
-@app.get("/static/{name}")
-def static_file_cached(name: str):
-    f = APP_DIR / "static" / name
-    if not f.exists() or ".." in name:
-        from fastapi import HTTPException
-        raise HTTPException(404, "not found")
-    return FileResponse(f, headers={"Cache-Control": "public, max-age=300"})
+    return FileResponse(APP_DIR / "static" / "index.html")
 
 
 @app.get("/static/{name}")

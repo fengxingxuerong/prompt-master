@@ -1,37 +1,37 @@
 {
  "评委C": {
   "streak_fail": 0,
-  "total_ok": 13,
+  "total_ok": 14,
   "total_fail": 2,
   "unhealthy": false
  },
  "评委B": {
   "streak_fail": 0,
-  "total_ok": 14,
+  "total_ok": 15,
   "total_fail": 1,
   "unhealthy": false
  },
  "评委E": {
   "streak_fail": 0,
-  "total_ok": 15,
+  "total_ok": 16,
   "total_fail": 1,
   "unhealthy": false
  },
  "评委A": {
   "streak_fail": 0,
-  "total_ok": 13,
+  "total_ok": 14,
   "total_fail": 1,
   "unhealthy": false
  },
  "评委F": {
-  "streak_fail": 0,
+  "streak_fail": 1,
   "total_ok": 11,
-  "total_fail": 5,
+  "total_fail": 6,
   "unhealthy": false
  },
  "评委D": {
-  "streak_fail": 1,
-  "total_ok": 12,
+  "streak_fail": 0,
+  "total_ok": 13,
   "total_fail": 4,
   "unhealthy": false
  }
