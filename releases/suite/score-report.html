@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PromptMaster Suite 项目评分报告 · 87.9/100</title>
+<style>
+:root{--navy:#1b2a4a;--navy2:#24365e;--ink:#1c2733;--mut:#6b7686;--paper:#f7f7f4;--line:#d9dcd6;--ok:#1e7f5c;--part:#c98a1e;--no:#b3493f;--blue:#2f5fbd;--mono:"Cascadia Code",Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font:14.5px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;padding:52px 24px}
+.wrap{max-width:1060px;margin:0 auto}
+header{border-bottom:3px solid var(--navy);padding-bottom:24px;margin-bottom:30px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:14px}
+.kicker{color:var(--blue);font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;font-family:var(--mono)}
+h1{font-size:30px;font-weight:700;color:var(--navy);margin-top:6px}
+.stamp{font-family:var(--mono);font-size:12px;color:var(--mut);text-align:right;line-height:1.6}
+.total{background:var(--navy);color:#fff;padding:26px 30px;margin:0 0 28px;display:flex;align-items:center;gap:26px;flex-wrap:wrap}
+.total .score{font-size:56px;font-weight:700;font-family:var(--mono);line-height:1}
+.total .score small{font-size:20px;color:#8db3ff}
+.total .label{font-size:14px;line-height:1.8}
+.total .label b{color:#8db3ff}
+h2{font-size:17px;font-weight:700;color:var(--navy);margin:34px 0 12px;display:flex;align-items:center;gap:10px}
+h2 .num{font-family:var(--mono);font-size:12.5px;color:var(--mut);font-weight:400}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);font-size:13.2px;margin:10px 0 26px}
+th{background:var(--navy);color:#fff;text-align:left;padding:9px 12px;font-weight:600;font-size:11.5px;letter-spacing:.04em}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.mono{font-family:var(--mono);font-size:11.8px;color:#3d4a5c}
+.bars{background:#fff;border:1px solid var(--line);padding:20px 22px;margin:12px 0 28px}
+.bar-row{display:grid;grid-template-columns:170px 1fr 56px;gap:12px;align-items:center;margin:10px 0;font-size:13px}
+.bar-track{background:#e8ebf2;height:16px;position:relative}
+.bar-fill{position:absolute;inset:0;background:var(--blue)}
+.bar-fill.dim{background:#8397b8}
+.formula{background:var(--navy2);color:#dfe6f5;padding:18px 22px;font-family:var(--mono);font-size:13.5px;line-height:2;margin:12px 0 26px;border-radius:4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0 26px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+.panel{background:#fff;border:1px solid var(--line);padding:18px 20px}
+.panel h3{font-size:12.5px;color:var(--navy);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;font-family:var(--mono)}
+.panel li{margin:7px 0 7px 18px;font-size:13.5px}
+footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--mut);font-size:12px;font-family:var(--mono);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <div class="kicker">PromptMaster Suite · Project Scoring Report</div>
+    <h1>项目评分报告</h1>
+  </div>
+  <div class="stamp">评分对象：全套件（tag v1.4.3 · 5b117fb）<br>依据：当日实测数据 · 五维加权 100 分制 · 2026-09-22</div>
+</header>
+
+<div class="total">
+  <div class="score">87.9<small> / 100</small></div>
+  <div class="label">
+    <b>锚点定位：生产就绪，可交付团队使用（85+ 档）</b><br>
+    总分 = 88×0.30 + 90×0.25 + 82×0.20 + 93×0.15 + 86×0.10<br>
+    <span style="font-family:var(--mono);font-size:12.5px">= 26.4 + 22.5 + 16.4 + 13.95 + 8.6 = 87.85 ≈ 87.9（任何人可按此式复算）</span>
+  </div>
+</div>
+
+<h2><span class="num">01</span>维度与权重</h2>
+<table>
+  <tr><th>维度</th><th>权重</th><th>评估口径</th></tr>
+  <tr><td><b>A 功能完成度</b></td><td class="mono">30%</td><td>承诺能力落地比例 + 核心路径可用性</td></tr>
+  <tr><td><b>B 技术质量</b></td><td class="mono">25%</td><td>测试覆盖、缺陷密度、代码结构、性能</td></tr>
+  <tr><td><b>C 产品价值</b></td><td class="mono">20%</td><td>解决什么问题、对谁有价值、离可用生产的距离</td></tr>
+  <tr><td><b>D 工程纪律与可维护性</b></td><td class="mono">15%</td><td>版本管理、文档、留痕、回滚、交接</td></tr>
+  <tr><td><b>E 创新性</b></td><td class="mono">10%</td><td>相对同类方案差异化程度</td></tr>
+</table>
+<p class="note" style="color:var(--mut);font-size:12.5px">锚点：100=可对外商业化运营 · 85+=生产就绪可交付团队 · 70+=个人生产可用 · 60+=功能完整但工程化有缺口。材料缺失项：无（全部维度有当日实测数据支撑）。</p>
+
+<h2><span class="num">02</span>分项得分与证据</h2>
+<div class="bars">
+  <div class="bar-row"><span>A 功能完成度 <b>88</b></span><div class="bar-track"><div class="bar-fill" style="width:88%"></div></div><span class="mono">26.4 分</span></div>
+  <div class="bar-row"><span>B 技术质量 <b>90</b></span><div class="bar-track"><div class="bar-fill" style="width:90%"></div></div><span class="mono">22.5 分</span></div>
+  <div class="bar-row"><span>C 产品价值 <b>82</b></span><div class="bar-track"><div class="bar-fill" style="width:82%"></div></div><span class="mono">16.4 分</span></div>
+  <div class="bar-row"><span>D 工程纪律 <b>93</b></span><div class="bar-track"><div class="bar-fill" style="width:93%"></div></div><span class="mono">13.95 分</span></div>
+  <div class="bar-row"><span>E 创新性 <b>86</b></span><div class="bar-track"><div class="bar-fill" style="width:86%"></div></div><span class="mono">8.6 分</span></div>
+</div>
+
+<table>
+  <tr><th style="width:20%">维度</th><th>加分证据（当日实测）</th><th>扣分明细</th></tr>
+  <tr><td>A 88</td><td>四服务在线核心路径全通（C1-C14 14/14）· 15 模型池 5 路熔断调度 · 会审台异步 31ms+SSE · 成本看板/通知中心/回滚手册齐备</td><td class="mono">−7 OpenRouter 402 · −3 龙虾占位 · −2 流式部分可用</td></tr>
+  <tr><td>B 90</td><td>705 用例全绿三轮复核 · 17 端点全 &lt;30ms · ledger 热点优化 · 当日 4 缺陷全部闭环</td><td class="mono">−5 并发写无机制防护 · −3 stderr 噪音 · −2 写放大挂账</td></tr>
+  <tr><td>C 82</td><td>多 LLM 容灾/调度/审计一站式 · 会审台为可用范式非 demo · 台账+看板+自动化管理闭环</td><td class="mono">−10 无鉴权多租户（豁免期） · −5 单机 JSON 天花板 · −3 无开箱 IM 推送</td></tr>
+  <tr><td>D 93</td><td>4 git tag · 今日 11 提交全留痕 · 根+服务 README · 双轨回滚实测 8.5s · D-013 事故 3 分钟 git 恢复</td><td class="mono">−4 .bak 双轨冗余 · −3 测试断言曾耦合版本号</td></tr>
+  <tr><td>E 86</td><td>majority-return+late 票 · 健康度滑动窗口+座位抖动进仲裁线 · 白名单 0.03s 快失败</td><td class="mono">−8 范式业内有同类 · −6 无独创评测方法论</td></tr>
+</table>
+
+<h2><span class="num">03</span>扣分项改进建议（按投入产出排序）</h2>
+<table>
+  <tr><th>#</th><th>扣分项</th><th>改进建议</th><th>量级</th></tr>
+  <tr><td>1</td><td>无鉴权/多租户（−10）</td><td>解除安全豁免时加 API-Key 中间件（taskboard 同款可复用）</td><td class="mono">1 天</td></tr>
+  <tr><td>2</td><td>OpenRouter 不通（−7）</td><td>充值或删除条目（保留登记）</td><td class="mono">用户决策</td></tr>
+  <tr><td>3</td><td>并发写无防护（−5）</td><td>save_sessions 原子写（tmp+rename）+文件锁，或迁 SQLite</td><td class="mono">半天</td></tr>
+  <tr><td>4</td><td>.bak 双轨冗余（−4）</td><td>后续只走 git tag，.bak 作最后保险</td><td class="mono">已在正轨</td></tr>
+  <tr><td>5</td><td>stderr 噪音（−3）</td><td>scheduler 加生命周期钩子排空线程池</td><td class="mono">半天</td></tr>
+  <tr><td>6</td><td>龙虾占位（−3）</td><td>等品牌/价格/供应商/产地四件套</td><td class="mono">10 分钟</td></tr>
+  <tr><td>7</td><td>写放大（−2）</td><td>会话破 100 时与 SQLite 同窗口处理</td><td class="mono">挂账</td></tr>
+</table>
+
+<div class="grid2">
+  <div class="panel">
+    <h3>附录 A：复核记录</h3>
+    <ul>
+      <li>总分复算：26.4+22.5+16.4+13.95+8.6=87.85 ✓</li>
+      <li>证据抽查 5 条全 MATCH（15 models / 18 订单+掩码 / 705 用例 / 22 会话恢复 / 4 tags）</li>
+      <li>维度覆盖 5/5，缺失材料标注：无</li>
+    </ul>
+  </div>
+  <div class="panel">
+    <h3>重算路径</h3>
+    <ul>
+      <li>对权重有异议 → 保留本报告为 v1.0</li>
+      <li>按新权重出具 v2 标注修订版</li>
+      <li>原版随时可回滚参照，公式自洽可验</li>
+    </ul>
+  </div>
+</div>
+
+<footer>
+  <span>PromptMaster Suite · scoring v1.0 · evidence: score-evidence.txt / capability-ledger-v2.txt / perf-baseline.json / verify-optimize-closeout.md</span>
+  <span>2026-09-22</span>
+</footer>
+</div>
+</body>
+</html>
