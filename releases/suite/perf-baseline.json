@@ -1,0 +1,140 @@
+{
+ "ts": "2026-09-22T20:15:23",
+ "endpoints": {
+  "GET /v1/models": {
+   "service": "modelhub",
+   "median_ms": 25,
+   "samples": [
+    25,
+    26,
+    2
+   ]
+  },
+  "GET /v1/pool/status": {
+   "service": "modelhub",
+   "median_ms": 3,
+   "samples": [
+    18,
+    3,
+    2
+   ]
+  },
+  "GET /v1/metrics": {
+   "service": "modelhub",
+   "median_ms": 8,
+   "samples": [
+    8,
+    5,
+    18
+   ]
+  },
+  "GET /v1/ledger/stats": {
+   "service": "modelhub",
+   "median_ms": 9,
+   "samples": [
+    9,
+    21,
+    4
+   ]
+  },
+  "GET /api/health": {
+   "service": "triage",
+   "median_ms": 16,
+   "samples": [
+    16,
+    20,
+    16
+   ]
+  },
+  "GET /api/orders": {
+   "service": "lobster",
+   "median_ms": 3,
+   "samples": [
+    19,
+    3,
+    2
+   ]
+  },
+  "GET / (落地页)": {
+   "service": "lobster",
+   "median_ms": 27,
+   "samples": [
+    60,
+    3,
+    27
+   ]
+  },
+  "GET /api/tasks": {
+   "service": "taskboard",
+   "median_ms": 19,
+   "samples": [
+    82,
+    19,
+    4
+   ]
+  },
+  "GET /api/board": {
+   "service": "taskboard",
+   "median_ms": 13,
+   "samples": [
+    42,
+    8,
+    13
+   ]
+  },
+  "GET /api/sessions": {
+   "service": "triage",
+   "median_ms": 14,
+   "samples": [
+    14,
+    2,
+    17
+   ]
+  },
+  "GET /api/ledger": {
+   "service": "triage",
+   "median_ms": 4,
+   "samples": [
+    20,
+    4,
+    4
+   ]
+  },
+  "GET /api/usage-board": {
+   "service": "triage",
+   "median_ms": 14,
+   "samples": [
+    26,
+    14,
+    3
+   ]
+  },
+  "GET /api/gateway-metrics": {
+   "service": "triage",
+   "median_ms": 15,
+   "samples": [
+    7,
+    45,
+    15
+   ]
+  },
+  "GET / (前端页)": {
+   "service": "triage",
+   "median_ms": 13,
+   "samples": [
+    50,
+    13,
+    3
+   ]
+  },
+  "GET /static/cost-board.html": {
+   "service": "triage",
+   "median_ms": 3,
+   "samples": [
+    16,
+    3,
+    3
+   ]
+  }
+ }
+}

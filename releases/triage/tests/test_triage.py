@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -16,8 +17,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import app as triage  # noqa: E402
+# D-011 修复：lobster 与 triage 都有 app.py，合并跑时 sys.modules 的 'app' 会撞名。
+# 用 importlib 按文件路径加载 triage 的 app，并从缓存里摘除同名模块避免串包。
+_app_dir = Path(__file__).resolve().parents[1]
+_app_path = _app_dir / "app.py"
+sys.path.insert(0, str(_app_dir))  # notify_center 同目录导入
+_spec = importlib.util.spec_from_file_location("triage_app", _app_path)
+triage = importlib.util.module_from_spec(_spec)
+sys.modules["triage_app"] = triage
+_spec.loader.exec_module(triage)
 
 
 @pytest.fixture()
@@ -136,7 +144,8 @@ def test_async_submit_returns_immediately(client, monkeypatch):
     d = r.json()
     assert d["status"] == "running" and d["session_id"].startswith("SES-")
     # 后台很快完成（mock 无延迟）
-    for _ in range(40):
+    poll = {}
+    for _ in range(120):  # D-012:偶发竞态，窗口 40→120（12s），后台线程调度慢时不误报
         poll = client.get(f"/api/sessions/{d['session_id']}").json()
         if poll.get("status") == "done":
             break

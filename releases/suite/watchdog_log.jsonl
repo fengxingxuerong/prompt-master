@@ -5,3 +5,5 @@
 {"ts": "2026-09-22T16:59:18", "action": "patrol", "detail": ["taskboard: DOWN → 拉起 (port from http://127.0.0.1:8792/api/health)"], "alert": true}
 {"ts": "2026-09-22T17:12:02", "service": "taskboard", "action": "restart", "alert": true}
 {"ts": "2026-09-22T17:12:02", "action": "patrol", "detail": ["taskboard: DOWN → 拉起 (port from http://127.0.0.1:8792/api/health)"], "alert": true}
+{"ts": "2026-09-22T20:42:01", "service": "triage", "action": "restart", "alert": true}
+{"ts": "2026-09-22T20:42:01", "action": "patrol", "detail": ["triage: DOWN → 拉起 (port from http://127.0.0.1:8793/api/health)"], "alert": true}

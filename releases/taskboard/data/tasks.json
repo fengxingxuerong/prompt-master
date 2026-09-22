@@ -1,6 +1,6 @@
 {
  "version": 1,
- "seq": 15,
+ "seq": 16,
  "tasks": [
   {
    "task_id": "TASK-20260921-001",
@@ -685,6 +685,43 @@
       "desc": "notify_center 模块（落盘+webhook 静默分发）+ 3 端点；看门狗挂 24h 超时提醒（阈值判定单测过）；成本看板实时 SVG 曲线（5s 采样）。异常演练 webhook 不可达 2s 静默不丢盘。报告 releases/suite/m2-acceptance.md",
       "assignee": "Agent-AutoClaw",
       "priority": "P2",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-016",
+   "created_at": "2026-09-22 20:44:17",
+   "created_by": "Agent-AutoClaw",
+   "title": "验证测试优化：性能基线+D-011/012/013 处置+回滚演练",
+   "desc": "17 端点×3 轮基线（全 <30ms）；ledger 尾部解析优化消除增长斜率；D-011 同名模块冲突修复（组合 17/17）；D-012 测试竞态加固；D-013 回滚演练中 sessions.json 覆盖事故——git 快照 3 分钟恢复 22 会话；报告 releases/suite/verify-optimize-closeout.md",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P1",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 20:44:17",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P1，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 20:44:17",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "D-013 恢复验证通过；运行纪律：禁多实例同写 data/",
+     "before": {
+      "title": "验证测试优化：性能基线+D-011/012/013 处置+回滚演练",
+      "desc": "17 端点×3 轮基线（全 <30ms）；ledger 尾部解析优化消除增长斜率；D-011 同名模块冲突修复（组合 17/17）；D-012 测试竞态加固；D-013 回滚演练中 sessions.json 覆盖事故——git 快照 3 分钟恢复 22 会话；报告 releases/suite/verify-optimize-closeout.md",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P1",
       "due": "2026-09-22",
       "status": "pending",
       "acceptance": ""
