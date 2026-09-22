@@ -1,14 +1,14 @@
 {
  "2026-09-22": {
-  "calls": 37,
-  "success": 37,
-  "latency_ms_sum": 646697,
-  "content_chars_sum": 3462,
+  "calls": 41,
+  "success": 41,
+  "latency_ms_sum": 667937,
+  "content_chars_sum": 3891,
   "failovers_sum": 12,
   "by_model": {
    "deepseek-v4-flash": {
-    "calls": 12,
-    "success": 12
+    "calls": 16,
+    "success": 16
    },
    "sensenova-6.8-flash-lite": {
     "calls": 4,

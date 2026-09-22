@@ -15,16 +15,15 @@ import json
 import re
 import threading
 import time
+import urllib.request
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import urllib.request
-
-from notify_center import list_notifications, load_config, notify, save_config
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from notify_center import list_notifications, load_config, notify
 from pydantic import BaseModel, Field
 
 APP_DIR = Path(__file__).resolve().parent

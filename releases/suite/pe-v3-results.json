@@ -1,0 +1,46 @@
+[
+ {
+  "tid": "T1 混合工单",
+  "wall_s": 7.2,
+  "parse": "raw-ok",
+  "category": "billing",
+  "severity": "P2",
+  "confidence": 0.9,
+  "action": "联系财务/退款部门核实退款状态，并同步提交发票重开申请，要求1个工作日内反馈处理",
+  "expected": "billing/P2",
+  "match": true
+ },
+ {
+  "tid": "T2 边界歧义",
+  "wall_s": 6.1,
+  "parse": "raw-ok",
+  "category": "billing",
+  "severity": "P1",
+  "confidence": 0.9,
+  "action": "立即核实该笔银行扣款流水，若订单确实未生成，需在1小时内为用户补单或发起原路退款",
+  "expected": "billing/P1",
+  "match": true
+ },
+ {
+  "tid": "T3 弱信号",
+  "wall_s": 2.7,
+  "parse": "raw-ok",
+  "category": "other",
+  "severity": "P3",
+  "confidence": 0.4,
+  "action": "向客户澄清具体是指哪个问题以及上次沟通的时间或工单号，以便查询进展",
+  "expected": "other/P3",
+  "match": true
+ },
+ {
+  "tid": "T4 强信号P1",
+  "wall_s": 5.4,
+  "parse": "raw-ok",
+  "category": "technical",
+  "severity": "P1",
+  "confidence": 0.95,
+  "action": "立即联系运维和DBA，启用备份恢复生产数据库，并同步通知客户故障状态",
+  "expected": "technical/P1",
+  "match": true
+ }
+]

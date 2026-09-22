@@ -50,7 +50,11 @@ REVIEW_SYSTEM = (
     '"severity":"P1|P2|P3","action":"一句话建议动作","confidence":0.0到1.0}'
     " 分类口径：billing=账单/退款/支付；technical=技术故障/API/系统；"
     "logistics=物流/配送/签收；complaint=情绪投诉/舆情风险；other=其他。"
+    " severity 口径：P1=资金损失/生产故障/舆情正在发生；P2=功能受损但有替代路径；P3=咨询/轻微不便。"
+    " action 必须是客服可直接执行的下一步（含时限或动作对象），不许写\"尽快处理\"这类空话。"
+    " confidence 锚点：0.9+=诉求明确；0.7~0.8=主题明确缺关键细节；≤0.6=信息不足以分类。"
 )
+
 SEV_ORDER = {"P1": 3, "P2": 2, "P3": 1}
 MAJORITY = 3          # ≥3 有效票即提前汇总
 UNHEALTHY_STREAK = 2  # 连续失败 2 次即视为不健康（不阻塞汇总）
