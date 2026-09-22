@@ -46,12 +46,16 @@ cd D:\projects\prompt-master
 | POST | /api/sessions/{sid}/feedback | 人工反馈 `{rating 1-5, comment?}` |
 | GET | /api/ledger?limit=50&session=SES-xxx | 调用台账（可按会话过滤） |
 | GET | /api/reviewer_health | 评委健康度（streak/成败计数/unhealthy） |
+| GET | /api/sessions/{sid}/events | SSE 实时进度（progress 逐票/done 终态；已完成会话订阅立即收 done） |
+| GET | /api/usage-board | 用量成本数据（按日/按模型聚合，只读 usage_daily.json） |
+| GET | /static/{name} | 静态页（index.html / cost-board.html） |
 
 ## 版本与回滚
 
 | 版本 | 文件 | 说明 |
 |---|---|---|
-| v1.1.1（当前） | app.py | majority-return + 健康度 + JSON 容错 + 模型白名单快失败 |
+| v1.2.0（当前） | app.py | 异步提交 + SSE 实时进度（G-07/G-12）+ /api/usage-board |
+| v1.1.1 | app_v1.1.1.py.bak | majority-return + 健康度 + JSON 容错 + 白名单 |
 | v1.1 | app_v1.1.py.bak | 无白名单校验 |
 | v1.0 | app_v1.0.py.bak | 朴素基线（全员等待、裸 json.loads） |
 
@@ -64,7 +68,7 @@ cd D:\projects\prompt-master
 3. **OpenRouter 未启用**（欠费 402），启用需充值后改 modelhub.json 的 enabled。
 4. **成本**：每单 6 次调用 × ~700 max_tokens；台账 usage 字段可审计实际 token 消耗。
 5. **输出质量波动**：LLM 分类非确定性（temperature=0.2 缓解）；consensus.agreement < 0.5 时建议人工复核。
-6. **并发上限**：ThreadPoolExecutor 6 workers/单，多用户同时提交会排队（sync 接口），生产化需改异步任务队列。
+6. **并发**：v1.2.0 已异步化（提交即返回，后台会审），多用户不再排队；SSE 订阅不存在的会话会进入 keep-alive 等待（最长约 5 分钟），前端不会触发此路径。
 
 ## 修改指南
 
