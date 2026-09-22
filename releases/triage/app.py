@@ -21,6 +21,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import urllib.request
+
+from notify_center import list_notifications, load_config, notify, save_config
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -415,6 +417,39 @@ async def session_events(sid: str):
                                       "X-Accel-Buffering": "no"})
 
 
+@app.get("/api/notifications")
+def api_notifications(limit: int = 50):
+    return {"count": 0, "items": list_notifications(APP_DIR / "data", limit=limit)}
+
+
+@app.get("/api/notify-config")
+def api_notify_config():
+    cfg = load_config(APP_DIR / "data")
+    return {"enabled": cfg.get("enabled", False),
+            "webhook_url": ("已配置" if cfg.get("webhook_url") else "未配置")}
+
+
+class NotifyTestIn(BaseModel):
+    message: str = Field(default="通知链路测试", max_length=200)
+
+
+@app.post("/api/notify-test")
+def api_notify_test(req: NotifyTestIn):
+    """M2.1 验证入口：发一条测试通知（落盘+webhook 按配置）。"""
+    r = notify("triage", req.message, level="test", base_dir=APP_DIR / "data")
+    return r
+
+
+@app.get("/api/gateway-metrics")
+def api_gateway_metrics():
+    """M2.3：代理网关 /v1/metrics（浏览器直连 8687 会跨域）。失败返回 offline。"""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8687/v1/metrics", timeout=3) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        return {"offline": True, "error": f"{type(e).__name__}: {str(e)[:80]}"}
+
+
 @app.get("/api/usage-board")
 def usage_board():
     """G-14 成本看板数据端点：只读 usage_daily.json，按日+按模型聚合。"""
@@ -465,7 +500,7 @@ def health():
     led_n = 0
     if LEDGER.exists():
         led_n = len(LEDGER.read_text(encoding="utf-8").strip().splitlines())
-    return {"status": "ok", "service": "triage-panel", "version": "1.2.0",
+    return {"status": "ok", "service": "triage-panel", "version": "1.3.0",
             "reviewers": len(REVIEWERS), "ledger_entries": led_n,
             "sessions": len(load_sessions())}
 

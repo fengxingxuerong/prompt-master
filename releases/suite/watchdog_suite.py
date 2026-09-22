@@ -48,6 +48,41 @@ def notify(source: str, message: str) -> None:
                                 ensure_ascii=False) + "\n")
     except Exception:  # noqa: BLE001
         pass
+def _check_stale_tasks() -> None:
+    """M2.2：任务台账 pending/处理中超 24h → 落提醒通知（每次巡检最多提醒一次/任务）。"""
+    try:
+        import urllib.request as _u
+        with _u.urlopen("http://127.0.0.1:8792/api/tasks?limit=200", timeout=5) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        now = time.time()
+        marker = ROOT / "suite" / ".stale_notified.json"
+        seen = {}
+        if marker.exists():
+            try:
+                seen = json.loads(marker.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                seen = {}
+        changed = False
+        for t in data.get("tasks", []):
+            st = (t.get("status") or "").lower()
+            if st not in ("pending", "in_progress"):
+                continue
+            tid = t.get("task_id", "")
+            due = t.get("due") or ""
+            try:
+                overdue_h = (now - time.mktime(time.strptime(due, "%Y-%m-%d"))) / 3600.0
+            except Exception:  # noqa: BLE001
+                continue
+            if overdue_h >= 24 and seen.get(tid) != due:
+                notify("watchdog", f"任务 {tid} 已到期超 24h 未处理（due={due}）：{t.get('title', '')[:40]}", level="warn",
+                       base_dir=ROOT / "triage" / "data")
+                seen[tid] = due
+                changed = True
+        if changed:
+            marker.write_text(json.dumps(seen, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001 - 提醒失败不影响巡检
+        print(f"[watchdog] stale-task check failed: {e}")
+
 def _rotate_ledgers() -> None:
     """G-05：巡检时顺带做台账轮转检查（超 1MB 轮转，保留 3 代）。"""
     try:
@@ -73,6 +108,7 @@ def patrol() -> list[str]:
     if actions:
         log({"ts": ts, "action": "patrol", "detail": actions, "alert": bool(actions)})
     _rotate_ledgers()  # G-05：巡检顺带做台账轮转检查
+    _check_stale_tasks()  # M2.2：pending/待用户超 24h 任务落提醒
     return actions
 
 def install() -> None:

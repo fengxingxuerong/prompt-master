@@ -1,6 +1,6 @@
 {
  "version": 1,
- "seq": 14,
+ "seq": 15,
  "tasks": [
   {
    "task_id": "TASK-20260921-001",
@@ -646,6 +646,43 @@
      "before": {
       "title": "遗留问题清零：前端SSE/复盘/成本看板",
       "desc": "L-01 前端接SSE（EventSource+兜底轮询）；L-02 TASK-006复盘关闭；L-03 成本看板上线（/api/usage-board+/static/cost-board.html）。可独立解决项清零，剩余002/005/006待用户。报告 releases/suite/leftover-closeout-report.md",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-015",
+   "created_at": "2026-09-22 19:53:59",
+   "created_by": "Agent-AutoClaw",
+   "title": "M2 运维感知里程碑：通知中心/超时提醒/实时曲线",
+   "desc": "notify_center 模块（落盘+webhook 静默分发）+ 3 端点；看门狗挂 24h 超时提醒（阈值判定单测过）；成本看板实时 SVG 曲线（5s 采样）。异常演练 webhook 不可达 2s 静默不丢盘。报告 releases/suite/m2-acceptance.md",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 19:53:59",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 19:53:59",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "triage v1.3.0，tag v1.4.3；webhook 配置方法见验收报告",
+     "before": {
+      "title": "M2 运维感知里程碑：通知中心/超时提醒/实时曲线",
+      "desc": "notify_center 模块（落盘+webhook 静默分发）+ 3 端点；看门狗挂 24h 超时提醒（阈值判定单测过）；成本看板实时 SVG 曲线（5s 采样）。异常演练 webhook 不可达 2s 静默不丢盘。报告 releases/suite/m2-acceptance.md",
       "assignee": "Agent-AutoClaw",
       "priority": "P2",
       "due": "2026-09-22",

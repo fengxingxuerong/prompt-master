@@ -28,6 +28,8 @@ td.mono{font-family:var(--mono);font-size:12px}
 .note{font-size:12.5px;color:var(--mut);margin:8px 0 20px}
 h2{font-size:15px;color:var(--navy);margin:0 0 10px}
 footer{border-top:1px solid var(--line);padding-top:12px;color:var(--mut);font-size:11.5px;font-family:var(--mono);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+
+.panel-lite{background:#fff;border:1px solid var(--line);padding:14px 16px}
 </style>
 </head>
 <body>
@@ -67,8 +69,29 @@ fetch("/api/usage-board").then(r=>r.json()).then(d=>{
   });
   html+='</table>';
   if(!days.length)html='<div class="note">暂无数据：usage_daily.json 为空（服务刚重建或无调用）。</div>';
+  html+='<h2 style="margin-top:26px">网关实时调用（每 5 秒刷新）</h2><div class="panel-lite"><svg id="livecurve" width="100%" height="120" viewBox="0 0 600 120" preserveAspectRatio="none"><polyline id="curve" fill="none" stroke="#2f5fbd" stroke-width="2" points=""/><text id="curval" x="600" y="14" text-anchor="end" font-size="13" fill="#1b2a4a" font-family="monospace">—</text></svg><div class="note" id="livestat">采集中…</div></div>';
   document.getElementById("root").innerHTML=html;
+  startLive();
 }).catch(e=>{document.getElementById("root").innerHTML='<div class="note">加载失败：'+e.message+'（需经会审台服务 :8793 访问本页）</div>'});
 </script>
 </body>
 </html>
+
+
+function startLive(){
+  const pts=[];const MAX=60;
+  async function tick(){
+    try{
+      const r=await fetch("/api/gateway-metrics");const m=await r.json();
+      if(m.offline){document.getElementById("livestat").textContent="网关离线："+(m.error||"");return}
+      const v=m.modelhub_calls_total||0;
+      pts.push(v);if(pts.length>MAX)pts.shift();
+      const min=Math.min(...pts),max=Math.max(...pts),span=Math.max(1,max-min);
+      const xs=pts.map((p,i)=>(i/(MAX-1))*580+10+","+ (110-((p-min)/span)*90)).join(" ");
+      document.getElementById("curve").setAttribute("points",xs);
+      document.getElementById("curval").textContent="累计调用 "+v;
+      document.getElementById("livestat").textContent="采集中… 已取 "+pts.length+" 点（成功 "+m.modelhub_calls_success+" · 失败 "+m.modelhub_calls_failed+"）";
+    }catch(e){document.getElementById("livestat").textContent="拉取失败："+e.message+"（会审台或网关未启动）"}
+  }
+  tick();setInterval(tick,5000);
+}
