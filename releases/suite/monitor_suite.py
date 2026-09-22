@@ -18,11 +18,13 @@ SERVICES = {
     "modelhub": "http://127.0.0.1:8687/api/health",
     "lobster": "http://127.0.0.1:8791/api/health",
     "taskboard": "http://127.0.0.1:8792/api/health",
+    "triage": "http://127.0.0.1:8793/api/health",
 }
 DATA_APIS = {
     "modelhub": ("http://127.0.0.1:8687/v1/models", lambda d: len(d.get("data", []))),
     "lobster": ("http://127.0.0.1:8791/api/orders", lambda d: d.get("count", 0)),
     "taskboard": ("http://127.0.0.1:8792/api/tasks", lambda d: d.get("count", 0)),
+    "triage": ("http://127.0.0.1:8793/api/sessions", lambda d: d.get("count", 0)),
 }
 
 def probe(url):

@@ -39,6 +39,10 @@ jobs:
           PM_ARBITER_BASE_URL: http://127.0.0.1:9/v1
           PM_API_KEY: sk-ci-has-no-real-key
         run: python -m pytest tests/ -q
+      - name: Releases suite tests (lobster + triage) —— TestClient 进程内，零真实出网
+        run: |
+          python -m pytest releases/lobster/tests/ -q
+          python -m pytest releases/triage/tests/ -q
       - name: Topology selftest —— 干净检出无 .env 也必须通过
         env:
           PM_API_KEY: ""
@@ -68,6 +72,10 @@ jobs:
           PM_BASE_URL: http://127.0.0.1:9/v1
           PM_API_KEY: sk-ci-has-no-real-key
         run: python -m pytest tests/ -q
+      - name: Releases suite tests (lobster + triage)
+        run: |
+          python -m pytest releases/lobster/tests/ -q
+          python -m pytest releases/triage/tests/ -q
       - name: Stub e2e (PowerShell)
         shell: pwsh
         run: ./examples/run_e2e_stub.ps1

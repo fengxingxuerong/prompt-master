@@ -21,6 +21,7 @@ SERVICES = [
     {"name": "modelhub", "url": "http://127.0.0.1:8687/api/health", "cmd": [PY, str(ROOT / ".." / "run_modelhub.py"), "--port", "8687"], "cwd": str(ROOT / "..")},
     {"name": "lobster", "url": "http://127.0.0.1:8791/api/health", "cmd": [PY, str(ROOT / "lobster" / "app.py"), "--port", "8791"], "cwd": str(ROOT / "lobster")},
     {"name": "taskboard", "url": "http://127.0.0.1:8792/api/health", "cmd": [PY, str(ROOT / "taskboard" / "app.py"), "--port", "8792"], "cwd": str(ROOT / "taskboard")},
+    {"name": "triage", "url": "http://127.0.0.1:8793/api/health", "cmd": [PY, str(ROOT / "triage" / "app.py"), "--port", "8793"], "cwd": str(ROOT / "triage")},
 ]
 
 def alive(url: str) -> bool:
@@ -35,6 +36,28 @@ def log(rec: dict) -> None:
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
+def notify(source: str, message: str) -> None:
+    """G-06：看门狗告警统一落盘 logs/notifications.jsonl（与 usage_store 共用）。"""
+    try:
+        nlog = ROOT.parent / "logs" / "notifications.jsonl"
+        nlog.parent.mkdir(parents=True, exist_ok=True)
+        import json as _json
+        with open(nlog, "a", encoding="utf-8") as f:
+            f.write(_json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                 "source": source, "message": message},
+                                ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+def _rotate_ledgers() -> None:
+    """G-05：巡检时顺带做台账轮转检查（超 1MB 轮转，保留 3 代）。"""
+    try:
+        rot = ROOT / "suite" / "rotate_ledger.py"
+        ns: dict = {}
+        exec(compile(rot.read_text(encoding="utf-8"), str(rot), "exec"), ns)
+        ns["rotate"]()
+    except Exception as exc:  # noqa: BLE001 - 轮转失败不影响巡检
+        print(f"[watchdog] rotate check failed: {exc}")
+
 def patrol() -> list[str]:
     actions = []
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -46,8 +69,10 @@ def patrol() -> list[str]:
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         actions.append(f"{svc['name']}: DOWN → 拉起 (port from {svc['url']})")
         log({"ts": ts, "service": svc["name"], "action": "restart", "alert": True})
+        notify("watchdog", f"服务 {svc['name']} 掉线，已自动拉起")
     if actions:
         log({"ts": ts, "action": "patrol", "detail": actions, "alert": bool(actions)})
+    _rotate_ledgers()  # G-05：巡检顺带做台账轮转检查
     return actions
 
 def install() -> None:
@@ -87,6 +112,7 @@ if __name__ == "__main__":
     elif a.once:
         acts = patrol()
         print("PATROL:", acts or ["all alive"])
+
     else:
         print("watchdog running (Ctrl+C 停止看门狗本身)")
         while True:
