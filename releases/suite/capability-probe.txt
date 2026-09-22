@@ -1,0 +1,9 @@
+﻿=== CAPABILITY PROBE 2026-09-22 17:08:56 ===
+C1 模型池: OK 15 models
+C2 真实LLM调用: OK deepseek-v4-flash 2364ms ans=å
+C3 龙虾健康: OK ok
+C4 订单列表: OK count=16 phone_masked=True
+C5 任务台账: OK 11 tasks returned
+C6 会审台健康: OK v1.1.1 ledger=105
+C7 会审会话: OK 15 sessions
+C8 usage端点: 远程服务器返回错误: (404) 未找到。

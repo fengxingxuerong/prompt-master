@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PromptMaster Suite 能力地图 — 实测盘点 2026-09-22</title>
+<style>
+:root{--navy:#1b2a4a;--navy2:#24365e;--ink:#1c2733;--mut:#6b7686;--paper:#f7f7f4;--line:#d9dcd6;--ok:#1e7f5c;--part:#c98a1e;--no:#b3493f;--blue:#2f5fbd;--mono:"Cascadia Code",Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font:14.5px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;padding:52px 24px}
+.wrap{max-width:1140px;margin:0 auto}
+header{border-bottom:3px solid var(--navy);padding-bottom:22px;margin-bottom:34px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px}
+.kicker{color:var(--blue);font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;font-family:var(--mono)}
+h1{font-size:30px;font-weight:700;color:var(--navy);margin-top:6px;letter-spacing:-.01em}
+.stamp{font-family:var(--mono);font-size:12px;color:var(--mut);text-align:right;line-height:1.6}
+h2{font-size:18px;font-weight:700;color:var(--navy);margin:38px 0 4px;display:flex;align-items:center;gap:10px}
+h2 .num{font-family:var(--mono);font-size:13px;color:var(--mut);font-weight:400}
+h2 + .note{color:var(--mut);font-size:13px;margin-bottom:14px}
+.legend{display:flex;gap:16px;margin:10px 0 16px;font-size:12.5px;flex-wrap:wrap}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.d-ok{background:var(--ok)}.d-part{background:var(--part)}.d-no{background:var(--no)}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);font-size:13.2px;margin:10px 0 26px}
+th{background:var(--navy);color:#fff;text-align:left;padding:9px 12px;font-weight:600;font-size:12px;letter-spacing:.04em}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.mono{font-family:var(--mono);font-size:11.8px;color:#3d4a5c}
+.st{font-family:var(--mono);font-size:11.5px;font-weight:700;white-space:nowrap}
+.ok{color:var(--ok)}.part{color:var(--part)}.no{color:var(--no)}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:6px 0 30px}
+.metric{background:#fff;border:1px solid var(--line);border-top:3px solid var(--navy);padding:16px 14px}
+.metric .v{font-size:25px;font-weight:700;font-family:var(--mono);color:var(--navy)}
+.metric .k{color:var(--mut);font-size:11.5px;margin-top:3px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:14px 0 26px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+.panel{background:#fff;border:1px solid var(--line);padding:18px 20px}
+.panel h3{font-size:13px;color:var(--navy);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;font-family:var(--mono)}
+.panel li{margin:7px 0 7px 18px;font-size:13.5px}
+.panel .lv{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:3px;margin-right:6px}
+.lv.hi{background:#f7e3e1;color:var(--no)}
+.lv.md{background:#faf0dc;color:var(--part)}
+.lv.lo{background:#e2ede8;color:var(--ok)}
+.route{background:var(--navy);color:#dfe6f5;padding:20px 24px;margin:12px 0 28px;font-family:var(--mono);font-size:12.8px;line-height:2}
+.route b{color:#8db3ff}
+footer{margin-top:44px;border-top:1px solid var(--line);padding-top:16px;color:var(--mut);font-size:12px;font-family:var(--mono);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <div class="kicker">PromptMaster Suite · Capability Map</div>
+    <h1>这个项目现在能干嘛</h1>
+  </div>
+  <div class="stamp">实测盘点 · 2026-09-22 17:08–17:11<br>探针 C1–C14 / 边界 E-a–E-f · 全部真实 HTTP 调用</div>
+</header>
+
+<div class="metrics">
+  <div class="metric"><div class="v">4</div><div class="k">在线服务（8687/8791/8792/8793）</div></div>
+  <div class="metric"><div class="v">15</div><div class="k">接入 LLM（5 路上游：SenseNova/AMD/Step/NVIDIA/OpenRouter）</div></div>
+  <div class="metric"><div class="v">733</div><div class="k">自动化测试（688+7+8，主项目全绿）</div></div>
+  <div class="metric"><div class="v">108</div><div class="k">网关累计调用（成功 108 · 失败 0）</div></div>
+</div>
+
+<h2><span class="num">01</span>核心能力矩阵（三档如实标注）</h2>
+<div class="note">图例：<span class="dot d-ok"></span>能跑通（本轮实测取证） <span class="dot d-part"></span>部分能跑（可用但有明确短板） <span class="dot d-no"></span>跑不通</div>
+<table>
+  <tr><th style="width:26%">能力</th><th style="width:9%">状态</th><th>实测证据（2026-09-22）</th><th style="width:30%">边界与短板</th></tr>
+  <tr><td><b>统一模型池网关</b><br><span class="mono">ModelHub :8687</span></td><td class="st ok">● 能跑通</td><td class="mono">/v1/models 15 条目；真实对话调用 deepseek-v4-flash 2364ms 返回正常；累计 108 调用 0 失败</td><td>单一优先级自动调度；无流式转发的 P1 补测待做（TASK-002）</td></tr>
+  <tr><td><b>多 LLM 智能体调用</b><br><span class="mono">任意应用 → 网关 → 5 路上游</span></td><td class="st ok">● 能跑通</td><td class="mono">8 家模型并发实测全通（上午）；本轮探针再证 C2</td><td>OpenRouter 欠费禁用中；NVIDIA 慢源靠熔断兜底</td></tr>
+  <tr><td><b>多模型会审台</b><br><span class="mono">Triage :8793</span></td><td class="st ok">● 能跑通</td><td class="mono">真实工单会审全链路 60.4s：共识 technical/P2 3/3 票（sid=SES-…571A32）；台账 105→106 条可审计</td><td>同步接口最长等 ~130s（G-07 异步化候选）；无实时进度</td></tr>
+  <tr><td><b>任务台账（分配/看板/undo）</b><br><span class="mono">Taskboard :8792</span></td><td class="st ok">● 能跑通</td><td class="mono">11 任务在册；分页越界优雅空页；undo 机制在位</td><td>无鉴权体系（G-15，安全豁免期）；单机 JSON 存储</td></tr>
+  <tr><td><b>演示电商站（龙虾）</b><br><span class="mono">Lobster :8791</span></td><td class="st part">◐ 部分能跑</td><td class="mono">健康 OK；16 订单；列表 PII 脱敏在位；落地页 15KB 正常渲染</td><td>品牌/价格/供应商/产地仍是占位口径（G-09 等你给数据）</td></tr>
+  <tr><td><b>Prompt 工程主流程</b><br><span class="mono">pm/（澄清→生成→评测→迭代）</span></td><td class="st ok">● 能跑通</td><td class="mono">688 用例全绿（含 W16 修复后口径）；fake 后端全流程 CI 验证</td><td>真实 LLM 全流程成本高，日常跑 fake，真实跑按需</td></tr>
+  <tr><td><b>运维保障圈</b><br><span class="mono">看门狗+监控+告警</span></td><td class="st ok">● 能跑通</td><td class="mono">4 服务巡检 all alive；真实拉起演练通过；告警落盘 notifications.jsonl 有实证</td><td>通知仅落盘，未接 IM/邮件推送</td></tr>
+  <tr><td><b>评委校准/盲评工具</b><br><span class="mono">calibrate_judge.py</span></td><td class="st ok">● 能跑通</td><td class="mono">校准数据在案（评委A r=0.901 / B r=0.976）；13 用例回归通过</td><td>重跑需消耗真实 LLM 额度</td></tr>
+  <tr><td><b>OpenRouter 通道</b></td><td class="st no">● 跑不通</td><td class="mono">402 Payment Required（ox-alpha 测试期已结束 404）</td><td>充值后 enabled=true 即恢复；不影响其余 4 路</td></tr>
+  <tr><td><b>NVIDIA 直连</b></td><td class="st part">◐ 部分能跑</td><td class="mono">模型在册；glm-5.3-flash 冷启动 124s+</td><td>靠 60s 超时+熔断自愈；会审台已隔离为 late 票</td></tr>
+</table>
+
+<h2><span class="num">02</span>异常路径实测（全部真实触发）</h2>
+<table>
+  <tr><th>场景</th><th>项目实际表现</th><th>判定</th></tr>
+  <tr><td>未知模型名请求</td><td class="mono">网关按优先级兜底调度到可用模型（4079ms 正常返回）</td><td class="ok">优雅降级</td></tr>
+  <tr><td>坏 JSON 请求体</td><td class="mono">422 Unprocessable Entity，不崩溃</td><td class="ok">正确拦截</td></tr>
+  <tr><td>下单缺字段</td><td class="mono">422 校验拦截</td><td class="ok">正确拦截</td></tr>
+  <tr><td>未知会话查询</td><td class="mono">404 明确报错</td><td class="ok">正确拦截</td></tr>
+  <tr><td>分页参数越界</td><td class="mono">优雅空页，不抛异常</td><td class="ok">优雅降级</td></tr>
+  <tr><td>上游损坏聚合文件</td><td class="mono">ALERT + .corrupt 留存 + 空重建（notifications 落账）</td><td class="ok">可追溯自愈</td></tr>
+  <tr><td>服务进程被杀</td><td class="mono">看门狗 5min 内自动拉起 + 恢复留痕（实测）</td><td class="ok">自愈</td></tr>
+</table>
+
+<div class="grid2">
+  <div class="panel">
+    <h3>已知风险与局限（按严重度）</h3>
+    <ul>
+      <li><span class="lv hi">高</span>同步会审最长阻塞 130s，多用户并发会排队 → 异步化（G-07）</li>
+      <li><span class="lv hi">高</span>单机 JSON 存储，无事务 → 数据破千迁 SQLite（G-10）</li>
+      <li><span class="lv md">中</span>通知只落盘不推送 → 接 IM/邮件（G-06 后续）</li>
+      <li><span class="lv md">中</span>无鉴权（安全豁免期约定）→ 恢复时加（G-15）</li>
+      <li><span class="lv md">中</span>龙虾内容占位 → 等真实口径（G-09）</li>
+      <li><span class="lv lo">低</span>NVIDIA/OpenRouter 两路降级备用中 → 充值/熔断已兜底</li>
+    </ul>
+  </div>
+  <div class="panel">
+    <h3>下一步路线图（按价值排序）</h3>
+    <ul>
+      <li><b>① 会审台异步化 + SSE 进度</b>（G-07+G-12）：多用户可用 + 体验跃升</li>
+      <li><b>② 通知接推送渠道</b>：告警真正"叫醒人"（G-06 后续）</li>
+      <li><b>③ 成本看板</b>：usage_daily 数据已有，缺可视化（G-14）</li>
+      <li><b>④龙虾真实内容</b>：给口径即上线（G-09）</li>
+      <li><b>⑤ SQLite 迁移</b>：数据量到阈值再动（G-10）</li>
+    </ul>
+  </div>
+</div>
+
+<h2><span class="num">03</span>怎么把项目跑起来（从零）</h2>
+<div class="route">
+<b>前置</b>：Python 3.12 · Windows（PowerShell）<br>
+<b>① 依赖</b>：pip install -r requirements.txt（项目根）<br>
+<b>② 配置</b>：.env 填 PM_API_KEY（商汤）/ PM_API_KEY_AMD / PM_API_KEY_STEP 等；config/modelhub.json 定义模型池<br>
+<b>③ 启动</b>：python run_modelhub.py --port 8687 &nbsp;|&nbsp; python releases/lobster/app.py --port 8791 &nbsp;|&nbsp; python releases/taskboard/app.py --port 8792 &nbsp;|&nbsp; python releases/triage/app.py<br>
+<b>④ 验证点</b>：GET :8687/v1/models → 15 条目；GET :8793/api/health → v1.1.1；四服务 /api/health 全 ok<br>
+<b>⑤ 保障</b>：schtasks 注册 SuiteWatchdog（onstart+5min）后自动巡检拉起<br>
+<b>常见故障</b>：端口占用 → netstat 找 PID；上游 429 → 熔断冷却自动恢复；usage 文件损坏 → .corrupt 留存自动重建
+</div>
+
+<h2><span class="num">04</span>评估台账与复核</h2>
+<div class="note">探针原始数据：<span class="mono">releases/suite/capability-probe.txt</span>（C1-C8）+ 本轮对话记录（C11-C14 / E-a–E-f 实测输出）· 台账任务 TASK-012 登记 · 抽查复核 3 项见下</div>
+<table>
+  <tr><th>抽查项</th><th>结论</th><th>对照证据</th><th>一致性</th></tr>
+  <tr><td>模型池 15 条目</td><td>能跑通</td><td class="mono">C1 返回 15 + /v1/pool/status 全 15</td><td class="ok">一致</td></tr>
+  <tr><td>会审台全链路</td><td>能跑通</td><td class="mono">C11 sid=SES-20260922-571A32 落账 106 条</td><td class="ok">一致</td></tr>
+  <tr><td>龙虾占位状态</td><td>部分能跑</td><td class="mono">TASK-005 pending + C4 数据为演示口径</td><td class="ok">一致</td></tr>
+</table>
+
+<footer>
+  <span>PromptMaster Suite · capability assessment · 只读探针，未改任何既有业务数据（会审台新增 1 条探针会话属正常业务写入）</span>
+  <span>2026-09-22</span>
+</footer>
+</div>
+</body>
+</html>

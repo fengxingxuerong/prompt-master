@@ -1,0 +1,31 @@
+{
+ "2026-09-22": {
+  "calls": 8,
+  "success": 8,
+  "latency_ms_sum": 208399,
+  "content_chars_sum": 586,
+  "failovers_sum": 2,
+  "by_model": {
+   "deepseek-v4-flash": {
+    "calls": 3,
+    "success": 3
+   },
+   "sensenova-6.8-flash-lite": {
+    "calls": 1,
+    "success": 1
+   },
+   "glm-5.2": {
+    "calls": 2,
+    "success": 2
+   },
+   "step-step-5-preview": {
+    "calls": 1,
+    "success": 1
+   },
+   "amd-qwen3.8-27b": {
+    "calls": 1,
+    "success": 1
+   }
+  }
+ }
+}

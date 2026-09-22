@@ -1245,5 +1245,72 @@
   "feedback": null,
   "wall_ms": 60256,
   "majority_ms": 5587
+ },
+ "SES-20260922-571A32": {
+  "session_id": "SES-20260922-571A32",
+  "ts": "2026-09-22T17:09:44",
+  "ticket": {
+   "subject": "探针测试单",
+   "body": "这是能力盘点探针：API 网关偶尔超时，请分类。",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 2963,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "排查API网关超时原因并优化性能",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"排查API网关超时原因并优化性能\",\"confidence\":0.9}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 8197,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "排查API网关超时原因，检查网络连接及服务负载情况。",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"排查API网关超时原因，检查网络连接及服务负载情况。\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 3517,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P2",
+     "action": "建议排查API网关超时根因并优化超时阈值配置",
+     "confidence": 0.92
+    },
+    "raw_head": "\n\n{\"category\":\"technical\",\"severity\":\"P2\",\"action\":\"建议排查API网关超时根因并优化超时阈值配置\",\"confidence\":0.92}"
+   }
+  ],
+  "consensus": {
+   "category": "technical",
+   "severity": "P2",
+   "action": "排查API网关超时原因并优化性能",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.92,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 60286,
+  "majority_ms": 8215
  }
 }
