@@ -7,3 +7,25 @@ C5 任务台账: OK 11 tasks returned
 C6 会审台健康: OK v1.1.1 ledger=105
 C7 会审会话: OK 15 sessions
 C8 usage端点: 远程服务器返回错误: (404) 未找到。
+
+=== PROBE ROUND2 (17:09-17:11, 同日实测续) ===
+C11 会审全链路: OK wall=60417ms cat=technical sev=P2 votes=3/3 sid=SES-20260922-571A32
+C12 ModelHub控制台: OK 13348 chars (http://127.0.0.1:8687/console)
+C13 会审台UI: OK 8460 chars (http://127.0.0.1:8793/)
+C14 龙虾落地页: OK 15136 chars (http://127.0.0.1:8791/)
+
+=== EDGE PROBES (17:11) ===
+E-a 未知模型名: 网关按优先级兜底调度 200 OK 4079ms（优雅降级，非报错）
+E-b 坏JSON请求体: 422 Unprocessable Entity（正确拦截）
+E-c 龙虾下单缺字段: 422（正确拦截）
+E-d 未知会话查询: 404（正确拦截）
+E-f 任务分页越界: 优雅空页 count=11（无异常抛出）
+E-g usage文件损坏(前轮实测): ALERT + .corrupt-20260922-165846 留存 + notifications.jsonl 落账 + 空重建
+E-h 服务进程被杀(前轮实测): 看门狗自动拉起 REVIVED: ok + 恢复事件落账
+
+=== SPOT CHECK (复核抽查) ===
+SPOT1 模型池15条目: 实测 15 -> 一致
+SPOT2 会审台v1.1.1+台账: 实测 v1.1.1 ledger=112 -> 一致(台账较地图时点+1属正常业务增长)
+SPOT3 台账TASK-012 done: 实测 total=12 done=9 -> 含012即一致
+=== SPOT CHECK END 17:13:59 ===
+SPOT3 精查: TASK-012 status=done
