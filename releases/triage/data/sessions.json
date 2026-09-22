@@ -1786,5 +1786,76 @@
   "feedback": null,
   "wall_ms": 60177,
   "majority_ms": 3878
+ },
+ "SES-20260922-AB30BC": {
+  "session_id": "SES-20260922-AB30BC",
+  "ts": "2026-09-22T23:42:28",
+  "ticket": {
+   "subject": "UI 走查工单",
+   "body": "验证进度条与 SSE 逐票显示的完整链路。",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 3221,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "联系研发团队确认SSE逐票显示链路验证排期，并给出完成时间点",
+     "confidence": 0.75
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"联系研发团队确认SSE逐票显示链路验证排期，并给出完成时间点\",\"confidence\":0.75}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 7125,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "转派至前端研发组进行SSE链路联调验证，并在24小时内反馈走查结果",
+     "confidence": 0.8
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"转派至前端研发组进行SSE链路联调验证，并在24小时内反馈走查结果\",\"confidence\":0.8}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 4553,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "指派前端QA团队在2个工作日内完成进度条与SSE逐票显示链路的端到端验证并反馈结果",
+     "confidence": 0.85
+    },
+    "raw_head": "\n\n{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"指派前端QA团队在2个工作日内完成进度条与SSE逐票显示链路的端到端验证并反馈结果\",\"confidence\":0.85}"
+   }
+  ],
+  "consensus": {
+   "category": "technical",
+   "severity": "P3",
+   "action": "联系研发团队确认SSE逐票显示链路验证排期，并给出完成时间点",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.8,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": {
+   "rating": 5,
+   "comment": "UI 走查反馈",
+   "ts": "2026-09-22T23:43:28"
+  },
+  "wall_ms": 60029,
+  "majority_ms": 7130
  }
 }
