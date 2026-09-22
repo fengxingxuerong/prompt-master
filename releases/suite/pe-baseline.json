@@ -1,0 +1,32 @@
+[
+ {
+  "tid": "T1 混合工单",
+  "wall_s": 2.5,
+  "parse": "raw-ok",
+  "category": "billing",
+  "severity": "P2",
+  "expected": "billing",
+  "category_match": true,
+  "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"联系财务优先处理退款到账"
+ },
+ {
+  "tid": "T2 边界歧义",
+  "wall_s": 2.8,
+  "parse": "raw-ok",
+  "category": "billing",
+  "severity": "P2",
+  "expected": "billing",
+  "category_match": true,
+  "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"核实支付流水，确认扣款后"
+ },
+ {
+  "tid": "T3 弱信号",
+  "wall_s": 4.5,
+  "parse": "raw-ok",
+  "category": "other",
+  "severity": "P3",
+  "expected": "other",
+  "category_match": true,
+  "raw_head": "{\"category\":\"other\",\"severity\":\"P3\",\"action\":\"回访客户确认具体问题并跟进进"
+ }
+]

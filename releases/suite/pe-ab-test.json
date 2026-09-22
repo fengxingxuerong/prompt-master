@@ -1,0 +1,82 @@
+[
+ {
+  "tid": "T1 混合工单",
+  "expect": "billing/P2",
+  "V1": {
+   "parse": "raw-ok",
+   "category": "billing",
+   "severity": "P2",
+   "confidence": 0.95,
+   "action": "同时推进退款到账与发票重开，并明确告知用户处理时限",
+   "wall_s": 3.5
+  },
+  "V2": {
+   "parse": "raw-ok",
+   "category": "billing",
+   "severity": "P2",
+   "confidence": 0.92,
+   "action": "核查9月10日退款未到账原因并告知到账时间，同时联系财务作废原发票并重开",
+   "wall_s": 5.4
+  }
+ },
+ {
+  "tid": "T2 边界歧义",
+  "expect": "billing/P1",
+  "V1": {
+   "parse": "raw-ok",
+   "category": "billing",
+   "severity": "P2",
+   "confidence": 0.85,
+   "action": "核查支付回调并补单，尽快确认扣款与订单状态",
+   "wall_s": 3.3
+  },
+  "V2": {
+   "parse": "raw-ok",
+   "category": "billing",
+   "severity": "P1",
+   "confidence": 0.9,
+   "action": "立即核查该笔299元支付流水并确认订单状态，若未生成则发起补单或原路退款",
+   "wall_s": 3.7
+  }
+ },
+ {
+  "tid": "T3 弱信号",
+  "expect": "other/P3",
+  "V1": {
+   "parse": "raw-ok",
+   "category": "other",
+   "severity": "P3",
+   "confidence": 0.6,
+   "action": "回复用户确认具体咨询事项，并查询历史工单进展",
+   "wall_s": 3.3
+  },
+  "V2": {
+   "parse": null,
+   "category": null,
+   "severity": null,
+   "confidence": null,
+   "action": "",
+   "wall_s": null
+  }
+ },
+ {
+  "tid": "T4 强信号P1",
+  "expect": "technical/P1",
+  "V1": {
+   "parse": "raw-ok",
+   "category": "technical",
+   "severity": "P1",
+   "confidence": 0.95,
+   "action": "立即启动应急预案，从最近备份恢复生产数据库，优先恢复核心服务并通知客户",
+   "wall_s": 4.3
+  },
+  "V2": {
+   "parse": "raw-ok",
+   "category": "technical",
+   "severity": "P1",
+   "confidence": 0.95,
+   "action": "立即联系运维负责人确认误删数据库的恢复方案，并同步技术团队启动紧急恢复流",
+   "wall_s": 63.4
+  }
+ }
+]

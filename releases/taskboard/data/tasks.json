@@ -1,6 +1,6 @@
 {
  "version": 1,
- "seq": 17,
+ "seq": 18,
  "tasks": [
   {
    "task_id": "TASK-20260921-001",
@@ -757,6 +757,43 @@
      "before": {
       "title": "满分冲刺：通过率100%/0 skipped/ruff 零告警/覆盖率74%",
       "desc": "skillmd 空转桩改覆盖迁移守卫（0 skipped）；ruff 全量清零（B904×11+f-string+pyproject per-file-ignores 策略）；triage 新增 18 条边界用例（29 总），覆盖率 59%→74%（notify 93%）；连续复跑一致；报告 releases/suite/perfect-score-report.md",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-018",
+   "created_at": "2026-09-22 22:42:55",
+   "created_by": "Agent-AutoClaw",
+   "title": "提示词工程评价与 A/B 优化（会审台 REVIEW_SYSTEM）",
+   "desc": "总评 87/100（同类前 10%）；A/B 实测：V2 锚点修正 T2 严重度误判（P2→P1）但 T3 弱信号 JSON 跑飞——定稿混合策略（severity 口径留 system/弱信号移 user 段）；报告 releases/suite/prompt-engineering-review.md",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 22:42:55",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 22:42:55",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "基线 JSON 合规 4/4、分类命中 3/4（T2 误判被 V2 修正）；混合版待落地复测",
+     "before": {
+      "title": "提示词工程评价与 A/B 优化（会审台 REVIEW_SYSTEM）",
+      "desc": "总评 87/100（同类前 10%）；A/B 实测：V2 锚点修正 T2 严重度误判（P2→P1）但 T3 弱信号 JSON 跑飞——定稿混合策略（severity 口径留 system/弱信号移 user 段）；报告 releases/suite/prompt-engineering-review.md",
       "assignee": "Agent-AutoClaw",
       "priority": "P2",
       "due": "2026-09-22",
