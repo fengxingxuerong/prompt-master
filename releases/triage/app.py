@@ -415,6 +415,35 @@ async def session_events(sid: str):
                                       "X-Accel-Buffering": "no"})
 
 
+@app.get("/api/usage-board")
+def usage_board():
+    """G-14 成本看板数据端点：只读 usage_daily.json，按日+按模型聚合。"""
+    usage_file = APP_DIR.parents[1] / "data" / "usage_daily.json"
+    days = []
+    if usage_file.exists():
+        try:
+            raw = json.loads(usage_file.read_text(encoding="utf-8"))
+            for date in sorted(raw.keys()):
+                d = raw[date]
+                days.append({"date": date, "calls": d.get("calls", 0),
+                             "success": d.get("success", 0),
+                             "latency_ms_sum": d.get("latency_ms_sum", 0),
+                             "failovers_sum": d.get("failovers_sum", 0),
+                             "by_model": d.get("by_model", {})})
+        except Exception:  # noqa: BLE001 - 损坏时返回空集（usage_store 自身会告警）
+            pass
+    total = {"calls": 0, "success": 0, "latency_ms_sum": 0, "failovers_sum": 0,
+             "by_model": {}}
+    for d in days:
+        for k in ("calls", "success", "latency_ms_sum", "failovers_sum"):
+            total[k] += d.get(k, 0)
+        for m, v in (d.get("by_model") or {}).items():
+            t = total["by_model"].setdefault(m, {"calls": 0, "success": 0})
+            t["calls"] += v.get("calls", 0)
+            t["success"] += v.get("success", 0)
+    return {"days": days, "total": total}
+
+
 @app.get("/api/reviewer_health")
 def reviewer_health():
     return load_health()
@@ -444,6 +473,15 @@ def health():
 @app.get("/")
 def index():
     return FileResponse(APP_DIR / "static" / "index.html")
+
+
+@app.get("/static/{name}")
+def static_file(name: str):
+    f = APP_DIR / "static" / name
+    if not f.exists() or ".." in name:
+        from fastapi import HTTPException
+        raise HTTPException(404, "not found")
+    return FileResponse(f)
 
 
 if __name__ == "__main__":

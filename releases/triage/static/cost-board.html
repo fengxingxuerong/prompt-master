@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM 用量成本看板 · ModelHub</title>
+<style>
+:root{--navy:#1b2a4a;--ink:#1c2733;--mut:#6b7686;--paper:#f7f7f4;--line:#d9dcd6;--ok:#1e7f5c;--blue:#2f5fbd;--mono:"Cascadia Code",Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font:14.5px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;padding:44px 22px}
+.wrap{max-width:1060px;margin:0 auto}
+header{border-bottom:3px solid var(--navy);padding-bottom:18px;margin-bottom:26px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px}
+h1{font-size:26px;font-weight:700;color:var(--navy)}
+.kicker{color:var(--blue);font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-family:var(--mono)}
+.src{font-family:var(--mono);font-size:11.5px;color:var(--mut);text-align:right}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 24px}
+.metric{background:#fff;border:1px solid var(--line);border-top:3px solid var(--navy);padding:15px}
+.metric .v{font-size:23px;font-weight:700;font-family:var(--mono);color:var(--navy)}
+.metric .k{color:var(--mut);font-size:11.5px;margin-top:3px}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);font-size:13px;margin-bottom:24px}
+th{background:var(--navy);color:#fff;text-align:left;padding:8px 12px;font-weight:600;font-size:11.5px;letter-spacing:.04em}
+td{padding:8px 12px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:none}
+td.mono{font-family:var(--mono);font-size:12px}
+.bar{background:#e8ebf2;height:14px;position:relative;min-width:60px}
+.bar>span{position:absolute;inset:0;background:var(--blue);display:block}
+.ok{color:var(--ok)}
+.note{font-size:12.5px;color:var(--mut);margin:8px 0 20px}
+h2{font-size:15px;color:var(--navy);margin:0 0 10px}
+footer{border-top:1px solid var(--line);padding-top:12px;color:var(--mut);font-size:11.5px;font-family:var(--mono);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div><div class="kicker">ModelHub · Usage Cost Board</div><h1>LLM 用量成本看板</h1></div>
+  <div class="src">数据源：data/usage_daily.json<br><span id="gen"></span></div>
+</header>
+<div id="root"><div class="note">加载中…（若长时间无响应，请确认 data/usage_daily.json 存在）</div></div>
+<footer><span>零依赖静态页 · 由 /api/usage-board 注入数据</span><span>PromptMaster Suite</span></footer>
+</div>
+<script>
+document.getElementById("gen").textContent = "生成于 " + new Date().toLocaleString("zh-CN");
+function fmt(n){return (n||0).toLocaleString("zh-CN")}
+function secs(ms){return (ms/1000).toFixed(1)+"s"}
+fetch("/api/usage-board").then(r=>r.json()).then(d=>{
+  const days=d.days||[];const total=d.total||{};
+  const maxCalls=Math.max(1,...days.map(x=>x.calls));
+  const models=Object.entries(total.by_model||{}).sort((a,b)=>b[1].calls-a[1].calls);
+  const maxModel=Math.max(1,...models.map(m=>m[1].calls));
+  let html="";
+  html+='<div class="metrics">'
+    +'<div class="metric"><div class="v">'+fmt(total.calls)+'</div><div class="k">累计调用</div></div>'
+    +'<div class="metric"><div class="v">'+fmt(total.success)+'</div><div class="k">成功</div></div>'
+    +'<div class="metric"><div class="v '+(total.calls===total.success?'ok':'')+'">'+(total.calls?Math.round(total.success/total.calls*100):0)+'%</div><div class="k">成功率</div></div>'
+    +'<div class="metric"><div class="v">'+secs(total.latency_ms_sum)+'</div><div class="k">总耗时</div></div>'
+    +'<div class="metric"><div class="v">'+fmt(total.failovers_sum)+'</div><div class="k">熔断切换次数</div></div>'
+    +'</div>';
+  html+='<h2>按日调用</h2><table><tr><th>日期</th><th>调用</th><th>成功</th><th>成功率</th><th>总耗时</th><th style="width:30%">分布</th></tr>';
+  days.forEach(x=>{
+    html+='<tr><td class="mono">'+x.date+'</td><td class="mono">'+fmt(x.calls)+'</td><td class="mono">'+fmt(x.success)+'</td><td class="mono">'+(x.calls?Math.round(x.success/x.calls*100):0)+'%</td><td class="mono">'+secs(x.latency_ms_sum)+'</td><td><div class="bar"><span style="width:'+Math.round(x.calls/maxCalls*100)+'%"></span></div></td></tr>';
+  });
+  html+='</table>';
+  html+='<h2>按模型累计</h2><table><tr><th>模型</th><th>调用</th><th>成功</th><th style="width:34%">占比</th></tr>';
+  models.forEach(([name,v])=>{
+    html+='<tr><td class="mono">'+name+'</td><td class="mono">'+fmt(v.calls)+'</td><td class="mono">'+fmt(v.success)+'</td><td><div class="bar"><span style="width:'+Math.round(v.calls/maxModel*100)+'%"></span></div></td></tr>';
+  });
+  html+='</table>';
+  if(!days.length)html='<div class="note">暂无数据：usage_daily.json 为空（服务刚重建或无调用）。</div>';
+  document.getElementById("root").innerHTML=html;
+}).catch(e=>{document.getElementById("root").innerHTML='<div class="note">加载失败：'+e.message+'（需经会审台服务 :8793 访问本页）</div>'});
+</script>
+</body>
+</html>

@@ -99,68 +99,11 @@ function submitTicket(){
   const btn=document.getElementById("go");btn.disabled=true;
   document.getElementById("empty").style.display="none";
   document.getElementById("result").style.display="none";
-  document.getElementById("status").textContent="已受理，6 位评委并行研判中…（实时进度见下方）";
+  document.getElementById("status").textContent="6 位评委并行研判中…（约 10-130s，视最慢评委而定）";
   fetch("/api/reviews",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({subject,body})})
     .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
-    .then(d=>{
-      window._sid=d.session_id;
-      window._verdicts=[];window._livebox={};renderLiveHeader();
-      listenEvents(d.session_id,d.events,btn);
-      // SSE 兜底：若 150s 未收到 done，回退轮询
-      window._fallbackTimer=setTimeout(()=>{if(window._es&&window._es.readyState!==0){try{window._es.close()}catch(e){}pollUntilDone(d.session_id,btn)}},150000);
-    })
+    .then(s=>{render(s);btn.disabled=false;document.getElementById("status").textContent=""})
     .catch(e=>{document.getElementById("status").textContent="";err.style.display="block";err.textContent="会审失败："+e.message;btn.disabled=false});
-}
-function renderLiveHeader(){
-  document.getElementById("result").style.display="block";
-  document.getElementById("vbody").innerHTML="";
-  document.getElementById("cbox").innerHTML='<div class="cbox"><div class="v cat">…</div><div class="k">共识分类</div></div><div class="cbox"><div class="v">…</div><div class="k">严重度</div></div><div class="cbox"><div class="v">…</div><div class="k">一致率</div></div><div class="cbox"><div class="v">…</div><div class="k">会审耗时</div></div><div style="width:100%;font-size:13px;color:#c4cdd8">评委逐票实时研判中：<span id="live-seats">-</span></div>';
-  document.getElementById("dissent").innerHTML="";
-}
-function upsertRow(rec){
-  // progress 事件 → 表格行实时更新
-  const CAT=CATS;
-  const vd=rec.verdict||null;
-  const tr=document.createElement("tr");
-  tr.id="row-"+rec.seat;
-  tr.innerHTML=`<td>${rec.seat}</td><td class="mono">${rec.model}</td>
-    <td>${vd?(CAT[vd.category]||vd.category):"—"}</td>
-    <td>${vd?vd.severity:"—"}</td>
-    <td class="mono">${vd?vd.confidence:"—"}</td>
-    <td class="mono">${((rec.latency_ms||0)/1000).toFixed(1)}s</td>
-    <td class="${rec.has_verdict?"ok":"bad"}">${rec.has_verdict?"有效":(rec.parse_error?"解析失败":"调用失败")}</td>`;
-  const old=document.getElementById("row-"+rec.seat);
-  if(old)old.replaceWith(tr);else document.getElementById("vbody").appendChild(tr);
-}
-function listenEvents(sid,evUrl,btn){
-  if(window._es){try{window._es.close()}catch(e){}}
-  const es=new EventSource(evUrl);window._es=es;
-  es.addEventListener("progress",ev=>{
-    const d=JSON.parse(ev.data);
-    if(d.type==="review"){
-      upsertRow(d);
-      window._livebox[d.seat]=d.has_verdict;
-      const done_n=Object.keys(window._livebox).length;
-      const ok_n=Object.values(window._livebox).filter(Boolean).length;
-      document.getElementById("live-seats").textContent=
-        `${done_n}/6 已回报（${ok_n} 有效）· ${d.elapsed_ms?(d.elapsed_ms/1000).toFixed(1)+"s":""}`;
-    }
-  });
-  es.addEventListener("done",ev=>{
-    clearTimeout(window._fallbackTimer);
-    const d=JSON.parse(ev.data);
-    es.close();
-    // done 事件带共识但无逐票明细 → 轮询一次补全渲染
-    fetch("/api/sessions/"+sid).then(r=>r.json()).then(s=>{render(s);btn.disabled=false;document.getElementById("status").textContent=""});
-  });
-  es.onerror=()=>{es.close();pollUntilDone(sid,btn)};
-}
-function pollUntilDone(sid,btn){
-  const timer=setInterval(()=>{
-    fetch("/api/sessions/"+sid).then(r=>r.json()).then(s=>{
-      if(s.status==="done"){clearInterval(timer);render(s);btn.disabled=false;document.getElementById("status").textContent=""}
-    }).catch(()=>{});
-  },2000);
 }
 function render(s){
   document.getElementById("result").style.display="block";

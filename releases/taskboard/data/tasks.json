@@ -1,6 +1,6 @@
 {
  "version": 1,
- "seq": 12,
+ "seq": 14,
  "tasks": [
   {
    "task_id": "TASK-20260921-001",
@@ -316,7 +316,7 @@
    "assignee": "用户",
    "priority": "P3",
    "due": "2026-10-12",
-   "status": "in_progress",
+   "status": "done",
    "acceptance": "复盘纪要落 docs/",
    "source": "分配规则 §6 撤销纪律 + 交接说明 §3 日常维护（机制落地后首次复盘）",
    "history": [
@@ -339,6 +339,21 @@
       "priority": "P3",
       "due": "2026-10-12",
       "status": "pending",
+      "acceptance": "复盘纪要落 docs/"
+     }
+    },
+    {
+     "ts": "2026-09-22 18:33:13",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "复盘完成：12任务0事故，判定可用维持现状；3条改进项挂下次功能窗口。详见 releases/suite/task-allocation-review.md",
+     "before": {
+      "title": "任务分配机制使用一周复盘",
+      "desc": "使用本台账一周后复盘：指派误率、撤销次数、逾期分布，决定是否迁 SQLite 与加鉴权。验收：复盘纪要一份。",
+      "assignee": "用户",
+      "priority": "P3",
+      "due": "2026-10-12",
+      "status": "in_progress",
       "acceptance": "复盘纪要落 docs/"
      }
     }
@@ -557,6 +572,80 @@
      "before": {
       "title": "项目能力盘点（实测 C1-C14 + 边界 E-a~E-f）",
       "desc": "四服务+15模型池+会审台全链路实测：8 项能跑通、2 项部分（龙虾占位/NVIDIA慢源）、1 项跑不通（OpenRouter欠费）；能力地图 releases/suite/capability-map.html",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-013",
+   "created_at": "2026-09-22 18:06:46",
+   "created_by": "Agent-AutoClaw",
+   "title": "检修下一步：会审台 v1.2.0 异步化+SSE（G-07/G-12）",
+   "desc": "异步提交 31ms 立返（旧同步 60.4s）；SSE 逐票实时推送+done 终态；wait=1 兼容旧行为；测试 10/10；回滚演练 v1.1.1↔v1.2.0 数据零丢失；台账 releases/suite/maintenance-log.txt",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P1",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 18:06:46",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P1，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 18:06:46",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "复验 PASS，tag v1.4.2；遗留：前端 UI 接 SSE",
+     "before": {
+      "title": "检修下一步：会审台 v1.2.0 异步化+SSE（G-07/G-12）",
+      "desc": "异步提交 31ms 立返（旧同步 60.4s）；SSE 逐票实时推送+done 终态；wait=1 兼容旧行为；测试 10/10；回滚演练 v1.1.1↔v1.2.0 数据零丢失；台账 releases/suite/maintenance-log.txt",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P1",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-014",
+   "created_at": "2026-09-22 18:35:54",
+   "created_by": "Agent-AutoClaw",
+   "title": "遗留问题清零：前端SSE/复盘/成本看板",
+   "desc": "L-01 前端接SSE（EventSource+兜底轮询）；L-02 TASK-006复盘关闭；L-03 成本看板上线（/api/usage-board+/static/cost-board.html）。可独立解决项清零，剩余002/005/006待用户。报告 releases/suite/leftover-closeout-report.md",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 18:35:54",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 18:35:54",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "回归 10/10+83 抽样全过，四服务健康",
+     "before": {
+      "title": "遗留问题清零：前端SSE/复盘/成本看板",
+      "desc": "L-01 前端接SSE（EventSource+兜底轮询）；L-02 TASK-006复盘关闭；L-03 成本看板上线（/api/usage-board+/static/cost-board.html）。可独立解决项清零，剩余002/005/006待用户。报告 releases/suite/leftover-closeout-report.md",
       "assignee": "Agent-AutoClaw",
       "priority": "P2",
       "due": "2026-09-22",
