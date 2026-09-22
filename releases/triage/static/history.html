@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会审历史 · 多模型会审台</title>
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--card:#1c2330;--line:#2a3342;--ink:#e6edf3;--mut:#8b98a9;--blue:#4f8ff7;--green:#3fb27f;--red:#e0645c;--amber:#d9a53f;--mono:"Cascadia Code",Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;padding:28px 18px}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-size:22px;font-weight:650;margin-bottom:4px}
+.sub{color:var(--mut);font-size:13px;margin-bottom:22px}
+.sub a{color:var(--blue);text-decoration:none}
+.cols{display:grid;grid-template-columns:420px 1fr;gap:18px}
+@media(max-width:860px){.cols{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.panel h2{font-size:14px;color:var(--mut);font-weight:600;letter-spacing:.06em;margin-bottom:12px;text-transform:uppercase}
+.sess{padding:10px 12px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;cursor:pointer;font-size:13px}
+.sess:hover{border-color:var(--blue)}
+.sess.active{border-color:var(--blue);background:var(--card)}
+.sess .t{font-weight:600}
+.sess .m{color:var(--mut);font-family:var(--mono);font-size:11.5px;margin-top:2px}
+.empty{color:var(--mut);text-align:center;padding:40px 0;font-size:13px}
+#detail .verdict{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:13px}
+#detail .verdict .head{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--mut)}
+#detail .verdict .json{font-family:var(--mono);font-size:12px;color:#c4cdd8;white-space:pre-wrap;word-break:break-all;margin-top:6px}
+.bad{color:var(--red)}
+.ok{color:var(--green)}
+.dl{background:var(--card);border-radius:8px;padding:10px 14px;font-family:var(--mono);font-size:12px;color:#c4cdd8;margin:10px 0}
+.back{color:var(--blue);text-decoration:none;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>会审历史</h1>
+<div class="sub">全部会话与调用留痕 · <a href="/">← 返回会审台</a> · <a href="/static/cost-board.html">成本看板</a></div>
+<div class="cols">
+  <div class="panel">
+    <h2>会话列表</h2>
+    <div id="list" class="empty">加载中…</div>
+  </div>
+  <div class="panel">
+    <h2>会话详情</h2>
+    <div id="detail" class="empty">从左侧选择一个会话查看评委逐票研判与共识。</div>
+  </div>
+</div>
+</div>
+<script>
+const CATS={billing:"账单",technical:"技术",logistics:"物流",complaint:"投诉",other:"其他"};
+fetch("/api/sessions").then(r=>r.json()).then(d=>{
+  const el=document.getElementById("list");
+  if(!d.count){el.textContent="暂无会话";return}
+  el.className="";
+  d.sessions.forEach(s=>{
+    const div=document.createElement("div");
+    div.className="sess";
+    div.innerHTML=`<div class="t">${s.subject||s.session_id}</div><div class="m">${s.session_id} · ${s.status}</div>`;
+    div.onclick=()=>{document.querySelectorAll(".sess").forEach(x=>x.classList.remove("active"));div.classList.add("active");loadDetail(s.session_id)};
+    el.appendChild(div);
+  });
+});
+function loadDetail(sid){
+  fetch("/api/sessions/"+sid).then(r=>r.json()).then(s=>{
+    const el=document.getElementById("detail");
+    el.className="";
+    const c=s.consensus||{};
+    let h=`<div class="dl">会话 ${s.session_id} · ${s.ts}<br>工单：${(s.ticket&&s.ticket.subject)||""}<br>共识：${c.category?CATS[c.category]||c.category:"—"} / ${c.severity||"—"}（${c.votes||"-"} 票，一致率 ${c.agreement!=null?Math.round(c.agreement*100):0}%）<br>建议动作：${c.action||"—"}</div>`;
+    h+="<h3 style='font-size:13px;color:var(--mut);margin:14px 0 8px'>评委逐票</h3>";
+    (s.verdicts||[]).forEach(v=>{
+      const vd=v.verdict;
+      h+=`<div class="verdict"><div class="head"><span>${v.seat} · ${v.model}</span><span>${(v.latency_ms/1000).toFixed(1)}s · ${v.late?'late':(vd?'有效':'失败')}</span></div>`;
+      h+=vd?`<div class="json">${JSON.stringify(vd,null,1)}</div>`
+          :`<div class="bad">${v.parse_error||v.error||"无研判"}</div>`;
+      h+="</div>";
+    });
+    if(s.feedback)h+=`<div class="dl">人工反馈：${s.feedback.rating} 星 · ${s.feedback.comment||""}（${s.feedback.ts}）</div>`;
+    el.innerHTML=h;
+  });
+}
+</script>
+</body>
+</html>

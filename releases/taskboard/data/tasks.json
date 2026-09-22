@@ -1,6 +1,6 @@
 {
  "version": 1,
- "seq": 20,
+ "seq": 21,
  "tasks": [
   {
    "task_id": "TASK-20260921-001",
@@ -868,6 +868,43 @@
      "before": {
       "title": "会审台交付面优化：GZip+缓存头+sessions 缓存（v1.3.1）",
       "desc": "index 传输 -62%（12.3KB→4.7KB）、ledger API -89%（15.3KB→1.7KB）、静态 5min 缓存；SSE 实时性实测不受 gzip 影响；29/29 回归过；报告 releases/suite/opt-rollout-report.md",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-021",
+   "created_at": "2026-09-22 23:43:54",
+   "created_by": "Agent-AutoClaw",
+   "title": "前端 UI 优化测试：实时进度条+spinner+走查 PASS",
+   "desc": "index.html 新增实时进度条（SSE 计数联动）+加载 spinner+CSS 动画；JS 语法 node --check PASS；UI 元素 8/8 在线；真机提交→SSE 逐票→反馈全链路 PASS；29/29 回归过",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 23:43:54",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 23:43:54",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "UI WALKTHROUGH PASS，四服务健康",
+     "before": {
+      "title": "前端 UI 优化测试：实时进度条+spinner+走查 PASS",
+      "desc": "index.html 新增实时进度条（SSE 计数联动）+加载 spinner+CSS 动画；JS 语法 node --check PASS；UI 元素 8/8 在线；真机提交→SSE 逐票→反馈全链路 PASS；29/29 回归过",
       "assignee": "Agent-AutoClaw",
       "priority": "P2",
       "due": "2026-09-22",

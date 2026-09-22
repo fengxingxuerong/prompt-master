@@ -125,7 +125,7 @@ def test_ledger_traceability(client):
     r = client.post("/api/reviews", json={"subject": "发票错误", "body": "抬头开错"})
     sid = r.json()["session_id"]
     client.post(f"/api/sessions/{sid}/feedback", json={"rating": 4})
-    led = client.get("/api/ledger?limit=100").json()
+    led = client.get(f"/api/ledger?limit=100&session={sid}").json()
     kinds = {e["kind"] for e in led["entries"]}
     assert {"review", "consensus", "feedback"} <= kinds
     sample = next(e for e in led["entries"] if e["kind"] == "review")
