@@ -58,7 +58,8 @@
 | 禁止抑制型条款（OPTIMIZER 硬性规则 7 / `quality.py` `suppressive_rule`） | 同上 R1-c：「停止处理」「不输出任何结论」「仅输出固定 token」→ robustness 8.75→7.88，且与"边界仍要作答"的骨架要求冲突 |
 | 「完全为空」与「非空但数据不足」两条互斥分支（OPTIMIZER 硬性规则 8 / `quality.py` `blanket_missing_branch`） | 同日志第 1、2 轮：合并成一条兜底后，含 120 万/98 万的用例被整段判「数据缺失」，事实断言失败，两轮修订都没修掉 |
 | 「格式不规范」≠「字段缺失」（OPTIMIZER 硬性规则 8） | 同日志第 2 轮：日期写法混排被判成"没有该字段" |
-| 评委锚定：编造类违规落 5-6 档（`prompts.py` EVALUATOR 锚定规则） | `judge_calibration/samples.json` 的人工分 vs 评委分对比（`calibrate_judge.py`） |
+| 评委锚定：编造/无依据关键事实落 **3-4 档** + 加权总分封顶 6.0（`prompts.py` EVALUATOR 锚定规则；2026-09-18 从旧的 5-6 档下移） | 三角色在 11 条锚点上的 MAE 0.90~0.98、偏差 +0.41~+0.62（`logs/judge_calibration_history.json`）；旧 6 条手写锚点上曾报 0.37/0.46，扩集后作废为"考卷太易" |
+| 评委锚定：**核心交付物缺位/被不可核对的断言糊过去** → task_completion ≤5、总分封顶 7.0，并配"真·信息不足不扣分"的反向护栏（2026-09-20 新增） | 三家不同谱系的评委在**同两条**锚点上同向偏 +2.25~+3.53（`real-triage-overconservative` 人工 6.0 vs 评委 8.8/9.53/9.45；`real-sales-derived-stats` 人工 7.0 vs 9.25/9.6），护栏一侧的证据是争议子集里两条"正确拒答"人工给 8.5/8.7（`judge_calibration/samples_disputed.json`）。算式与护栏由 `tests/test_flow.py` 钉住。**验证结果（2026-09-20 重基线，评委 A）**：`real-triage-overconservative` 8.80→6.35（Δ +2.80→+0.35，移动量是 A 自我极差的 3.5 倍）；`real-sales-derived-stats` 仍 8.85（Δ+1.85，未触发 7.0 封顶）⇒ **只落了第一形**，第二形的写法待改；护栏侧三家都没误伤正确拒答。详见 `docs/evaluation.md` §八 |
 | 记忆参考相似度门槛 0.35（`memory.py` `_SIM_MIN`） | `logs/memory_benefit.json`：0.275 的"语义族邻居"被照抄，v0 均分 1.19，同任务无参考的修订轮 9.65 |
 
 

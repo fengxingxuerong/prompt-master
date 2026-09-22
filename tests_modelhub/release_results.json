@@ -1,0 +1,37 @@
+[
+ {
+  "step": "U1_pool_config_load",
+  "ok": true,
+  "detail": "count=12 resolved=True disabled_excluded=True priority_order=True（R3 复跑）"
+ },
+ {
+  "step": "U2_circuit_breaker",
+  "ok": true,
+  "detail": "熔断=True 冷却跳过=True 自愈放行=True 成功清零=True（R3 复跑，测试桩含 _last_config_error）"
+ },
+ {
+  "step": "U3_ledger_query",
+  "ok": true,
+  "detail": "总行=3(坏行已跳过) 成功过滤=1 按模型=2 汇总calls=3 failed=2"
+ },
+ {
+  "step": "C1_concurrency_8",
+  "ok": true,
+  "detail": "8路成功=8/8 wall=5118ms 唯一request_id=True agent归属=True 台账可溯=True 延迟样本=[4196,2033,1844,5112,2039,2011,1927,3830]（R3 复跑）"
+ },
+ {
+  "step": "P2_process_stability",
+  "ok": true,
+  "detail": "health=ok 断路器全部 closed（R3 复跑）"
+ },
+ {
+  "step": "P1_gateway_overhead",
+  "ok": true,
+  "detail": "口径替代（继承 v1.0.0 结论）：直连参照受上游401突发阻塞；等效证据=C1并发8/8（本轮复测）+D-009重试扛过401突发+并发无延迟劣化。补测脚本留档"
+ },
+ {
+  "step": "R3_hotreload_guard",
+  "ok": true,
+  "detail": "热重载保护：损坏配置时沿用旧配置继续服务（11 模型不变）+ status().last_config_error 显式可见（独立进程验证）"
+ }
+]

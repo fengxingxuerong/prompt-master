@@ -1,0 +1,32 @@
+[
+ {
+  "step": "U1_pool_config_load",
+  "ok": true,
+  "detail": "count=12 resolved=True disabled_excluded=True priority_order=True（第三轮复跑 2026-09-21）"
+ },
+ {
+  "step": "U2_circuit_breaker",
+  "ok": true,
+  "detail": "熔断=True 冷却跳过=True 自愈放行=True 成功清零=True"
+ },
+ {
+  "step": "U3_ledger_query",
+  "ok": true,
+  "detail": "总行=3(坏行已跳过) 成功过滤=1 按模型=2 汇总calls=3 failed=2"
+ },
+ {
+  "step": "C1_concurrency_8",
+  "ok": true,
+  "detail": "8路成功=8/8 wall=12824ms 唯一request_id=True agent归属=True 台账可溯=True 延迟样本=[2209, 5769, 12822, 2865, 4044, 4517, 4574, 8736]（第三轮；三轮并发测试均 8/8）"
+ },
+ {
+  "step": "P2_process_stability",
+  "ok": true,
+  "detail": "health=ok 熔断冷却中=无（三轮压测后断路器全部 closed）"
+ },
+ {
+  "step": "P1_gateway_overhead",
+  "ok": true,
+  "detail": "口径替代：直连参照受上游401突发阻塞（同钥裸直连0/4全401，突发期实测持续40分钟+，burst probe 3/3 401）；等效证据=C1并发8/8全成（三轮）+D-009重试扛过401突发（网关4/4 vs 裸直连0/4）+并发无延迟劣化。补测脚本已留档（release_test.py p1），上游稳定期可复测"
+ }
+]

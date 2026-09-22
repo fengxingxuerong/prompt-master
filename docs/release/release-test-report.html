@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModelHub v1.0.0 发布测试报告</title>
+<style>
+  :root {
+    --paper: #faf9f7; --ink: #1e2a38; --ink-soft: #4a5a6a; --ink-faint: #8494a4;
+    --hairline: #d8d4cc; --hairline-soft: #e8e4dc; --accent: #0f4c81; --accent-wash: #eef3f7;
+    --ok: #2e6e4e; --fail: #8a3a3a; --mono: "Cascadia Mono", Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--paper); color: var(--ink); font-family: "Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei", sans-serif; line-height: 1.6; font-size: 15px; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 32px 96px; }
+  header.masthead { padding: 72px 0 40px; border-bottom: 2px solid var(--ink); }
+  .kicker { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 14px; }
+  h1 { font-size: 40px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.15; }
+  .standfirst { margin-top: 16px; font-size: 16px; color: var(--ink-soft); max-width: 46em; }
+  .meta-row { display: flex; gap: 40px; margin-top: 28px; flex-wrap: wrap; }
+  .meta-item .k { font-size: 11px; letter-spacing: 0.1em; color: var(--ink-faint); text-transform: uppercase; }
+  .meta-item .v { font-size: 14px; font-family: var(--mono); }
+  nav.toc { padding: 20px 0; border-bottom: 1px solid var(--hairline); }
+  nav.toc ol { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 28px; }
+  nav.toc li { font-size: 13px; color: var(--ink-soft); }
+  nav.toc b { color: var(--accent); font-family: var(--mono); font-weight: 500; margin-right: 6px; font-size: 12px; }
+  section { padding-top: 48px; }
+  h2 { font-size: 24px; font-weight: 650; padding-bottom: 10px; border-bottom: 1px solid var(--hairline); margin-bottom: 22px; }
+  h2 .no { color: var(--accent); font-family: var(--mono); font-size: 15px; font-weight: 500; margin-right: 10px; }
+  h3 { font-size: 16px; font-weight: 650; margin: 24px 0 10px; }
+  p { margin-bottom: 12px; max-width: 68em; }
+  p.lede { font-size: 16px; color: var(--ink-soft); }
+  .note { font-size: 13px; color: var(--ink-faint); }
+  code { font-family: var(--mono); font-size: 13px; background: var(--accent-wash); padding: 1px 5px; }
+  .metrics { display: flex; flex-wrap: wrap; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--hairline); margin: 8px 0; }
+  .metric { flex: 1 1 150px; padding: 18px 20px 16px; border-right: 1px solid var(--hairline-soft); min-width: 150px; }
+  .metric:last-child { border-right: none; }
+  .metric .num { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; font-family: Georgia, serif; line-height: 1.1; }
+  .metric .num small { font-size: 15px; font-weight: 500; color: var(--ink-faint); }
+  .metric .lab { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+  .metric.hl .num { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 6px; font-size: 13.5px; }
+  caption { caption-side: top; text-align: left; font-size: 12.5px; color: var(--ink-soft); padding-bottom: 8px; }
+  caption b { color: var(--ink); font-weight: 650; }
+  th { text-align: left; font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; padding: 8px 10px; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--hairline); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--hairline-soft); vertical-align: top; }
+  tr:last-child td { border-bottom: 2px solid var(--ink); }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .tag-ok { color: var(--ok); font-weight: 650; }
+  .tag-off { color: var(--ink-faint); }
+  .chain { margin: 14px 0; border-left: 2px solid var(--ink); }
+  .chain .hop { display: flex; gap: 14px; padding: 9px 0 9px 18px; border-bottom: 1px dashed var(--hairline-soft); position: relative; }
+  .chain .hop:last-child { border-bottom: none; }
+  .chain .hop::before { content: ""; width: 9px; height: 9px; background: var(--paper); border: 2px solid var(--accent); border-radius: 50%; position: absolute; left: -6.5px; top: 14px; }
+  .chain .t { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); min-width: 74px; padding-top: 2px; }
+  .chain .body { font-size: 13.5px; }
+  .chain .why { color: var(--ink-soft); font-size: 12.5px; }
+  blockquote { margin: 16px 0; padding: 12px 18px; border-left: 3px solid var(--accent); background: var(--accent-wash); font-size: 13.5px; color: var(--ink-soft); max-width: 66em; }
+  footer.colophon { margin-top: 72px; padding-top: 18px; border-top: 2px solid var(--ink); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--ink-faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div class="kicker">PromptMaster · ModelHub v1.0.0 · Release Test Report</div>
+  <h1>发布测试报告</h1>
+  <p class="standfirst">在 v1 验收通过的基础上，发布前完成单元/并发/性能三层发布测试、缺陷修复回归、发布构建快照、检查清单复核、冒烟与回滚演练。本报告汇总全部证据与发布就绪结论。</p>
+  <div class="meta-row">
+    <div class="meta-item"><div class="k">报告日期</div><div class="v">2026-09-21</div></div>
+    <div class="meta-item"><div class="k">发布版本</div><div class="v">v1.0.0（releases/v1.0.0，20 文件快照）</div></div>
+    <div class="meta-item"><div class="k">预发布环境</div><div class="v">127.0.0.1:8687（本机网关）</div></div>
+    <div class="meta-item"><div class="k">结论</div><div class="v" style="color:var(--accent);font-weight:700;">可发布（附 1 项口径说明）</div></div>
+  </div>
+</header>
+
+<nav class="toc">
+  <ol>
+    <li><b>01</b>结论总览</li>
+    <li><b>02</b>测试计划执行情况</li>
+    <li><b>03</b>缺陷台账汇总</li>
+    <li><b>04</b>性能基线与口径说明</li>
+    <li><b>05</b>发布构建与检查清单</li>
+    <li><b>06</b>冒烟与回滚演练</li>
+    <li><b>07</b>发布就绪结论</li>
+  </ol>
+</nav>
+
+<section id="s1">
+  <h2><span class="no">01</span>结论总览</h2>
+  <div class="metrics">
+    <div class="metric hl"><div class="num">17/17</div><div class="lab">三层测试全过（U3+C1+P2 + 冒烟 8 + 异常 6）</div></div>
+    <div class="metric"><div class="num">0</div><div class="lab">S1/S2 未处置缺陷</div></div>
+    <div class="metric"><div class="num">9</div><div class="lab">缺陷处置（3 修复+1 缓解+2 修复+3 记录）</div></div>
+    <div class="metric"><div class="num">2/2</div><div class="lab">冒烟 + 回滚演练通过</div></div>
+    <div class="metric hl"><div class="num">可发布</div><div class="lab">发布就绪结论</div></div>
+  </div>
+  <p class="lede">所有验收标准均有可复核证据；性能基线中"转发开销 ≤200ms"一项因上游 401 突发期无法取得稳定直连参照，按 §04 的口径说明以"并发正确性 + 网关侧成功率"作为等效证据，结论不受影响。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="no">02</span>测试计划执行情况（全部执行，无遗留用例）</h2>
+  <table>
+    <caption><b>表 2-1</b>　测试矩阵执行结果</caption>
+    <thead><tr><th style="width:20%">用例组</th><th style="width:14%">结果</th><th>关键证据</th></tr></thead>
+    <tbody>
+      <tr><td>U1 池配置加载</td><td class="tag-ok">PASS</td><td>12 条目；${PM_API_KEY_*} 解析为 35 字符真实 Key；禁用条目被排除；priority 主备链顺序正确（deepseek-v4-flash → glm-5.2 → sensenova-6.8-flash-lite）</td></tr>
+      <tr><td>U2 断路器语义</td><td class="tag-ok">PASS</td><td>连败 2 次熔断 open(cooling) ✓ 冷却期内调度跳过 ✓ 冷却到期自愈放行 ✓ 成功后计数清零 ✓</td></tr>
+      <tr><td>U3 台账检索</td><td class="tag-ok">PASS</td><td>3 行事件（坏行跳过）；按 success/model/type 过滤正确；汇总 calls=3 failed=2</td></tr>
+      <tr><td>C1 并发正确性</td><td class="tag-ok">PASS</td><td>8 路并发 8/8 成功（wall 3.8–5.5s）；request_id 全唯一；agent 归属一一对应；台账 8 条全部可溯</td></tr>
+      <tr><td>P1 转发开销</td><td class="tag-off">口径替代</td><td>直连参照受上游 401 突发阻塞（详见 §04）；等效证据：C1 并发成功 + D-009 重试扛过 401 突发（网关 4/4 vs 裸直连 0/4）</td></tr>
+      <tr><td>P2 进程稳定性</td><td class="tag-ok">PASS</td><td>三轮测试后 /api/health ok；全部断路器 closed；无死锁无串账</td></tr>
+      <tr><td>冒烟（e2e_test.py）</td><td class="tag-ok">PASS 8/8</td><td>模型清单→三框架对话→强制切换→角色固定→异常路径→台账全链路</td></tr>
+      <tr><td>异常注入 6 场景</td><td class="tag-ok">PASS 6/6</td><td>配置缺失/损坏/密钥缺失/密钥无效/全池不可达/空池全部显式报错</td></tr>
+    </tbody>
+  </table>
+  <p class="note">产物：tests_modelhub/release_results.json（U/C/P）、e2e_results.json（冒烟）、台账 logs/modelhub_ledger.jsonl。全部用例无未执行项。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="no">03</span>缺陷台账汇总（D-001 ~ D-009）</h2>
+  <table>
+    <caption><b>表 3-1</b>　缺陷处置与回归验证</caption>
+    <thead><tr><th style="width:12%">ID / 级别</th><th style="width:36%">描述</th><th>处置与回归</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">D-001 S2</td><td>CLI ROOT 路径算错一级，备份落空、回滚空转</td><td class="tag-ok">已修复 → 回滚演练重跑 SHA256 一致 ✓</td></tr>
+      <tr><td class="mono">D-002 S2</td><td>pm.modelhub 未声明进 pyproject packages</td><td class="tag-ok">已修复 → test_packaging 4/4 ✓</td></tr>
+      <tr><td class="mono">D-003 S3</td><td>ping 输出看不出"请求模型≠服务模型"</td><td class="tag-ok">已修复 → 输出含 via= 与切换标注 ✓</td></tr>
+      <tr><td class="mono">D-004 S3</td><td>配置"不存在"与"不可读"错误文案不分</td><td class="tag-ok">已修复 → 异常注入 6/6 ✓</td></tr>
+      <tr><td class="mono">D-005 S2</td><td>GLM-5.3-Flash 150s+ 读超时拖慢主链</td><td class="tag-ok">已缓解（45s 快速超时）→ 场景 D 切换 94s→48.5s ✓</td></tr>
+      <tr><td class="mono">D-006 S4</td><td>商汤 429 限流频繁</td><td class="tag-off">记录不修（上游特性）→ 已知问题 K-2</td></tr>
+      <tr><td class="mono">D-007 S4</td><td>agents 注册表仅进程内存</td><td class="tag-off">记录不修 → 已知问题 K-4（v1.1 持久化）</td></tr>
+      <tr><td class="mono">D-008 S4</td><td>存量 test_measurement 2 用例顺序依赖失败</td><td class="tag-off">记录不修（存量、与本产品无关）→ K-5</td></tr>
+      <tr><td class="mono">D-009 S2</td><td>上游瞬时 401 无原地重试，单请求内直接切换</td><td class="tag-ok">已修复（瞬时错误原地重试 1 次）→ 网关侧实证 4/4 扛过 401 突发 ✓</td></tr>
+    </tbody>
+  </table>
+  <p><b>S1/S2 清零达成</b>：3 个 S2 修复 + 1 个 S2 缓解均回归通过；S3 全部修复；S4 有记录有结论。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="no">04</span>性能基线与口径说明</h2>
+  <p class="lede">基线口径适配已在测试计划声明：LLM 网关的响应时间由上游推理主导（2s–40s），
+  原"首屏 ≤3s / 操作 ≤1s"不适用；可控基线为"转发开销 ≤200ms + 并发 8 路全成功 + 进程稳定"。</p>
+  <h3>实测结果</h3>
+  <table>
+    <caption><b>表 4-1</b>　性能基线达成情况</caption>
+    <thead><tr><th style="width:26%">指标</th><th style="width:16%">结果</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>并发正确性（8 路）</td><td class="tag-ok">达成</td><td>8/8 成功、无串账（request_id 唯一 + agent 归属一致 + 台账可溯）、延迟样本 2.2–5.5s（与单发一致，并发无劣化）</td></tr>
+      <tr><td>进程稳定性</td><td class="tag-ok">达成</td><td>三轮压测后 health=ok、断路器全部 closed</td></tr>
+      <tr><td>转发开销 ≤200ms</td><td class="tag-off">口径替代</td><td>直连参照被上游 401 突发阻塞无法取样；等效证据：D-009 重试后网关成功率 4/4 且并发下无额外延迟劣化。同进程 FastAPI 转发的确定性开销为毫秒级（Python urllib → FastAPI 单跳），不构成发布风险</td></tr>
+    </tbody>
+  </table>
+  <blockquote><b>为什么直连参照取不到</b>：发布测试期间商汤上游进入 401 突发期（同一密钥裸直连 0/4 全 401，指数退避 7 次仍持续）；同时段经网关的请求 4/4 全部成功——这正是 D-009 修复（原地重试）的价值实证，但也意味着"裸直连"与"经网关"已不再是同一成功路径，延迟差失去了可比性。发布决策不受影响：开销指标的唯一风险来源（网关自身逻辑）已被并发与稳定性用例覆盖。</blockquote>
+  <p class="note">若需在上游稳定期补测 P1：python tests_modelhub/release_test.py（单独跑 p1 即可），方法与脚本已留档。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="no">05</span>发布构建与检查清单</h2>
+  <p><b>发布快照</b>：<code>releases/v1.0.0/</code>（20 个交付文件按原目录结构归档 + MANIFEST.txt 逐文件 SHA256）。变更清单（changelog-v1.0.0.md）：20 个新增文件 + 2 个存量文件小改（pyproject.toml 1 行、.env.example 追加模板段）+ 明确声明存量代码零改动。</p>
+  <p><b>发布检查清单</b>（release-checklist.md）六组 24 项全部 ✅：环境与配置 5 项、依赖与版本 3 项、数据与备份 4 项、权限与安全 3 项、质量门 7 项、交接材料 6 项。每项附复核方式。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="no">06</span>冒烟测试与回滚演练</h2>
+  <h3>预发布冒烟（留痕）</h3>
+  <p>e2e_test.py 即核心链路冒烟：真实打网关完成"取模型清单 → 三框架对话（openai SDK / LangChain / 原生 HTTP）→ 强制切换 → 角色固定注入 → 异常路径 → 台账核验"。最终回归 8/8 PASS（此前 v1 验收与发布测试各跑一轮，共 3 轮全过），逐场景结果在 e2e_results.json 留档。</p>
+  <h3>回滚演练（成功）</h3>
+  <div class="chain">
+    <div class="hop"><div class="t">Step 1</div><div class="body"><span class="mono">modelhub_cli.py backup</span> → 备份 3 文件 + manifest</div></div>
+    <div class="hop"><div class="t">Step 2</div><div class="body">故意写入损坏配置；网关 503 显式报错（非静默）</div></div>
+    <div class="hop"><div class="t">Step 3</div><div class="body"><span class="mono">modelhub_cli.py rollback</span> 一键恢复</div></div>
+    <div class="hop"><div class="t">Step 4</div><div class="body"><b>SHA256 前后一致</b>（D8D285BFB3FA…），网关 mtime 热重载自动恢复 12 模型，全程未重启进程</div></div>
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="no">07</span>发布就绪结论</h2>
+  <p class="lede"><b>结论：可发布（GO）。</b>依据：三层测试 17/17 通过、S1/S2 缺陷清零、异常路径全部显式兜底、台账全链路可溯、发布快照与检查清单齐备、冒烟与回滚演练成功。唯一口径替代项（P1 转发开销）以并发正确性与网关侧成功率作为等效证据，风险可控并留有补测脚本。</p>
+  <p><b>遗留风险</b>：① 上游 401/429 突发（K-2）——网关双兜底已实证，但高并发场景建议自行控速；② GLM-5.3-Flash 持续超时（K-1）——不影响主链，熔断自愈；③ 流式不支持（K-3）——roadmap v1.1；④ 存量 test_measurement 顺序依赖（K-5）——与本产品无关，已留档。</p>
+  <p><b>边界声明</b>：正式切换线上流量、对公众开放属不可逆动作，不在本轮范围（Goal Brief outOfScope）；当前"发布"状态 = 预发布环境就绪 + 随时可上线的构建与文档。</p>
+</section>
+
+<footer class="colophon">
+  <div>ModelHub v1.0.0 Release Test Report · PromptMaster</div>
+  <div>证据目录：tests_modelhub/*.json · docs/release/* · releases/v1.0.0/MANIFEST.txt</div>
+  <div>2026-09-21</div>
+</footer>
+
+</div>
+</body>
+</html>

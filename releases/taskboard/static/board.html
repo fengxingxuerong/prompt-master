@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任务分配看板 · Task Ledger</title>
+<meta name="description" content="任务分配与追踪看板：负载总览、截止日排序、台账检索与状态流转。">
+<style>
+  :root { --paper:#fafaf8; --ink:#1a2530; --soft:#5a6875; --faint:#8b98a5;
+    --line:#dfe3e0; --line2:#ececea; --accent:#0f4c81; --wash:#eef3f7;
+    --orange:#c0392b; --ok:#2e6e4e; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--paper); color:var(--ink); font-family:"Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif; font-size:14px; line-height:1.6; }
+  .wrap { max-width:1120px; margin:0 auto; padding:30px 22px 80px; }
+  header { display:flex; justify-content:space-between; align-items:baseline; border-bottom:2px solid var(--ink); padding-bottom:12px; flex-wrap:wrap; gap:8px; }
+  h1 { font-size:21px; font-weight:700; }
+  h1 span { color:var(--accent); font-family:var(--mono); font-size:13px; margin-left:8px; font-weight:500; }
+  .links a { color:var(--accent); text-decoration:none; font-size:13px; margin-left:16px; }
+  .today { color:var(--faint); font-family:var(--mono); font-size:12.5px; }
+  section { margin-top:30px; }
+  h2 { font-size:15px; font-weight:700; margin-bottom:10px; }
+  h2 small { color:var(--faint); font-weight:400; font-size:12px; margin-left:8px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); padding:7px 9px; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); }
+  td { padding:8px 9px; border-bottom:1px solid var(--line2); vertical-align:top; }
+  .mono { font-family:var(--mono); font-size:12px; }
+  .p1 { color:var(--orange); font-weight:700; } .p2 { color:var(--accent); font-weight:600; } .p3 { color:var(--faint); }
+  .badge { display:inline-block; padding:1px 8px; border:1px solid; font-size:11.5px; white-space:nowrap; }
+  .b-pending { color:var(--faint); border-color:var(--faint); } .b-in_progress { color:var(--accent); border-color:var(--accent); }
+  .b-review { color:#7d5bb5; border-color:#7d5bb5; } .b-blocked { color:var(--orange); border-color:var(--orange); }
+  .b-done { color:var(--ok); border-color:var(--ok); } .b-cancelled { color:var(--faint); border-color:var(--faint); }
+  .overdue td { background:#fdf0ee; }
+  .overdue .due { color:var(--orange); font-weight:700; }
+  .ops button { background:none; border:1px solid var(--line); color:var(--soft); font-size:11px; padding:3px 8px; margin:2px 3px 2px 0; cursor:pointer; font-family:inherit; }
+  .ops button:hover { border-color:var(--accent); color:var(--accent); }
+  .ops button.undo:hover { border-color:var(--orange); color:var(--orange); }
+  .loadgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:0; border:1px solid var(--line); background:#fff; }
+  .loadcell { padding:14px 16px; border-right:1px solid var(--line2); }
+  .loadcell:last-child { border-right:none; }
+  .loadcell .who { font-weight:700; font-size:13.5px; }
+  .loadcell .role { font-size:11.5px; color:var(--faint); margin-bottom:8px; }
+  .loadcell .nums { font-family:var(--mono); font-size:12px; color:var(--soft); }
+  .loadcell .nums b { color:var(--accent); font-size:16px; }
+  .loadcell .nums .warn { color:var(--orange); }
+  .bar { height:6px; background:var(--line2); margin-top:8px; position:relative; }
+  .bar i { position:absolute; left:0; top:0; bottom:0; background:var(--accent); }
+  .bar i.full { background:var(--orange); }
+  #newTask { background:#fff; border:1px solid var(--line); padding:18px 20px; }
+  #newTask .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; }
+  #newTask label { font-size:11.5px; color:var(--faint); display:block; margin-bottom:3px; }
+  #newTask input, #newTask select, #newTask textarea { width:100%; border:1px solid var(--line); padding:8px 10px; font-size:13px; font-family:inherit; background:var(--paper); color:var(--ink); }
+  #newTask input:focus, #newTask select:focus, #newTask textarea:focus { outline:none; border-color:var(--accent); }
+  #newTask .full { grid-column:1 / -1; }
+  #newTask button { background:var(--accent); border:none; color:#fff; padding:9px 22px; font-weight:700; cursor:pointer; font-size:13.5px; }
+  .msg { margin-top:10px; padding:9px 12px; border-left:3px solid var(--accent); background:var(--wash); font-size:13px; display:none; }
+  .msg.show { display:block; } .msg.err { border-left-color:var(--orange); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>任务分配看板<span>TASK LEDGER</span></h1>
+  <div><span class="today" id="today"></span>
+    <span class="links"><a href="/rules">分配规则</a><a href="/exceptions">异常手册</a><a href="/handoff">交接说明</a></span>
+  </div>
+</header>
+
+<section>
+  <h2>负载总览<small>按负责人统计 · 打开任务含逾期</small></h2>
+  <div class="loadgrid" id="loadGrid"></div>
+</section>
+
+<section>
+  <h2>截止日排序<small>全部未完成任务 · 越早越靠前 · 逾期整行标红</small></h2>
+  <table>
+    <thead><tr><th>编号</th><th>标题</th><th>负责人</th><th>优先级</th><th>截止</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody id="dueBody"></tbody>
+  </table>
+</section>
+
+<section>
+  <h2>新建任务<small>来源必填：保证每条任务可追溯</small></h2>
+  <div id="newTask">
+    <div class="grid">
+      <div class="full"><label>标题 *</label><input id="t-title" maxlength="80" placeholder="一句话说清要做什么"></div>
+      <div><label>负责人 *</label><select id="t-assignee"><option value="">选择…</option></select></div>
+      <div><label>优先级</label><select id="t-priority"><option value="P1">P1（3 天内）</option><option value="P2" selected>P2（7 天内）</option><option value="P3">P3（21 天内）</option></select></div>
+      <div><label>截止日期（空=按优先级自动）</label><input id="t-due" type="date"></div>
+      <div><label>来源 *</label><input id="t-source" maxlength="300" placeholder="如：ModelHub 验收报告 §遗留清单"></div>
+      <div class="full"><label>描述 / 验收说明</label><textarea id="t-desc" rows="2" maxlength="500" placeholder="验收口径写在这里"></textarea></div>
+      <div class="full"><button onclick="createTask()">创建并指派</button></div>
+    </div>
+    <div class="msg" id="tMsg"></div>
+  </div>
+</section>
+
+<div class="toast-holder"></div>
+</div>
+<style>.toast-holder{position:fixed;right:18px;bottom:18px;z-index:9}.toast-holder .t{background:#fff;border:1px solid var(--accent);color:var(--ink);padding:11px 16px;font-size:13px;margin-top:8px;max-width:340px;box-shadow:0 4px 18px rgba(0,0,0,.08)}</style>
+<script>
+const $ = s => document.querySelector(s);
+function toast(msg, err) { const d = document.createElement("div"); d.className = "t"; if (err) d.style.borderColor = "var(--orange)"; d.textContent = msg; $(".toast-holder").appendChild(d); setTimeout(() => d.remove(), 3600); }
+function hdr(ct) { return ct ? { "Content-Type": "application/json; charset=utf-8" } : {}; }
+
+async function loadBoard() {
+  const [b, t] = await Promise.all([
+    fetch("/api/board").then(r => r.json()),
+    fetch("/api/tasks").then(r => r.json())
+  ]);
+  $("#today").textContent = "今天 " + b.today + " · 未完成任务 " + b.due_sorted.length;
+  // 负载
+  $("#loadGrid").innerHTML = Object.entries(b.by_assignee).map(([who, v]) => {
+    const pct = v.total ? Math.round(v.open / v.total * 100) : 0;
+    return `<div class="loadcell"><div class="who">${who}</div><div class="role">${{ "用户": "最终确认人", "Agent-AutoClaw": "执行代理", "待定负责人": "占位" }[who] || ""}</div>
+      <div class="nums">总 <b>${v.total}</b> · 未完 ${v.open} · 完成 ${v.done}${v.overdue ? ` · <span class="warn">逾期 ${v.overdue}</span>` : ""}</div>
+      <div class="nums" style="margin-top:4px">P1 ${v.by_priority.P1} / P2 ${v.by_priority.P2} / P3 ${v.by_priority.P3}</div>
+      <div class="bar"><i class="${v.overdue ? "full" : ""}" style="width:${pct}%"></i></div></div>`;
+  }).join("");
+  // 截止日排序表
+  $("#dueBody").innerHTML = b.due_sorted.map(r => {
+    const od = r.due < b.today;
+    const ops = { pending: [["in_progress", "开工"], ["cancelled", "取消"]], in_progress: [["review", "提复核"], ["blocked", "阻塞"]], review: [["done", "通过"]], blocked: [["in_progress", "解除阻塞"]] }[r.status] || [];
+    return `<tr class="${od ? "overdue" : ""}">
+      <td class="mono">${r.task_id}</td><td>${r.title}</td><td>${r.assignee}</td>
+      <td class="mono ${r.priority.toLowerCase()}">${r.priority}</td><td class="mono due">${r.due}</td>
+      <td><span class="badge b-${r.status}">${b.status_labels[r.status]}</span></td>
+      <td class="ops">${ops.map(([s, l]) => `<button onclick="transit('${r.task_id}','${s}')">${l}</button>`).join("")}
+        <button onclick="editTask('${r.task_id}')">编辑</button>\n        <button class="undo" onclick="undo('${r.task_id}')">撤销</button></td></tr>`;
+  }).join("") || '<tr><td colspan="7" style="text-align:center;color:var(--faint);padding:30px">暂无未完成任务</td></tr>';
+  // 花名册填充（一次性）
+  if (!$("#t-assignee").options.length) {
+    const r = await fetch("/api/roster").then(x => x.json());
+    r.roster.forEach(p => { const o = document.createElement("option"); o.value = p.name; o.textContent = p.name + "（" + p.role + "）"; $("#t-assignee").appendChild(o); });
+  }
+}
+async function transit(id, status) {
+  const r = await fetch("/api/tasks/" + id, { method: "PATCH", headers: hdr(1), body: JSON.stringify({ status: status, actor: "看板操作" }) });
+  const d = await r.json();
+  toast(r.ok ? id + " → " + d.changes : "失败：" + (d.detail || r.status), !r.ok); loadBoard();
+}
+async function editTask(id) {
+  const title = prompt("新标题（留空跳过）：");
+  if (title === null) return;
+  const desc = prompt("新描述（留空跳过）：");
+  if (desc === null) return;
+  const body = {};
+  if (title.trim()) body.title = title.trim();
+  if (desc.trim()) body.desc = desc.trim();
+  if (!Object.keys(body).length) return;
+  const r = await fetch("/api/tasks/" + id, { method: "PATCH", headers: hdr(1), body: JSON.stringify({ ...body, actor: "看板编辑" }) });
+  const d = await r.json();
+  toast(r.ok ? id + " 已更新：" + d.changes : "失败：" + (d.detail || r.status), !r.ok);
+  loadBoard();
+}
+async function undo(id) {
+  const r = await fetch("/api/tasks/" + id + "/undo", { method: "POST", headers: hdr(1), body: JSON.stringify({}) });
+  const d = await r.json();
+  toast(r.ok ? id + " 已撤销至 " + d.restored_to : "撤销失败：" + (d.detail || r.status), !r.ok); loadBoard();
+}
+async function createTask() {
+  const body = { title: $("#t-title").value.trim(), assignee: $("#t-assignee").value, priority: $("#t-priority").value,
+    due: $("#t-due").value, source: $("#t-source").value.trim(), desc: $("#t-desc").value.trim(), created_by: "看板表单" };
+  if (!body.title || !body.assignee || !body.source) return note("标题 / 负责人 / 来源 三项必填", true);
+  const r = await fetch("/api/tasks", { method: "POST", headers: hdr(1), body: JSON.stringify(body) });
+  const d = await r.json();
+  if (r.ok) { note("已创建 " + d.task_id + " → " + d.assignee + "（截止 " + d.due + "）"); $("#t-title").value = ""; $("#t-source").value = ""; $("#t-desc").value = ""; loadBoard(); }
+  else note("失败：" + (d.detail || r.status), true);
+}
+function note(msg, err) { const e = $("#tMsg"); e.textContent = msg; e.className = "msg show" + (err ? " err" : ""); }
+loadBoard();
+</script>
+</body>
+</html>

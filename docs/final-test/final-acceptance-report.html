@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModelHub v1.1.0 最终测试验证报告</title>
+<style>
+  :root { --paper:#faf9f7; --ink:#1e2a38; --soft:#4a5a6a; --faint:#8494a4;
+    --line:#d8d4cc; --line2:#e8e4dc; --accent:#0f4c81; --wash:#eef3f7;
+    --ok:#2e6e4e; --bad:#8a3a3a; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--paper); color:var(--ink); font-family:"Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif; font-size:15px; line-height:1.6; }
+  .wrap { max-width:1060px; margin:0 auto; padding:0 32px 96px; }
+  header.masthead { padding:72px 0 40px; border-bottom:2px solid var(--ink); }
+  .kicker { font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin-bottom:14px; }
+  h1 { font-size:40px; font-weight:650; letter-spacing:-.01em; line-height:1.15; }
+  .standfirst { margin-top:16px; font-size:16px; color:var(--soft); max-width:46em; }
+  .meta-row { display:flex; gap:40px; margin-top:28px; flex-wrap:wrap; }
+  .meta-item .k { font-size:11px; letter-spacing:.1em; color:var(--faint); text-transform:uppercase; }
+  .meta-item .v { font-size:14px; font-family:var(--mono); }
+  .verdict { display:inline-block; margin-top:18px; padding:10px 22px; border:2px solid var(--ok); color:var(--ok); font-size:18px; font-weight:700; font-family:var(--mono); letter-spacing:.06em; }
+  nav.toc { padding:20px 0; border-bottom:1px solid var(--line); }
+  nav.toc ol { list-style:none; display:flex; flex-wrap:wrap; gap:6px 28px; }
+  nav.toc li { font-size:13px; color:var(--soft); }
+  nav.toc b { color:var(--accent); font-family:var(--mono); font-weight:500; margin-right:6px; font-size:12px; }
+  section { padding-top:48px; }
+  h2 { font-size:24px; font-weight:650; padding-bottom:10px; border-bottom:1px solid var(--line); margin-bottom:22px; }
+  h2 .no { color:var(--accent); font-family:var(--mono); font-size:15px; font-weight:500; margin-right:10px; }
+  p { margin-bottom:12px; max-width:68em; }
+  p.lede { font-size:16px; color:var(--soft); }
+  .note { font-size:13px; color:var(--faint); }
+  code { font-family:var(--mono); font-size:13px; background:var(--wash); padding:1px 5px; }
+  .metrics { display:flex; flex-wrap:wrap; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); margin:8px 0; }
+  .metric { flex:1 1 150px; padding:18px 20px 16px; border-right:1px solid var(--line2); min-width:150px; }
+  .metric:last-child { border-right:none; }
+  .metric .num { font-size:34px; font-weight:700; letter-spacing:-.02em; font-family:Georgia,serif; line-height:1.1; }
+  .metric .num small { font-size:15px; font-weight:500; color:var(--faint); }
+  .metric .lab { font-size:12px; color:var(--soft); margin-top:4px; }
+  .metric.hl .num { color:var(--accent); }
+  table { width:100%; border-collapse:collapse; margin:14px 0 6px; font-size:13.5px; }
+  caption { caption-side:top; text-align:left; font-size:12.5px; color:var(--soft); padding-bottom:8px; }
+  caption b { color:var(--ink); font-weight:650; }
+  th { text-align:left; font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); font-weight:600; padding:8px 10px; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); }
+  td { padding:8px 10px; border-bottom:1px solid var(--line2); vertical-align:top; }
+  tr:last-child td { border-bottom:2px solid var(--ink); }
+  .mono { font-family:var(--mono); font-size:12.5px; }
+  .tag-ok { color:var(--ok); font-weight:650; } .tag-off { color:var(--faint); }
+  blockquote { margin:16px 0; padding:12px 18px; border-left:3px solid var(--accent); background:var(--wash); font-size:13.5px; color:var(--soft); max-width:66em; }
+  footer.colophon { margin-top:72px; padding-top:18px; border-top:2px solid var(--ink); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div class="kicker">PromptMaster · ModelHub v1.1.0 · Final Acceptance Test Report</div>
+  <h1>最终测试验证报告</h1>
+  <p class="standfirst">对评分满分（60/60）的 v1.1.0 候选版本执行发布前验收级测试：核心流程、异常路径、浸泡稳定性、部署与回滚演练，全程留痕。本报告为放行依据。</p>
+  <div class="meta-row">
+    <div class="meta-item"><div class="k">验证日期</div><div class="v">2026-09-21</div></div>
+    <div class="meta-item"><div class="k">被测版本</div><div class="v">v1.1.0（releases/v1.1.0，32 文件快照）</div></div>
+    <div class="meta-item"><div class="k">环境</div><div class="v">本机预发布网关 127.0.0.1:8687（即目标运行环境，无配置差异）</div></div>
+    <div class="meta-item"><div class="k">数据口径</div><div class="v">全部模拟/脱敏数据</div></div>
+  </div>
+  <div class="verdict">放行结论：可发布（GO）</div>
+</header>
+
+<nav class="toc">
+  <ol>
+    <li><b>01</b>结论总览</li>
+    <li><b>02</b>核心流程验证</li>
+    <li><b>03</b>异常路径验证</li>
+    <li><b>04</b>浸泡稳定性</li>
+    <li><b>05</b>部署与回滚演练</li>
+    <li><b>06</b>缺陷台账状态</li>
+    <li><b>07</b>遗留风险与建议</li>
+    <li><b>08</b>验收复核纪要</li>
+  </ol>
+</nav>
+
+<section id="s1">
+  <h2><span class="no">01</span>结论总览</h2>
+  <div class="metrics">
+    <div class="metric hl"><div class="num">28<small>/28</small></div><div class="lab">本轮用例全部通过（0 失败）</div></div>
+    <div class="metric"><div class="num">0</div><div class="lab">新增缺陷（D-010 仅建议级）</div></div>
+    <div class="metric"><div class="num">100<small>%</small></div><div class="lab">浸泡 12 轮成功率（含 4 轮真实切换）</div></div>
+    <div class="metric"><div class="num">-1.8<small>MB</small></div><div class="lab">浸泡内存变化（27.0→25.2，无增长）</div></div>
+    <div class="metric"><div class="num">2/2</div><div class="lab">部署 + 回滚演练通过</div></div>
+  </div>
+  <p class="lede">九条验收标准全部满足：范围口径书面锁定、核心流程端到端全过、异常路径全覆盖、回归无新增失败、台账全程可追踪、稳定性达标、部署回滚演练通过、报告与台账可交叉核对、逐条复核形成放行结论。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="no">02</span>核心流程验证（F1–F7，7/7）</h2>
+  <table>
+    <caption><b>表 2-1</b>　端到端核心路径（e2e_results.json 留档，实抽样例）</caption>
+    <thead><tr><th style="width:30%">路径</th><th style="width:12%">结果</th><th>实测样例</th></tr></thead>
+    <tbody>
+      <tr><td>F1 openai SDK + 固定角色</td><td class="tag-ok">PASS</td><td class="mono">model=glm-5.2 10861ms rid=8a3b107c7320</td></tr>
+      <tr><td>F2 LangChain 接入</td><td class="tag-ok">PASS</td><td class="mono">8632ms chars=89</td></tr>
+      <tr><td>F3 原生 HTTP + 未知模型回落</td><td class="tag-ok">PASS</td><td class="mono">served=glm-5.2 2386ms</td></tr>
+      <tr><td>F4 弱可用模型切换/自愈</td><td class="tag-ok">PASS</td><td class="mono">requested=amd-glm-5.3-flash → served=glm-5.2（自动切换）rid=a869da59e847</td></tr>
+      <tr><td>F5 角色固定双模型一致</td><td class="tag-ok">PASS</td><td>两模型均复述 analyst 人设（"结论先行、依据支撑、数据缺失不编造"）</td></tr>
+      <tr><td>F6 流式 SSE（含降级）</td><td class="tag-ok">PASS</td><td class="mono">text/event-stream + [DONE] + 正文；降级合成路径验证</td></tr>
+      <tr><td>F7 台账全链路可溯</td><td class="tag-ok">PASS</td><td class="mono">calls=118 switches=79 agents 6/6 切换留痕 40 条</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="s3">
+  <h2><span class="no">03</span>异常路径验证（X1–X9，9/9）</h2>
+  <table>
+    <caption><b>表 3-1</b>　异常场景（不崩溃、不静默、不产生脏数据）</caption>
+    <thead><tr><th style="width:30%">场景</th><th style="width:12%">结果</th><th>实测</th></tr></thead>
+    <tbody>
+      <tr><td>X1–X6 配置缺失/损坏/密钥缺失/密钥无效/全池不可达/空池</td><td class="tag-ok">6/6</td><td>全部 ConfigError / PoolExhausted 显式报错，定位精确到文件/行/变量</td></tr>
+      <tr><td>X7 未知角色</td><td class="tag-ok">PASS</td><td class="mono">HTTP 422 + 可用角色清单</td></tr>
+      <tr><td>X8 重复提交（同请求×3）</td><td class="tag-ok">PASS</td><td class="mono">状态 [200,200,200] request_id 全唯一，正文均非空（无脏数据）</td></tr>
+      <tr><td>X9 无效模型名</td><td class="tag-ok">PASS</td><td class="mono">requested=no-such-model-xyz → served=glm-5.2（回落主备链，requested_model 如实记录）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="s4">
+  <h2><span class="no">04</span>浸泡稳定性（S1–S2）</h2>
+  <p>连续 12 轮对话浸泡（第 3/6/9/12 轮刻意指定弱可用模型强制走切换路径）：</p>
+  <table>
+    <caption><b>表 4-1</b>　浸泡结果（final_extra_results.json 留档）</caption>
+    <thead><tr><th style="width:30%">指标</th><th style="width:12%">结果</th><th>实测</th></tr></thead>
+    <tbody>
+      <tr><td>S1 成功率（≥90% 口径）</td><td class="tag-ok">100%</td><td class="mono">12/12，其中 4 轮真实触发自动切换，总耗时 115s</td></tr>
+      <tr><td>S2 内存（无持续增长）</td><td class="tag-ok">达标</td><td class="mono">WorkingSet 27.0MB → 25.2MB（-1.8MB，零增长趋势）</td></tr>
+      <tr><td>未处理异常</td><td class="tag-ok">0</td><td>全程无未捕获异常、无报错激增</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="s5">
+  <h2><span class="no">05</span>部署与回滚演练（D1–D2，2/2）</h2>
+  <table>
+    <caption><b>表 5-1</b>　演练记录</caption>
+    <thead><tr><th style="width:22%">演练</th><th style="width:12%">结果</th><th>操作与证据</th></tr></thead>
+    <tbody>
+      <tr><td>D1 部署演练（快照部署到干净目录）</td><td class="tag-ok">PASS</td><td>releases/deploy-drill/ 从 v1.1.0 快照恢复 → 按操作手册用项目 venv 启动 :8790 → health ok v1.1.0、/v1/models 12 条、/console HTTP 200。<b>过程中发现 D-010</b>：交付包需按手册用 venv 启动（裸 python 缺依赖），已记建议级、手册本就声明正确方式</td></tr>
+      <tr><td>D2 回滚演练</td><td class="tag-ok">PASS</td><td>破坏 config → <b>网关靠热重载保护继续服务 12 模型</b>（last_config_error 显式可见）→ CLI rollback → SHA256 前后一致（D8D285BFB3FA…）→ models=12</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="s6">
+  <h2><span class="no">06</span>缺陷台账状态（defect-ledger.md）</h2>
+  <p><b>本轮零新增缺陷</b>；D-010 为建议级（交付包依赖说明，手册已覆盖，v1.2 补 requirements 锁定）。历史 9 条状态复核：</p>
+  <table>
+    <caption><b>表 6-1</b>　历史缺陷复核</caption>
+    <thead><tr><th style="width:20%">条目</th><th style="width:16%">状态</th><th>本轮复核证据</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">D-001~004（修复）</td><td class="tag-ok">持续有效</td><td>CLI 回滚/打包声明/ping 语义/配置文案——回归用例全绿</td></tr>
+      <tr><td class="mono">D-005（缓解）</td><td class="tag-ok">持续有效</td><td>GLM-5.3-Flash 45s 快速超时，浸泡 4 轮切换路径全部按时兜底</td></tr>
+      <tr><td class="mono">D-006~008（记录）</td><td class="tag-off">状态不变</td><td>上游限流特性 / agents 进程内存 / 存量测试顺序依赖——处理约定不变</td></tr>
+      <tr><td class="mono">D-009（修复）</td><td class="tag-ok">再次实证</td><td>浸泡期间上游 401 突发下网关成功率 100%（切换+重试双兜底）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="s7">
+  <h2><span class="no">07</span>遗留风险与建议</h2>
+  <table>
+    <caption><b>表 7-1</b>　遗留清单（均不阻塞发布）</caption>
+    <thead><tr><th style="width:32%">事项</th><th>说明与建议</th></tr></thead>
+    <tbody>
+      <tr><td>上游 stream=true 能力性 401（间歇）</td><td>降级合成已兜底并标注；上游恢复后自动走真流式。建议关注商汤公告</td></tr>
+      <tr><td>上游 429/401 突发期成功率</td><td>本轮浸泡 100% 兜底成功；高并发场景仍建议自行控速</td></tr>
+      <tr><td>P1 转发开销口径替代</td><td>401 突发期无法取直连参照；稳定期跑 release_test.py p1 补测</td></tr>
+      <tr><td>D-010 交付包依赖说明</td><td>手册已声明 venv 用法；v1.2 补 requirements 锁定文件 + 一键安装脚本</td></tr>
+      <tr><td>agents 注册表重启即清（仅网关内存签名信息）</td><td>落盘持久化已实现（data/agents.json）；仅旧版内存兜底路径残留，无数据风险</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="s8">
+  <h2><span class="no">08</span>验收复核纪要与放行结论</h2>
+  <p>按九条验收标准逐条对照：</p>
+  <table>
+    <caption><b>表 8-1</b>　验收复核（全部证据可交叉核对）</caption>
+    <thead><tr><th style="width:34%">验收标准</th><th style="width:12%">判定</th><th>证据位置</th></tr></thead>
+    <tbody>
+      <tr><td>测试范围与通过口径先确认</td><td class="tag-ok">✓</td><td>scope-and-cases.md（书面清单：4 组 25 项用例 + 通过口径）</td></tr>
+      <tr><td>核心流程端到端全部通过</td><td class="tag-ok">✓</td><td>e2e_results.json 8/8（表 2-1）</td></tr>
+      <tr><td>异常路径验证完成</td><td class="tag-ok">✓</td><td>exception 6/6 + X8/X9 + X7（表 3-1，共 9/9）</td></tr>
+      <tr><td>修复后回归无新增失败</td><td class="tag-ok">✓</td><td>三轮历史回归 + 本轮 e2e/exception 全绿，台账闭环</td></tr>
+      <tr><td>缺陷与结果台账全程可追踪</td><td class="tag-ok">✓</td><td>defect-ledger.md（D-001~010 全状态）+ JSONL 调用台账</td></tr>
+      <tr><td>稳定性与性能基线达标</td><td class="tag-ok">✓</td><td>S1 12/12（100%≥90%）、S2 内存零增长（表 4-1）</td></tr>
+      <tr><td>部署与回滚演练通过</td><td class="tag-ok">✓</td><td>D1 快照部署 + D2 回滚 SHA256 一致（表 5-1）</td></tr>
+      <tr><td>交付最终测试验证报告</td><td class="tag-ok">✓</td><td>本报告（与台账、JSON 产物交叉核对一致）</td></tr>
+      <tr><td>逐条复核并取得放行结论</td><td class="tag-ok">✓</td><td><b>放行结论：可发布（GO）</b>——零阻塞遗留，5 项风险均有兜底与计划</td></tr>
+    </tbody>
+  </table>
+  <blockquote><b>放行声明</b>：ModelHub v1.1.0 通过全部验收级测试（28/28 用例、0 新增缺陷、浸泡 100%、部署回滚演练 2/2），遗留 5 项均不阻塞发布且有明确兜底与计划。本报告为准予发布的依据；正式对外上线（公网流量切换）仍需用户最终确认后另行执行（Goal Brief outOfScope）。</blockquote>
+</section>
+
+<footer class="colophon">
+  <div>ModelHub v1.1.0 Final Acceptance Test Report · PromptMaster</div>
+  <div>证据：docs/final-test/* · tests_modelhub/{e2e_results,final_extra_results}.json · logs/modelhub_ledger.jsonl</div>
+  <div>2026-09-21</div>
+</footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PromptMaster Suite 全面缺口盘点 — 还有什么没做</title>
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--card:#1c2330;--line:#2a3342;--ink:#e6edf3;--mut:#8b98a9;--blue:#4f8ff7;--green:#3fb27f;--red:#e0645c;--amber:#d9a53f;--mono:"Cascadia Code",Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.75 "Segoe UI","Microsoft YaHei",sans-serif;padding:48px 20px}
+.wrap{max-width:1100px;margin:0 auto}
+header{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:30px}
+.kicker{color:var(--blue);font-size:12px;letter-spacing:.2em;text-transform:uppercase;font-family:var(--mono)}
+h1{font-size:30px;font-weight:600;margin:8px 0 6px}
+.sub{color:var(--mut)}
+h2{font-size:19px;margin:34px 0 14px;padding-left:12px;border-left:3px solid var(--blue)}
+table{width:100%;border-collapse:collapse;margin:14px 0;background:var(--card);border-radius:10px;overflow:hidden;font-size:13.5px}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:600;background:#182030;font-size:12px}
+tr:last-child td{border-bottom:none}
+td.mono{font-family:var(--mono);font-size:12.5px}
+.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}
+.tag{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 9px;border-radius:20px;border:1px solid var(--line);margin-right:6px}
+.tag.p1{color:var(--red);border-color:var(--red)}
+.tag.p2{color:var(--amber);border-color:var(--amber)}
+.tag.p3{color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:12px 0}
+.card p{color:#c4cdd8;font-size:14px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:24px 0}
+.metric{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
+.metric .v{font-size:24px;font-weight:700;font-family:var(--mono);color:var(--blue)}
+.metric .k{color:var(--mut);font-size:12.5px;margin-top:4px}
+footer{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);color:var(--mut);font-size:12.5px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">PromptMaster Suite · Comprehensive Gap Review</div>
+  <h1>全面缺口盘点：还有什么没做</h1>
+  <div class="sub">2026-09-22 · 基于实证核查（git 状态 / 计划任务 / 监控覆盖 / 台账遗留 / CI 配置 / 密钥面扫描），非主观推测 · 覆盖十个维度</div>
+</header>
+
+<div class="metrics">
+  <div class="metric"><div class="v">10</div><div class="k">盘点维度</div></div>
+  <div class="metric"><div class="v">4</div><div class="k">P1 高优缺口（建议本周处理）</div></div>
+  <div class="metric"><div class="v">6</div><div class="k">P2 中优缺口（建议两周内）</div></div>
+  <div class="metric"><div class="v">5+</div><div class="k">P3 低优/长期项</div></div>
+</div>
+
+<h2>先说已经做扎实的（避免误判）</h2>
+<table>
+  <tr><th>维度</th><th>现状（实证）</th></tr>
+  <tr><td>测试</td><td class="ok">主项目 38 文件 688 用例 3 次全绿 + 龙虾 7/7 + CI 在跑</td></tr>
+  <tr><td>运行保障</td><td class="ok">看门狗计划任务 Ready（16:52 下次巡检），三服务自动拉起已实测</td></tr>
+  <tr><td>密钥管理</td><td class="ok">.env 已被 gitignore（check-ignore 实证），配置侧 ${ENV} 引用不留明文</td></tr>
+  <tr><td>缺陷闭环</td><td class="ok">D/T 系列与 P-01~P-05 全部闭环，台账留痕 105 条可审计</td></tr>
+  <tr><td>文档</td><td class="ok">README 总索引 + 各服务 README + API 文档 + 设计规范齐备</td></tr>
+</table>
+
+<h2>P1 高优缺口（4 项）</h2>
+<table>
+  <tr><th>#</th><th>缺口</th><th>实证</th><th>建议</th></tr>
+  <tr><td><span class="tag p1">G-01</span></td><td><b>版本管理断档</b>：主项目最后一次 commit 是 09-20，此后 v1.2/v1.3/v1.4 三轮迭代 + 会审台 + 新模型池共 25 处改动未提交，会审台整个目录未跟踪</td><td class="mono">git log -1 = 2026-09-20；uncommitted=25 行；?? releases/triage/</td><td>立即 git 提交并打 tag（v1.4.0），会审台入库——否则回滚演练靠手工 .bak 文件，无版本谱系</td></tr>
+  <tr><td><span class="tag p1">G-02</span></td><td><b>新服务不在运维保障圈内</b>：看门狗与监控脚本只覆盖 8687/8791/8792，会审台 8793 掉线无人拉起、无巡检数据</td><td class="mono">watchdog_suite.py services=3；monitor_suite.py endpoints=3</td><td>watchdog/monitor 加第 4 项（一行配置），计划任务已就绪无需新建</td></tr>
+  <tr><td><span class="tag p1">G-03</span></td><td><b>CI 不覆盖新测试资产</b>：ci.yml 只跑主项目 tests/，龙虾 7 用例与会审台（0 测试）都不在流水线里</td><td class="mono">ci.yml 仅两条 pytest tests/</td><td>CI 增加龙虾 pytest 步骤；会审台补最小测试集后一并纳入</td></tr>
+  <tr><td><span class="tag p1">G-04</span></td><td><b>会审台零测试</b>：核心共识/容错/白名单逻辑全靠手测，无 pytest 资产</td><td class="mono">releases/triage test_* 计数=0</td><td>补 6-8 个用例（共识投票/围栏解析/白名单快失败/422 边界），TestClient 即可</td></tr>
+</table>
+
+<h2>P2 中优缺口（6 项）</h2>
+<table>
+  <tr><th>#</th><th>缺口</th><th>实证/说明</th><th>建议</th></tr>
+  <tr><td><span class="tag p2">G-05</span></td><td><b>台账轮转未自动化</b>：rotate_ledger.py 只能手动跑，modelhub 台账已 65KB 且持续增长；会审台台账无轮转逻辑</td><td class="mono">modelhub_ledger.jsonl 65KB + .1 74KB；SuiteWatchdog_5min 不含轮转</td><td>看门狗巡检时顺带执行轮转检查（脚本已存在，加一行调用）</td></tr>
+  <tr><td><span class="tag p2">G-06</span></td><td><b>告警无出口</b>：usage_store 损坏只有 stderr ALERT，W11 遗留"接通知渠道"未做；服务掉线靠看门狗静默拉起，用户不知情</td><td class="mono">usage_store.py L44 仅 print ALERT</td><td>ALERT 事件写 notification 文件 + 看门狗拉起时在台账记 recovery 事件</td></tr>
+  <tr><td><span class="tag p2">G-07</span></td><td><b>同步阻塞接口</b>：会审台 POST /api/reviews 同步等结果（最长 130s），多用户提交会排队</td><td class="mono">ThreadPoolExecutor 6 workers/请求</td><td>改异步任务队列（提交返回 session_id，前端轮询），UI 已有轮询基础</td></tr>
+  <tr><td><span class="tag p2">G-08</span></td><td><b>TASK-002 上游 stream 401 未解</b>：streaming.py 无 401 专项处理，P1 补测任务还挂着</td><td class="mono">TASK-20260921-002 pending；streaming.py 无 401 分支</td><td>需要商汤账户信息才能定位（用户侧信息），先降级：SSE 失败自动回退非流式</td></tr>
+  <tr><td><span class="tag p2">G-09</span></td><td><b>龙虾站内容占位未替换</b>：品牌/价格/供应商/产地四件套仍是演示口径</td><td class="mono">TASK-20260921-005 pending（等你拍板）</td><td>需要你给真实口径，10 分钟可完成</td></tr>
+  <tr><td><span class="tag p2">G-10</span></td><td><b>数据层单机 JSON</b>：sessions.json 全量读写 + tasks.json/orders.json 单文件，并发写有锁但无事务；量大数据迁移成本高</td><td class="mono">save_sessions 全量重写模式</td><td>已在 README 责任边界注明迁 SQLite 指引，数据量破千再动</td></tr>
+</table>
+
+<h2>P3 低优 / 长期项</h2>
+<table>
+  <tr><th>#</th><th>缺口</th><th>说明</th></tr>
+  <tr><td><span class="tag p3">G-11</span></td><td>OpenRouter 源未激活</td><td>欠费 402，充值后 enabled=true 即恢复；影响面小（池内已有 4 家可用）</td></tr>
+  <tr><td><span class="tag p3">G-12</span></td><td>会审台 UI 进度反馈粗糙</td><td>P-04 文案缓解方案已上线，逐评委实时进度需要 SSE，属体验增强</td></tr>
+  <tr><td><span class="tag p3">G-13</span></td><td>任务分配机制一周复盘未做</td><td class="mono">TASK-006 in_progress，到期 09-28</td></tr>
+  <tr><td><span class="tag p3">G-14</span></td><td>模型成本可视化</td><td>usage_daily.json 已按日落盘，但无看板页展示成本趋势</td></tr>
+  <tr><td><span class="tag p3">G-15</span></td><td>多用户/鉴权</td><td>会审台与 taskboard 均无身份体系（taskboard 有 token 中间件），面向真实团队需加鉴权——安全维度此前按你指令豁免，恢复时一并做</td></tr>
+</table>
+
+<h2>一句话结论</h2>
+<div class="card">
+  <p><b>功能面已经相当完整</b>（四服务、15 模型池、688 测试全绿、实战案例闭环），<b>真正的短板集中在"工程化收尾"</b>：版本管理断档（G-01 最痛）、新服务游离在运维圈和 CI 之外（G-02/G-03/G-04 同根同源，一次配置全解决）、告警与轮转的"最后一公里"自动化（G-05/G-06）。这六件事加起来半天工作量，做完后项目的成熟度会从"能跑、能测"升到"敢交给别人维护"。</p>
+</div>
+
+<footer>PromptMaster Suite gap review · evidence: git status, schtasks query, watchdog/monitor source, taskboard tasks.json, ci.yml, check-ignore .env · 2026-09-22</footer>
+</div>
+</body>
+</html>

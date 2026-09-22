@@ -1,0 +1,138 @@
+{
+  "_comment": [
+    "ModelHub 模型池：以商汤 SenseNova Token Plan 为主，AMD Radeon 开发者端点为兜底。",
+    "priority 越小越优先；同一优先级内按名称排序。上游密钥通过 ${ENV} 占位符引用 .env，绝不明文入库。",
+    "12 个条目全部来自 2026-09-21 实测探测：",
+    "  - 商汤 /v1/models 返回 9 个模型，其中 5 个对话可用（6.8-flash-lite 需 max_tokens>=8000，否则 reasoning 吃满预算空返回）；",
+    "    sensenova-6.7-flash-lite / u1-fast / u1.5-lite / u1.5-fast 在 chat 端点 404（图像/非 chat 专用，或路由未开放）。",
+    "  - AMD /models 返回 7 个模型：MinerU2.5-Pro 是 OCR 专用（chat 400 并明确提示走 /v1/ocr），GLM-5.3-Flash 目录在列但连续读超时（入池靠熔断冷却自愈），其余 5 个对话可用。",
+    "  - AMD 端点模型名大小写敏感（DeepSeek-V4-Flash 对、deepseek-v4-flash 404）。",
+    "enabled=false 的条目保留登记但不参与调度（OCR 专用模型）。"
+  ],
+  "version": 1,
+  "pool": [
+    {
+      "name": "deepseek-v4-flash",
+      "base_url": "https://token.sensenova.cn/v1",
+      "api_key": "${PM_API_KEY_1}",
+      "upstream_model": "deepseek-v4-flash",
+      "priority": 1,
+      "family": "deepseek",
+      "source": "sensenova",
+      "notes": "商汤主力：1M 上下文，384K 输出，支持 thinking + tool calls"
+    },
+    {
+      "name": "glm-5.2",
+      "base_url": "https://token.sensenova.cn/v1",
+      "api_key": "${PM_API_KEY_1}",
+      "upstream_model": "glm-5.2",
+      "priority": 2,
+      "family": "glm",
+      "source": "sensenova",
+      "notes": "排序一致性最好（校准 r=0.976），判定类角色优选"
+    },
+    {
+      "name": "sensenova-6.8-flash-lite",
+      "base_url": "https://token.sensenova.cn/v1",
+      "api_key": "${PM_API_KEY_1}",
+      "upstream_model": "sensenova-6.8-flash-lite",
+      "priority": 3,
+      "family": "sensenova",
+      "source": "sensenova",
+      "notes": "商汤轻量多模态智能体模型；max_tokens 必须 >=8000，否则 reasoning 吃满预算返回空正文"
+    },
+    {
+      "name": "deepseek-v4-pro",
+      "base_url": "https://token.sensenova.cn/v1",
+      "api_key": "${PM_API_KEY_1}",
+      "upstream_model": "deepseek-v4-pro",
+      "priority": 4,
+      "family": "deepseek",
+      "source": "sensenova",
+      "notes": "推理型，延迟略高（实测 3.6s）"
+    },
+    {
+      "name": "kimi-k3",
+      "base_url": "https://token.sensenova.cn/v1",
+      "api_key": "${PM_API_KEY_1}",
+      "upstream_model": "kimi-k3",
+      "priority": 5,
+      "family": "kimi",
+      "source": "sensenova",
+      "notes": "端点强制 temperature=1；判定类角色不适用，对话可用（实测 6.7s）"
+    },
+    {
+      "name": "amd-deepseek-v4-flash",
+      "base_url": "https://developer.amd.com.cn/radeon/api/v1",
+      "api_key": "${PM_API_KEY_AMD}",
+      "upstream_model": "DeepSeek-V4-Flash",
+      "priority": 6,
+      "family": "deepseek",
+      "source": "amd",
+      "notes": "AMD 兜底同家族；端点模型名大小写敏感"
+    },
+    {
+      "name": "amd-deepseek-v4.1-flash",
+      "base_url": "https://developer.amd.com.cn/radeon/api/v1",
+      "api_key": "${PM_API_KEY_AMD}",
+      "upstream_model": "DeepSeek-V4.1-Flash",
+      "priority": 7,
+      "family": "deepseek",
+      "source": "amd",
+      "notes": "AMD 端点实测 4.4s，可用"
+    },
+    {
+      "name": "amd-qwen3.8-flash-next",
+      "base_url": "https://developer.amd.com.cn/radeon/api/v1",
+      "api_key": "${PM_API_KEY_AMD}",
+      "upstream_model": "Qwen3.8-Flash-Next",
+      "priority": 8,
+      "family": "qwen",
+      "source": "amd",
+      "notes": "AMD 端点实测 5.8s，可用"
+    },
+    {
+      "name": "amd-qwen3.8-27b",
+      "base_url": "https://developer.amd.com.cn/radeon/api/v1",
+      "api_key": "${PM_API_KEY_AMD}",
+      "upstream_model": "Qwen3.8-27B",
+      "priority": 9,
+      "family": "qwen",
+      "source": "amd",
+      "notes": "AMD 端点实测 2.8s，可用"
+    },
+    {
+      "name": "amd-minicpm5-2b",
+      "base_url": "https://developer.amd.com.cn/radeon/api/v1",
+      "api_key": "${PM_API_KEY_AMD}",
+      "upstream_model": "MiniCPM5-2B",
+      "priority": 10,
+      "family": "minicpm",
+      "source": "amd",
+      "notes": "小模型；输出带思考痕迹（无需强约束时可用）"
+    },
+    {
+      "name": "amd-glm-5.3-flash",
+      "base_url": "https://developer.amd.com.cn/radeon/api/v1",
+      "api_key": "${PM_API_KEY_AMD}",
+      "upstream_model": "GLM-5.3-Flash",
+      "priority": 11,
+      "family": "glm",
+      "source": "amd",
+      "timeout_seconds": 45,
+      "notes": "目录在列但 2026-09-21 两次 150s+ 读超时；45s 快速超时保切换敏捷，入池靠熔断冷却自愈"
+    },
+    {
+      "name": "amd-mineru2.5-pro",
+      "base_url": "https://developer.amd.com.cn/radeon/api/v1",
+      "api_key": "${PM_API_KEY_AMD}",
+      "upstream_model": "MinerU2.5-Pro",
+      "priority": 99,
+      "family": "mineru",
+      "source": "amd",
+      "chat_compatible": false,
+      "enabled": false,
+      "notes": "OCR 专用模型，chat 端点返回 400 并提示走 /v1/ocr；登记但禁用"
+    }
+  ]
+}

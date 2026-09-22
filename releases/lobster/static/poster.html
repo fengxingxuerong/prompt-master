@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>宣传海报 · AUSSIE LOBSTER 澳龙直送</title>
+<meta name="description" content="宣传海报：AUSSIE LOBSTER 澳龙直送 3:4 竖版物料预览（演示）。">
+<style>
+  :root { --bg:#0b0f14; --orange:#ff6b35; --teal:#3ec9c0; --ink:#f2f0ea; --soft:#b9c0c6; --faint:#78828c;
+    --line:#243040; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#07090c; color:var(--ink); font-family:"Source Han Sans SC","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; align-items:center; padding:34px 14px 60px; gap:18px; }
+  .toolbar a { color:var(--teal); text-decoration:none; font-size:13.5px; margin:0 10px; }
+  .poster { width:min(720px, 94vw); aspect-ratio:3/4; position:relative; overflow:hidden;
+    background:radial-gradient(130% 100% at 85% -5%, #123246 0%, #0b0f14 52%), #0b0f14;
+    border:1px solid var(--line); display:flex; flex-direction:column; }
+  .beam { position:absolute; top:-18%; right:-24%; width:75%; height:130%;
+    background:conic-gradient(from 200deg at 50% 40%, transparent 0deg, #3ec9c014 40deg, transparent 80deg); }
+  .glow { position:absolute; left:-16%; bottom:-22%; width:80%; aspect-ratio:1; border-radius:50%;
+    background:radial-gradient(circle, #ff6b3530 0%, transparent 62%); }
+  .frame { position:absolute; inset:16px; border:1px solid #ffffff22; pointer-events:none; }
+  .corner { position:absolute; width:22px; height:22px; }
+  .corner.tl { top:8px; left:8px; border-top:2px solid var(--orange); border-left:2px solid var(--orange); }
+  .corner.tr { top:8px; right:8px; border-top:2px solid var(--teal); border-right:2px solid var(--teal); }
+  .corner.bl { bottom:8px; left:8px; border-bottom:2px solid var(--teal); border-left:2px solid var(--teal); }
+  .corner.br { bottom:8px; right:8px; border-bottom:2px solid var(--orange); border-right:2px solid var(--orange); }
+  .inner { position:relative; padding:9% 9% 7%; flex:1; display:flex; flex-direction:column; }
+  .brand { display:flex; justify-content:space-between; align-items:baseline; font-family:var(--mono); font-size:11px; letter-spacing:.28em; color:var(--teal); }
+  .brand .r { color:var(--orange); }
+  .headline { margin-top:14%; font-size:clamp(38px, 9.5vw, 66px); font-weight:800; line-height:1.08; letter-spacing:-.01em; }
+  .headline .hl { color:var(--orange); }
+  .sub { margin-top:16px; font-size:clamp(13px, 2.6vw, 15.5px); color:var(--soft); max-width:22em; }
+  .lobster { position:absolute; right:-4%; top:34%; width:46%; opacity:.96;
+    filter:drop-shadow(0 18px 40px #ff6b3555); }
+  .spec-strip { margin-top:auto; border:1px solid var(--line); background:#0e151cdd; backdrop-filter:blur(2px); }
+  .spec-strip .row { display:flex; justify-content:space-between; padding:10px 16px; border-bottom:1px solid var(--line); font-size:13px; }
+  .spec-strip .row:last-child { border-bottom:none; }
+  .spec-strip .g { font-family:var(--mono); color:var(--teal); font-weight:700; }
+  .spec-strip .p { font-family:var(--mono); color:var(--orange); font-weight:700; }
+  .usps { display:flex; gap:14px; margin-top:16px; font-size:12px; color:var(--faint); letter-spacing:.05em; }
+  .usps b { color:var(--soft); }
+  .foot { margin-top:18px; display:flex; justify-content:space-between; align-items:center; font-size:11.5px; color:var(--faint); }
+  .foot .cta { border:1px solid var(--orange); color:var(--orange); padding:6px 14px; font-weight:700; letter-spacing:.1em; }
+  .print-note { max-width:720px; font-size:12.5px; color:var(--faint); text-align:center; line-height:1.7; }
+</style>
+</head>
+<body>
+<div class="toolbar"><a href="/">← 返回首页</a><a href="/ledger">订单台账</a></div>
+
+<div class="poster">
+  <div class="beam"></div><div class="glow"></div>
+  <div class="frame"></div>
+  <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+  <div class="inner">
+    <div class="brand"><span>AUSSIE LOBSTER · 澳龙直送</span><span class="r">DEMO</span></div>
+    <div class="headline">深海<br>的<span class="hl">鲜甜</span><br>48 小时抵达</div>
+    <div class="sub">澳洲岩龙虾 · 野生捕捞 · 0°C 休眠冷链 · 死虾即赔</div>
+
+    <svg class="lobster" viewBox="0 0 200 200" fill="none" aria-label="澳龙">
+      <ellipse cx="100" cy="118" rx="26" ry="46" fill="#ff6b35"/>
+      <ellipse cx="100" cy="66" rx="17" ry="22" fill="#ff8b52"/>
+      <path d="M100 44 L96 22 L104 22 Z" fill="#ff8b52"/>
+      <path d="M100 44 L90 26 L97 25 Z" fill="#ffa070"/>
+      <path d="M100 44 L110 26 L103 25 Z" fill="#ffa070"/>
+      <path d="M84 92 C 56 84, 40 96, 36 118 C 52 122, 72 116, 84 106 Z" fill="#ff6b35"/>
+      <ellipse cx="34" cy="126" rx="12" ry="16" fill="#ff8b52"/>
+      <path d="M116 92 C 144 84, 160 96, 164 118 C 148 122, 128 116, 116 106 Z" fill="#ff6b35"/>
+      <ellipse cx="166" cy="126" rx="12" ry="16" fill="#ff8b52"/>
+      <path d="M92 158 L88 178 L96 178 Z" fill="#ffa070"/>
+      <path d="M108 158 L112 178 L104 178 Z" fill="#ffa070"/>
+      <circle cx="94" cy="60" r="2.4" fill="#0b0f14"/>
+      <circle cx="106" cy="60" r="2.4" fill="#0b0f14"/>
+    </svg>
+
+    <div class="spec-strip">
+      <div class="row"><span class="g">A · 600–800g</span><span class="p">¥399</span></div>
+      <div class="row"><span class="g">B · 800g–1.2kg</span><span class="p">¥599</span></div>
+      <div class="row"><span class="g">C · 1.2–1.5kg</span><span class="p">¥799</span></div>
+    </div>
+    <div class="usps"><span><b>野生</b> 配额捕捞</span><span><b>0°C</b> 休眠直运</span><span><b>48h</b> 渔港到餐桌</span></div>
+    <div class="foot"><span>演示物料 · 占位品牌可替换</span><span class="cta">立即预订 →</span></div>
+  </div>
+</div>
+
+<p class="print-note">海报为 3:4 竖版（社交媒体与印刷通用比例），截图即可发布。真实运营前请替换品牌名、价格与联系方式； 社媒图文文案见 docs/social-copy.md。</p>
+</body>
+</html>

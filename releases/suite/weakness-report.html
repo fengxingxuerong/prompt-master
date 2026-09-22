@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>项目缺点分析报告 · 三服务套件 v1.1.0+</title>
+<style>
+  :root { --paper:#fafaf8; --ink:#1a2530; --soft:#5a6875; --faint:#8b98a5;
+    --line:#dfe3e0; --accent:#0f4c81; --wash:#eef3f7; --orange:#c0392b; --ok:#2e6e4e; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--paper); color:var(--ink); font-family:"Source Han Sans SC","Microsoft YaHei",sans-serif; font-size:14.5px; line-height:1.65; }
+  .wrap { max-width:1060px; margin:0 auto; padding:56px 26px 90px; }
+  header { border-bottom:2px solid var(--ink); padding-bottom:20px; margin-bottom:8px; }
+  .kicker { font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:var(--faint); font-family:var(--mono); margin-bottom:12px; }
+  h1 { font-size:30px; font-weight:750; }
+  .standfirst { margin-top:10px; color:var(--soft); max-width:48em; }
+  .meta { display:flex; gap:28px; margin-top:16px; flex-wrap:wrap; }
+  .meta div .k { font-size:10.5px; letter-spacing:.1em; color:var(--faint); text-transform:uppercase; font-family:var(--mono); }
+  .meta div .v { font-size:13px; font-family:var(--mono); }
+  .verdict { display:inline-block; margin-top:16px; padding:8px 18px; border:1px solid var(--orange); color:var(--orange); font-weight:700; font-family:var(--mono); letter-spacing:.08em; font-size:14px; }
+  section { padding-top:34px; }
+  h2 { font-size:17px; font-weight:700; padding-bottom:7px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+  h2 .no { color:var(--accent); font-family:var(--mono); font-size:12.5px; font-weight:500; margin-right:8px; }
+  h3 { font-size:14.5px; font-weight:700; margin:18px 0 8px; color:var(--accent); }
+  p { margin-bottom:10px; max-width:68em; }
+  p.lede { color:var(--soft); }
+  .note { font-size:12.5px; color:var(--faint); }
+  code { font-family:var(--mono); font-size:12.5px; background:var(--wash); padding:1px 5px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0 6px; font-size:13px; }
+  caption { caption-side:top; text-align:left; font-size:12.5px; color:var(--soft); padding-bottom:7px; }
+  caption b { color:var(--ink); }
+  th { text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); padding:7px 9px; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); }
+  td { padding:7px 9px; border-bottom:1px solid var(--line2); vertical-align:top; }
+  .mono { font-family:var(--mono); font-size:12px; }
+  .sev-h { color:var(--orange); font-weight:700; } .sev-m { color:#b7791f; font-weight:600; } .sev-l { color:var(--faint); }
+  .pill { display:inline-block; padding:1px 8px; border:1px solid var(--line); font-size:11px; margin-right:4px; }
+  footer { margin-top:50px; padding-top:12px; border-top:1px solid var(--line); font-size:12px; color:var(--faint); font-family:var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Weakness Analysis · Suite v1.1.0+ · Evidence-anchored</div>
+  <h1>项目缺点分析报告</h1>
+  <p class="standfirst">对三服务套件做六维缺点分析：每条缺点附代码/文件级证据位置、严重度、影响与触发条件，红队二次复核（3 条抽查 + 2 项新增发现），配缺陷优先级清单与改进路线图。</p>
+  <div class="meta">
+    <div><div class="k">分析日期</div><div class="v">2026-09-21</div></div>
+    <div><div class="k">对象</div><div class="v">ModelHub :8687 · 龙虾站 :8791 · 任务台账 :8792（v1.1.0+）</div></div>
+    <div><div class="k">缺点总数</div><div class="v">17 条（高 3 / 中 6 / 低 8）</div></div>
+    <div><div class="k">口径声明</div><div class="v">只诊断不改动（本轮零代码修改；红队改写已即时还原并留痕）</div></div>
+  </div>
+  <div class="verdict">17 条缺点 · 3 条高危（全部集中在安全与隐私维度）· 每条带修复路径</div>
+</header>
+
+<section>
+  <h2><span class="no">01</span>严重度总览</h2>
+  <table>
+    <caption><b>表 1-1</b>　分级分布（详单见 §02–§07，每条附证据位置）</caption>
+    <thead><tr><th style="width:16%">严重度</th><th style="width:16%">数量</th><th>集中在哪</th></tr></thead>
+    <tbody>
+      <tr><td class="sev-h">高</td><td>3</td><td>全部在安全与隐私维度：无鉴权（W7）、PII 明文+无鉴权可读（W8）、桌面明文密钥（W9）</td></tr>
+      <tr><td class="sev-m">中</td><td>6</td><td>单机 JSON 并发边界（W3）、注册表双轨（W4）、测试未入 CI（W6）、上游限流依赖（W13）、存量测试污染（W16）、产品定位漂移面（W2）</td></tr>
+      <tr><td class="sev-l">低</td><td>8</td><td>版本声明（W1）、端口硬编码（W5）、CORS（W10）、usage 损坏静默（W11）、台账轮转（W12）、降级心跳（W14）、演示标识（W15）、升级路径（W17）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">02</span>高危三条（P1，本周应处理）</h2>
+  <table>
+    <caption><b>表 2-1</b>　高危缺点与修复路径（成本均 ≤2h）</caption>
+    <thead><tr><th style="width:24%">编号/缺点</th><th style="width:34%">证据位置（可溯源）</th><th>修复方向与权衡</th></tr></thead>
+    <tbody>
+      <tr><td class="sev-h">W7 三服务无鉴权<br><span class="mono">红队实锤</span></td><td>红队实测：未鉴权 PATCH 成功改写 TASK-005 状态（已即时还原，history 留痕）；lobster/taskboard `app.py` auth 引用 0 处；ModelHub 有 PMH_GATEWAY_TOKEN 机制但默认未设</td><td>统一复制 PMH_GATEWAY_TOKEN 模式到三服务。权衡：本地便利性下降；可设环境变量开关</td></tr>
+      <tr><td class="sev-h">W8 PII 明文+无鉴权可读</td><td>`releases/lobster/data/orders.json` 含 7 条明文手机号；`GET /api/orders` 无凭据返回全部</td><td>存储脱敏（只存尾 4 位）+ 接口默认脱敏返回。权衡：找回订单需留后 4 位自助匹配</td></tr>
+      <tr><td class="sev-h">W9 桌面明文密钥</td><td>`D:\Desktop\新建 Text Document.txt` 实测存在，含商汤 3 Key + AMD Key</td><td>移入密码管理器或删除（密钥已在 .env 与密钥管理面收敛）。权衡：无——纯收益</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">03</span>中危六条（P2，上量前处理）</h2>
+  <table>
+    <caption><b>表 3-1</b>　中危缺点</caption>
+    <thead><tr><th style="width:26%">编号/缺点</th><th style="width:36%">证据位置</th><th>修复方向</th></tr></thead>
+    <tbody>
+      <tr><td class="sev-m">W3 单机 JSON 并发边界</td><td class="mono">taskboard/lobster app.py 的 threading.Lock（进程内有效）</td><td>迁 SQLite（WAL 模式）——上量前做</td></tr>
+      <tr><td class="sev-m">W4 agent 注册双轨</td><td class="mono">data/agents.json（落盘）与 agents.py get_registry()（内存）并存</td><td>并轨到 AgentStore 单一真值</td></tr>
+      <tr><td class="sev-m">W6 三服务测试未入 CI</td><td class="mono">.github/workflows/ci.yml 仅覆盖 pm 原有包；tests_modelhub 为手动脚本</td><td>pytest 化 + workflow 三服务 job</td></tr>
+      <tr><td class="sev-m">W13 上游限流依赖</td><td class="mono">D-006/D-009 实测（429/401 突发）</td><td>非代码问题：按 TASK 队列做配额申请或多渠道</td></tr>
+      <tr><td class="sev-m">W16 存量测试顺序依赖</td><td class="mono">test_measurement.py 2 用例（复现实验已证与 ModelHub 无关）</td><td>单独排期修复 pm 存量</td></tr>
+      <tr><td class="sev-m">W2 占位内容散落 3 处</td><td class="mono">landing.html / app.py SPECS / poster.html</td><td>收敛为单一 config 注入（转正时一并做）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">04</span>低危八条（P3，择机打磨）</h2>
+  <p>W1 版本声明缺聚合端点 · W5 端口硬编码 9 处 · W10 CORS 未配置（同源兜底）· W11 usage_store 损坏静默重建（JSONL 事实源在）· W12 JSONL 无轮转（74.6KB，已加分页）· W14 降级分支无心跳 · W15 演示标识不一致 · W17 升级靠快照对照。全部有出处（weakness-report.md 源文件同名录），均为打磨项不构成使用障碍。</p>
+</section>
+
+<section>
+  <h2><span class="no">05</span>信息盲区（不下结论的部分）</h2>
+  <table>
+    <caption><b>表 5-1</b>　因资料不足无法确认的疑点</caption>
+    <thead><tr><th style="width:30%">疑点</th><th style="width:34%">缺什么材料</th><th>为什么重要</th></tr></thead>
+    <tbody>
+      <tr><td>上游 stream 401 的真实成因</td><td>商汤账户配额类型/等级信息</td><td>决定真流式实测（TASK-002）能否推进</td></tr>
+      <tr><td>三服务预期并发量级</td><td>使用场景（自用/团队/公开）</td><td>决定 W3/W12 的处理时点</td></tr>
+      <tr><td>合规要求基线</td><td>部署对象与受众（是否涉等保/隐私协议）</td><td>决定 W8 PII 处理标准与 W7 鉴权强度</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">06</span>红队复核记录（二次复核留痕）</h2>
+  <p>① 抽查 W7：未鉴权 PATCH 实测成功改写 TASK-005 → 已即时还原，还原动作在 history 留痕（证据链完整）；② 抽查 W8：orders.json 手机号实数 7 条；③ 抽查 W13：引用 D-006/D-009 无误引；④ 反向检查新增 E12/W15（演示标识不一致）与 E13/W14（降级分支无心跳）两项报告初稿遗漏；⑤ 核对 audit_v12.json"13 项零问题"与本报告不矛盾——那是运行健康口径，本报告是改进空间口径。</p>
+</section>
+
+<footer>
+  WEAKNESS ANALYSIS v1.0 · 三服务套件 · 2026-09-21<br>
+  源文件归档：weakness-report.md（本文件 MD 版）· 证据：audit_v12.json · 红队实测记录 · defect-ledger.md
+</footer>
+
+</div>
+</body>
+</html>

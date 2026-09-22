@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多 LLM 同时工作实测报告 — ModelHub v1.5 模型池</title>
+<style>
+  :root{--bg:#fafaf8;--panel:#ffffff;--line:#e6e3dc;--ink:#1a1c1e;--mut:#6b7280;--accent:#0f62fe;--ok:#0e9f6e;--warn:#d97706;--mono:"Cascadia Code",Consolas,monospace}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:15px/1.75 "Segoe UI","Microsoft YaHei",sans-serif;padding:56px 24px}
+  .wrap{max-width:1060px;margin:0 auto}
+  header{padding-bottom:28px;border-bottom:1px solid var(--line);margin-bottom:36px}
+  .kicker{color:var(--accent);font-size:12px;letter-spacing:.24em;text-transform:uppercase;font-family:var(--mono)}
+  h1{font-size:32px;font-weight:650;letter-spacing:-.01em;margin:10px 0 8px}
+  .sub{color:var(--mut);max-width:70ch}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin:32px 0}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px}
+  .stat .v{font-size:30px;font-weight:700;font-family:var(--mono);color:var(--accent)}
+  .stat .v.g{color:var(--ok)}
+  .stat .k{color:var(--mut);font-size:13px;margin-top:6px}
+  h2{font-size:20px;font-weight:650;margin:44px 0 16px}
+  table{width:100%;border-collapse:collapse;margin:16px 0 28px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13.5px}
+  th,td{padding:11px 16px;text-align:left;border-bottom:1px solid var(--line)}
+  th{color:var(--mut);font-weight:600;font-size:12px;letter-spacing:.04em;text-transform:uppercase;background:#f4f3ef}
+  tr:last-child td{border-bottom:none}
+  td.mono{font-family:var(--mono);font-size:12.5px}
+  .ok{color:var(--ok);font-weight:600}
+  .warn{color:var(--warn);font-weight:600}
+  .note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:18px 22px;margin:20px 0;font-size:14px;color:#374151}
+  .note b{color:var(--ink)}
+  code{font-family:var(--mono);font-size:.9em;background:#f0efe9;padding:1px 6px;border-radius:4px}
+  footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:var(--mut);font-size:12px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">ModelHub · Multi-LLM Live Test</div>
+  <h1>多 LLM 同时工作实测报告</h1>
+  <div class="sub">2026-09-22 · 桌面清单 5 路来源全量接入：ModelHub 模型池 12 → 15 条目（StepFun 新增可用、NVIDIA 超时熔断自愈、OpenRouter 欠费登记禁用）。以下全部为经网关 127.0.0.1:8687 的真实调用数据。</div>
+</header>
+
+<div class="grid">
+  <div class="stat"><div class="v g">15</div><div class="k">池条目（SenseNova 5 + AMD 7 + StepFun 1 + NVIDIA 1 + OpenRouter 1）</div></div>
+  <div class="stat"><div class="v g">8/8</div><div class="k">并发阶段 B：8 个 LLM 同时工作全通</div></div>
+  <div class="stat"><div class="v">124.3s</div><div class="k">8 并发墙钟（被 NVIDIA 冷启动拖底；其余 7 家 ≤19.3s）</div></div>
+  <div class="stat"><div class="v">18.3s</div><div class="k">fan-out 4 家同题对照墙钟，评分 6/7/7/8 真·多视角</div></div>
+</div>
+
+<h2>一、新源探测结论（桌面清单 → 实测）</h2>
+<table>
+  <tr><th>来源</th><th>桌面清单内容</th><th>实测结论</th><th>处置</th></tr>
+  <tr><td>AMD Radeon</td><td class="mono">DeepSeek-V4-Flash / GLM-5.3-Flash</td><td class="ok">池内已有（9-21 实测）</td><td>保留 priority 6-11</td></tr>
+  <tr><td>SenseNova</td><td class="mono">5 模型 + 3 密钥池</td><td class="ok">池内已有</td><td>保留 priority 1-5</td></tr>
+  <tr><td>StepFun</td><td class="mono">step-5-preview</td><td class="ok">OK 2.54s 直连 / 11.8s 经网关首调</td><td class="ok">入池 priority 12</td></tr>
+  <tr><td>OpenRouter</td><td class="mono">stealth/ox-alpha</td><td class="warn">404 测试期结束 → 官方 glm-5.3-flash 402 欠费</td><td class="warn">登记禁用（充值后 enabled=true 即恢复）</td></tr>
+  <tr><td>NVIDIA</td><td class="mono">z-ai/glm-5.2</td><td class="warn">410 EOL；z-ai/glm-5.3-flash 两次 150s 读超时</td><td class="warn">入池 60s 超时+熔断自愈（并发实测仍过，冷启动 124s）</td></tr>
+</table>
+
+<h2>二、阶段 B — 8 个 LLM 真实同时工作（并发池 max_workers=8）</h2>
+<table>
+  <tr><th>#</th><th>模型</th><th>来源</th><th>延迟</th><th>回答摘要</th></tr>
+  <tr><td>1</td><td class="mono">sensenova-6.8-flash-lite</td><td>SenseNova</td><td class="mono">1.53s</td><td>2，因一加一等于二</td></tr>
+  <tr><td>2</td><td class="mono">glm-5.2</td><td>SenseNova</td><td class="mono">3.94s</td><td>2</td></tr>
+  <tr><td>3</td><td class="mono">deepseek-v4-pro</td><td>SenseNova</td><td class="mono">4.68s</td><td>2。因为这是算术公理</td></tr>
+  <tr><td>4</td><td class="mono">step-step-5-preview</td><td>StepFun</td><td class="mono">7.78s</td><td>2，算术定义如此</td></tr>
+  <tr><td>5</td><td class="mono">kimi-k3</td><td>SenseNova</td><td class="mono">8.01s</td><td>2，因为两个 1 相加等于 2</td></tr>
+  <tr><td>6</td><td class="mono">amd-qwen3.8-27b</td><td>AMD</td><td class="mono">13.36s</td><td>2，因基础加法</td></tr>
+  <tr><td>7</td><td class="mono">deepseek-v4-flash</td><td>SenseNova</td><td class="mono">19.32s</td><td>2，因为基本算术相加得 2</td></tr>
+  <tr><td>8</td><td class="mono">nvidia-glm-5.3-flash</td><td>NVIDIA</td><td class="mono warn">124.33s</td><td>2，因为算术基本公理</td></tr>
+</table>
+<div class="note"><b>结论：</b>8 个不同家族的 LLM（DeepSeek×2 / GLM / SenseNova / Kimi / Qwen / Step / NVIDIA-GLM）在同一时刻各自向不同上游发起真实推理，全部返回正确且表述各异的答案。除 NVIDIA 冷启动外，其余 7 家全部在 20 秒内返回——多 LLM 同时工作在当前架构下成立，且新增源即插即用（只改配置，不改代码）。</div>
+
+<h2>三、阶段 C — fan-out 同题对照（多模型交叉验证）</h2>
+<p style="color:var(--mut);margin-bottom:8px">同一评分题发给 4 家模型并行作答（这是 PromptMaster 评委团的调度形态）：</p>
+<table>
+  <tr><th>模型</th><th>延迟</th><th>评分</th><th>理由摘要</th></tr>
+  <tr><td class="mono">step-step-5-preview</td><td class="mono">5.66s</td><td class="mono">6</td><td>肯定简洁优点，但直指功能短板</td></tr>
+  <tr><td class="mono">deepseek-v4-flash</td><td class="mono">2.81s</td><td class="mono">7</td><td>客观但略偏保守</td></tr>
+  <tr><td class="mono">amd-qwen3.8-27b</td><td class="mono">18.26s</td><td class="mono">7</td><td>表达清晰但过于笼统</td></tr>
+  <tr><td class="mono">glm-5.2</td><td class="mono">6.76s</td><td class="mono">8</td><td>中肯，但缺具体改进建议</td></tr>
+</table>
+<div class="note"><b>结论：</b>4 家给出 6-8 分的<span class="ok">真实分布而非复读</span>——评委团跨家族交叉验证的前提（独立性）在实测中得到验证。glm-5.2 恰是校准报告里排序一致性最好的评委（r=0.976），本轮给出最细腻理由，行为与校准结论吻合。</div>
+
+<h2>四、多 LLM 协作矩阵（本项目角色分配现状）</h2>
+<table>
+  <tr><th>项目角色</th><th>分配模型</th><th>为什么是它</th></tr>
+  <tr><td>澄清 / 优化器 / MockGen</td><td class="mono">sensenova-6.8-flash-lite</td><td>主力快模（.env 主源），1M 上下文</td></tr>
+  <tr><td>评委 A</td><td class="mono">sensenova-6.8-flash-lite</td><td>MAE 1.07 / bias +0.96 / r=0.901</td></tr>
+  <tr><td>评委 B</td><td class="mono">glm-5.2（商汤）</td><td>排序一致性最好 r=0.976（校准实测）</td></tr>
+  <tr><td>仲裁 / 盲评</td><td class="mono">deepseek-v4-flash（商汤）</td><td>与主源不同谱系；排序最差恰恰适合当第三方</td></tr>
+  <tr><td>被测目标</td><td class="mono">用户指定任意池内模型</td><td>本次并发实测 8 家均可用</td></tr>
+  <tr><td>兜底链</td><td class="mono">AMD 五模型 + Step</td><td>主源 429/超时时按 priority 自动切换</td></tr>
+</table>
+
+<h2>五、交接与运维</h2>
+<div class="note">
+<b>使用方式：</b>所有调用走 <code>http://127.0.0.1:8687/v1/chat/completions</code>，<code>model</code> 字段填池内任意名字即可；不指定时按 priority 自动选。看门狗计划任务每 5 分钟巡检三服务，掉线自动拉起。<br><br>
+<b>新源增删：</b>只改两处——<code>config/modelhub.json</code> 加条目 + <code>.env</code> 加对应 <code>PM_API_KEY_*</code>，重启 run_modelhub.py 生效。OpenRouter 充值后把 <code>enabled</code> 改 true 即可入调度。<br><br>
+<b>回滚方式：</b>配置备份在 <code>config/modelhub.json.bak-v140</code>，<code>copy</code> 回原名 + 重启即回到 12 条目状态；.env 新增键为纯追加，删除末尾三行即净。<br><br>
+<b>风险项：</b>① NVIDIA glm-5.3-flash 实测冷启动可到 124s，已配 60s 超时+熔断（连续 3 次失败冷却 300s），高频场景建议保持低 priority；② OpenRouter 账户欠费，密钥有效但 402；③ 桌面清单中 AMD rc- 密钥为共享测试池（"随便用"），限额策略未知，熔断机制兜底。
+</div>
+
+<footer>ModelHub live test · 2026-09-22 · data: multi_llm_results.json (staging) · gateway 127.0.0.1:8687 · pool 15 entries · 0 code changes, config-only rollout</footer>
+</div>
+</body>
+</html>

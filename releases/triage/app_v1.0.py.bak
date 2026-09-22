@@ -1,0 +1,276 @@
+"""多模型会审台（Triage Panel）v1.0 — 客服工单智能分诊实战案例。
+
+流程：工单输入 → 6 个 LLM 评委并行研判 → 共识汇总 → 人工反馈闭环。
+所有 LLM 调用经 ModelHub 网关(8687)真实发生，逐条落台账 data/ledger.jsonl。
+
+v1.0 刻意保持朴素（全员等待、直接 json.loads），预期在实战中暴露问题后于 v1.1 优化。
+"""
+from __future__ import annotations
+
+import json
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+import urllib.request
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+APP_DIR = Path(__file__).resolve().parent
+DATA = APP_DIR / "data"
+DATA.mkdir(exist_ok=True)
+LEDGER = DATA / "ledger.jsonl"
+SESSIONS = DATA / "sessions.json"
+
+HUB = "http://127.0.0.1:8687/v1/chat/completions"
+
+REVIEWERS = [
+    {"seat": "评委A", "model": "deepseek-v4-flash", "source": "sensenova"},
+    {"seat": "评委B", "model": "glm-5.2", "source": "sensenova"},
+    {"seat": "评委C", "model": "sensenova-6.8-flash-lite", "source": "sensenova"},
+    {"seat": "评委D", "model": "amd-qwen3.8-27b", "source": "amd"},
+    {"seat": "评委E", "model": "step-step-5-preview", "source": "stepfun"},
+    {"seat": "评委F", "model": "nvidia-glm-5.3-flash", "source": "nvidia"},
+]
+
+REVIEW_SYSTEM = (
+    "你是客服工单研判评委。对工单输出严格 JSON 对象（不要代码围栏、不要解释文字）："
+    '{"category":"billing|technical|logistics|complaint|other",'
+    '"severity":"P1|P2|P3","action":"一句话建议动作","confidence":0.0到1.0}'
+    " 分类口径：billing=账单/退款/支付；technical=技术故障/API/系统；"
+    "logistics=物流/配送/签收；complaint=情绪投诉/舆情风险；other=其他。"
+)
+CATEGORIES = ("billing", "technical", "logistics", "complaint", "other")
+SEV_ORDER = {"P1": 3, "P2": 2, "P3": 1}
+
+_lock = threading.Lock()
+app = FastAPI(title="Triage Panel", version="1.0.0")
+
+
+# ---------- 基础设施 ----------
+def append_ledger(rec: dict) -> None:
+    rec["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    with _lock:
+        with open(LEDGER, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def load_sessions() -> dict:
+    if not SESSIONS.exists():
+        return {}
+    try:
+        return json.loads(SESSIONS.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def save_sessions(all_sessions: dict) -> None:
+    with _lock:
+        SESSIONS.write_text(
+            json.dumps(all_sessions, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+
+
+def save_session(session: dict) -> None:
+    with _lock:
+        all_s = load_sessions()
+        all_s[session["session_id"]] = session
+        SESSIONS.write_text(
+            json.dumps(all_s, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+
+
+def call_llm(model: str, system: str, user: str, max_tokens: int = 700,
+             timeout: int = 60, hub: str = HUB) -> dict:
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.2,
+    }
+    req = urllib.request.Request(
+        hub, data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        method="POST", headers={"Content-Type": "application/json"},
+    )
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        lat = round((time.time() - t0) * 1000)
+        content = (d.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
+        return {"ok": True, "latency_ms": lat, "content": content,
+                "usage": d.get("usage", {})}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "latency_ms": round((time.time() - t0) * 1000),
+                "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+
+def parse_verdict(text: str) -> dict:
+    """v1.0 朴素解析：直接 json.loads（预期实战中会被代码围栏/前后缀文本打脸）。"""
+    return json.loads(text)
+
+
+# ---------- 核心流程 ----------
+def run_panel(session: dict) -> None:
+    ticket = session["ticket"]
+    user_msg = f"工单主题：{ticket['subject']}\n工单正文：{ticket['body']}"
+    t0 = time.time()
+
+    def review_one(rv: dict) -> dict:
+        r = call_llm(rv["model"], REVIEW_SYSTEM, user_msg)
+        rec = {"seat": rv["seat"], "model": rv["model"], "source": rv["source"],
+               "latency_ms": r["latency_ms"], "ok": r["ok"]}
+        append_ledger({"kind": "review", "session_id": session["session_id"],
+                       "model": rv["model"], "seat": rv["seat"],
+                       "latency_ms": r["latency_ms"], "ok": r["ok"],
+                       "error": r.get("error"), "in_chars": len(user_msg),
+                       "out_chars": len(r.get("content", "") or ""),
+                       "usage": r.get("usage", {})})
+        if not r["ok"]:
+            rec["error"] = r["error"]
+            return rec
+        try:
+            v = parse_verdict(r["content"])
+            rec["verdict"] = v
+            rec["raw_head"] = r["content"][:120]
+        except Exception as e:  # noqa: BLE001
+            rec["parse_error"] = f"{type(e).__name__}: {str(e)[:80]}"
+            rec["raw_head"] = r["content"][:160]
+        return rec
+
+    verdicts = []
+    with ThreadPoolExecutor(max_workers=len(REVIEWERS)) as ex:
+        futs = [ex.submit(review_one, rv) for rv in REVIEWERS]
+        for f in as_completed(futs):
+            verdicts.append(f.result())
+    verdicts.sort(key=lambda x: x["seat"])
+    session["verdicts"] = verdicts
+    session["wall_ms"] = round((time.time() - t0) * 1000)
+    session["consensus"] = build_consensus(verdicts)
+    session["status"] = "done"
+    append_ledger({"kind": "consensus", "session_id": session["session_id"],
+                   "wall_ms": session["wall_ms"],
+                   "consensus": session["consensus"].get("category"),
+                   "n_ok": sum(1 for v in verdicts if v.get("verdict")),
+                   "n_total": len(verdicts)})
+    save_session(session)
+
+
+def build_consensus(verdicts: list) -> dict:
+    oks = [v for v in verdicts if v.get("verdict")]
+    if not oks:
+        return {"category": None, "note": "无有效研判（全部失败），需人工介入"}
+    from collections import Counter
+
+    cats = Counter(v["verdict"].get("category", "other") for v in oks)
+    top_cat, top_n = cats.most_common(1)[0]
+    group = [v for v in oks if v["verdict"].get("category") == top_cat]
+    sevs = [v["verdict"].get("severity", "P3") for v in group]
+    top_sev = max(sevs, key=lambda s: SEV_ORDER.get(s, 1))
+    confs = [float(v["verdict"].get("confidence", 0) or 0) for v in group]
+    actions = [v["verdict"].get("action", "") for v in group]
+    return {
+        "category": top_cat,
+        "severity": top_sev,
+        "action": Counter(a for a in actions if a).most_common(1)[0][0] if any(actions) else "",
+        "votes": f"{top_n}/{len(oks)}",
+        "agreement": round(top_n / len(oks), 2),
+        "avg_confidence": round(sum(confs) / len(confs), 2) if confs else 0,
+        "dissent": [{"seat": v["seat"], "category": v["verdict"].get("category")}
+                    for v in oks if v["verdict"].get("category") != top_cat],
+        "failed": [{"seat": v["seat"], "model": v["model"],
+                    "reason": v.get("error") or v.get("parse_error")}
+                   for v in verdicts if not v.get("verdict")],
+    }
+
+
+# ---------- API ----------
+class ReviewIn(BaseModel):
+    subject: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=20000)
+    customer: str = Field(default="测试客户", max_length=60)
+
+
+@app.post("/api/reviews")
+def create_review(req: ReviewIn):
+    sid = f"SES-{time.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    session = {"session_id": sid, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+               "ticket": req.model_dump(), "status": "running",
+               "verdicts": [], "consensus": None, "feedback": None}
+    run_panel(session)
+    return session
+
+
+@app.get("/api/sessions")
+def list_sessions():
+    all_s = load_sessions()
+    items = sorted(all_s.values(), key=lambda s: s["ts"], reverse=True)
+    return {"count": len(items),
+            "sessions": [{k: s.get(k) for k in ("session_id", "ts", "status")}
+                         | {"subject": s["ticket"]["subject"]} for s in items]}
+
+
+@app.get("/api/sessions/{sid}")
+def get_session(sid: str):
+    s = load_sessions().get(sid)
+    if not s:
+        raise HTTPException(404, f"会话不存在：{sid}")
+    return s
+
+
+class FeedbackIn(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comment: str = Field(default="", max_length=300)
+
+
+@app.post("/api/sessions/{sid}/feedback")
+def give_feedback(sid: str, fb: FeedbackIn):
+    all_s = load_sessions()
+    s = all_s.get(sid)
+    if not s:
+        raise HTTPException(404, f"会话不存在：{sid}")
+    s["feedback"] = {"rating": fb.rating, "comment": fb.comment,
+                     "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    all_s[sid] = s
+    save_sessions(all_s)
+    append_ledger({"kind": "feedback", "session_id": sid,
+                   "rating": fb.rating, "comment": fb.comment[:100]})
+    return {"ok": True, "feedback": s["feedback"]}
+
+
+@app.get("/api/ledger")
+def query_ledger(limit: int = 50, session: str = ""):
+    if not LEDGER.exists():
+        return {"count": 0, "entries": []}
+    lines = LEDGER.read_text(encoding="utf-8").strip().splitlines()
+    entries = [json.loads(ln) for ln in lines if ln.strip()]
+    if session:
+        entries = [e for e in entries if e.get("session_id") == session]
+    return {"count": len(entries), "entries": entries[-limit:]}
+
+
+@app.get("/api/health")
+def health():
+    led_n = 0
+    if LEDGER.exists():
+        led_n = len(LEDGER.read_text(encoding="utf-8").strip().splitlines())
+    return {"status": "ok", "service": "triage-panel", "version": "1.0.0",
+            "reviewers": len(REVIEWERS), "ledger_entries": led_n,
+            "sessions": len(load_sessions())}
+
+
+@app.get("/")
+def index():
+    return FileResponse(APP_DIR / "static" / "index.html")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8793)

@@ -1,0 +1,11 @@
+﻿{
+    "scope":  "pre-modelhub optimization snapshot",
+    "created":  "2026-09-21 10:55:01",
+    "files":  [
+                  ".env",
+                  ".env.example",
+                  ".gitignore",
+                  "pm/llm.py"
+              ],
+    "restore_hint":  "copy files back to their original locations"
+}

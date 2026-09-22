@@ -1,0 +1,162 @@
+{
+ "label": "v13",
+ "ts": "2026-09-22 11:17:20",
+ "measurement": "urllib 同口径计时 + 正则静态检查 + py_compile",
+ "performance": [
+  {
+   "svc": "modelhub",
+   "path": "/",
+   "status": null,
+   "ms": 2097,
+   "size": 84
+  },
+  {
+   "svc": "modelhub",
+   "path": "/v1/models",
+   "status": null,
+   "ms": 2032,
+   "size": 84
+  },
+  {
+   "svc": "modelhub",
+   "path": "/console",
+   "status": null,
+   "ms": 2025,
+   "size": 84
+  },
+  {
+   "svc": "modelhub",
+   "path": "/v1/usage",
+   "status": null,
+   "ms": 2040,
+   "size": 84
+  },
+  {
+   "svc": "modelhub",
+   "path": "/v1/metrics",
+   "status": null,
+   "ms": 2039,
+   "size": 84
+  },
+  {
+   "svc": "lobster",
+   "path": "/",
+   "status": null,
+   "ms": 2025,
+   "size": 84
+  },
+  {
+   "svc": "lobster",
+   "path": "/ledger",
+   "status": null,
+   "ms": 2032,
+   "size": 84
+  },
+  {
+   "svc": "lobster",
+   "path": "/poster",
+   "status": null,
+   "ms": 2026,
+   "size": 84
+  },
+  {
+   "svc": "taskboard",
+   "path": "/",
+   "status": null,
+   "ms": 2036,
+   "size": 84
+  },
+  {
+   "svc": "taskboard",
+   "path": "/rules",
+   "status": null,
+   "ms": 2031,
+   "size": 84
+  },
+  {
+   "svc": "taskboard",
+   "path": "/exceptions",
+   "status": null,
+   "ms": 2025,
+   "size": 84
+  },
+  {
+   "svc": "taskboard",
+   "path": "/handoff",
+   "status": null,
+   "ms": 2035,
+   "size": 84
+  }
+ ],
+ "seo": [],
+ "accessibility": [],
+ "security": [
+  {
+   "name": "taskboard_auth_challenge",
+   "value": false,
+   "note": "无 WWW-Authenticate = 写接口无强制鉴权"
+  },
+  {
+   "name": "lobster_auth_challenge",
+   "value": false,
+   "note": "无 WWW-Authenticate = 写接口无强制鉴权"
+  },
+  {
+   "name": "modelhub_auth_challenge",
+   "value": false,
+   "note": "无 WWW-Authenticate = 写接口无强制鉴权"
+  },
+  {
+   "name": "lobster_pii_plain_phones",
+   "value": 7,
+   "note": ">0 即明文手机号落盘"
+  },
+  {
+   "name": "cors_acao_present",
+   "value": false,
+   "note": "未配置=同源兜底（可接受）"
+  },
+  {
+   "name": "modelhub_requirements_lock",
+   "value": true
+  },
+  {
+   "name": "lobster_requirements_txt",
+   "value": true
+  },
+  {
+   "name": "desktop_plain_key_file",
+   "value": true,
+   "note": "桌面明文密钥（高）"
+  }
+ ],
+ "code_quality": [
+  {
+   "file": "server.py",
+   "compile": true,
+   "err": ""
+  },
+  {
+   "file": "pool.py",
+   "compile": true,
+   "err": ""
+  },
+  {
+   "file": "app.py",
+   "compile": true,
+   "err": ""
+  },
+  {
+   "file": "app.py",
+   "compile": true,
+   "err": ""
+  }
+ ],
+ "summary": {
+  "perf_ok": "0/12",
+  "seo_pass": "0/0",
+  "a11y_issues": 0,
+  "sec_issues": 3,
+  "compile_ok": 4
+ }
+}

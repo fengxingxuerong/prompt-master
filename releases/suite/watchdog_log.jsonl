@@ -1,0 +1,3 @@
+{"ts": "2026-09-22T11:36:53", "service": "lobster", "action": "restart", "alert": true}
+{"ts": "2026-09-22T11:36:53", "action": "patrol", "detail": ["lobster: DOWN → 拉起 (port from http://127.0.0.1:8791/api/health)"], "alert": true}
+{"ts": "2026-09-22T11:37:32", "action": "install", "detail": ["onstart", "5min"], "alert": false}

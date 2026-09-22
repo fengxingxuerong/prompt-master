@@ -9,7 +9,24 @@
 
 from __future__ import annotations
 
+import os as _os
+
 import pytest
+
+# ---------------------------------------------------------------------------
+# W16 修复（2026-09-22）：顺序依赖根因。
+# pm.llm 在模块级 load_dotenv() 会把宿主机 .env 的 PM_JUDGE_JITTER=2.6 灌进进程
+# 环境；pm.schemas 又在 import 时把该值冻结进模块常量 JUDGE_JITTER。于是
+# "谁先被 import" 决定测量层用例结果：单跑 test_measurement 时 schemas 先于
+# llm 加载 → 0.0（绿）；先跑 test_api 时 llm 先灌 env → 2.6（红）。
+# 这里在任意测试模块加载前把常量钉回旧口径 0.0；需要测抖动的用例一律
+# monkeypatch.setattr(schemas, "JUDGE_JITTER", ...) 显式覆盖（既有用例已如此）。
+# ---------------------------------------------------------------------------
+_os.environ.pop("PM_JUDGE_JITTER", None)
+
+from pm import schemas as _pm_schemas  # noqa: E402
+
+_pm_schemas.JUDGE_JITTER = 0.0
 
 
 @pytest.fixture(autouse=True)

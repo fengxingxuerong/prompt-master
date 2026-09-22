@@ -1,0 +1,1249 @@
+{
+ "SES-20260922-8FE25E": {
+  "session_id": "SES-20260922-8FE25E",
+  "ts": "2026-09-22T16:19:02",
+  "ticket": {
+   "subject": "订单 88231 重复扣款且客服三天未回应",
+   "body": "客户 9 月 19 日下单后发现银行卡被扣两次 199 元，联系在线客服三次均收到机器人话术，未得到退款。客户表示再不解决就到消费者平台投诉，并要求赔偿。订单号 88231，支付流水后四位 6672。",
+   "customer": "测试客户-T1-账单P1"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 3791,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "立即核实并退款重复扣款，联系客户致歉安抚，避免升级投诉",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P1\",\"action\":\"立即核实并退款重复扣款，联系客户致歉安抚，避免升级投诉\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 10802,
+    "ok": true,
+    "parse_error": "JSONDecodeError: Unterminated string starting at: line 1 column 2 (char 1)",
+    "raw_head": "{\""
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 2779,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "立即核查订单88231支付流水，确认重复扣款后优先退款199元，安排人工客服24小时内主动联系客户致歉并提供补偿方案，防止升级至消协投诉",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P1\",\"action\":\"立即核查订单88231支付流水，确认重复扣款后优先退款199元，安排人工客服24小时内主动联系客户致歉并提供补偿方案，防止升级至消协投诉\","
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 60143,
+    "ok": false,
+    "error": "TimeoutError: timed out"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 25238,
+    "ok": true,
+    "parse_error": "JSONDecodeError: Unterminated string starting at: line 1 column 2 (char 1)",
+    "raw_head": "{\""
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 60048,
+    "ok": false,
+    "error": "TimeoutError: timed out"
+   }
+  ],
+  "consensus": {
+   "category": "billing",
+   "severity": "P1",
+   "action": "立即核实并退款重复扣款，联系客户致歉安抚，避免升级投诉",
+   "votes": "2/2",
+   "agreement": 1.0,
+   "avg_confidence": 0.95,
+   "dissent": [],
+   "failed": [
+    {
+     "seat": "评委B",
+     "model": "glm-5.2",
+     "reason": "JSONDecodeError: Unterminated string starting at: line 1 column 2 (char 1)"
+    },
+    {
+     "seat": "评委D",
+     "model": "amd-qwen3.8-27b",
+     "reason": "TimeoutError: timed out"
+    },
+    {
+     "seat": "评委E",
+     "model": "step-step-5-preview",
+     "reason": "JSONDecodeError: Unterminated string starting at: line 1 column 2 (char 1)"
+    },
+    {
+     "seat": "评委F",
+     "model": "nvidia-glm-5.3-flash",
+     "reason": "TimeoutError: timed out"
+    }
+   ]
+  },
+  "feedback": null,
+  "wall_ms": 60236
+ },
+ "SES-20260922-8C44D9": {
+  "session_id": "SES-20260922-8C44D9",
+  "ts": "2026-09-22T16:19:02",
+  "ticket": {
+   "subject": "API 调用大面积超时",
+   "body": "从今天上午 10 点开始，我们生产环境的程序调用你们接口频繁 504 超时，重试也没用，影响我们上千终端用户。请立即排查，附 trace id: abc-123-def。",
+   "customer": "测试客户-T2-技术故障"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 2782,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即排查API服务状态及trace id abc-123-def对应的超时链路",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即排查API服务状态及trace id abc-123-def对应的超时链路\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 7551,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即根据 trace id abc-123-def 排查 API 504 超时原因并联系客户同步进展。",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即根据 trace id abc-123-def 排查 API 504 超时原因并联系客户同步进展。\",\"confidence\":0.95"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 2464,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即根据trace id abc-123-def排查API 504超时根因，优先恢复生产环境服务",
+     "confidence": 0.98
+    },
+    "raw_head": "\n\n{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即根据trace id abc-123-def排查API 504超时根因，优先恢复生产环境服务\",\"confidence\":0.98}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 60018,
+    "ok": false,
+    "error": "TimeoutError: timed out"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 9507,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即根据trace id abc-123-def排查API网关及后端服务超时原因，并同步处理进展",
+     "confidence": 1.0
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即根据trace id abc-123-def排查API网关及后端服务超时原因，并同步处理进展\",\"confidence\":1.0}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 60014,
+    "ok": false,
+    "error": "TimeoutError: timed out"
+   }
+  ],
+  "consensus": {
+   "category": "technical",
+   "severity": "P1",
+   "action": "立即排查API服务状态及trace id abc-123-def对应的超时链路",
+   "votes": "4/4",
+   "agreement": 1.0,
+   "avg_confidence": 0.97,
+   "dissent": [],
+   "failed": [
+    {
+     "seat": "评委D",
+     "model": "amd-qwen3.8-27b",
+     "reason": "TimeoutError: timed out"
+    },
+    {
+     "seat": "评委F",
+     "model": "nvidia-glm-5.3-flash",
+     "reason": "TimeoutError: timed out"
+    }
+   ]
+  },
+  "feedback": null,
+  "wall_ms": 60237
+ },
+ "SES-20260922-DAB0D6": {
+  "session_id": "SES-20260922-DAB0D6",
+  "ts": "2026-09-22T16:20:02",
+  "ticket": {
+   "subject": "快递显示签收但没收到货",
+   "body": "物流单号 SF1380000 显示已签收，但客户表示从未收到包裹，小区驿站也没有代收记录。要求核查签收人信息并补发。",
+   "customer": "测试客户-T3-物流"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 3099,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "联系快递公司核查签收底单和派送记录，确认签收人信息，若属实则安排补发。",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"联系快递公司核查签收底单和派送记录，确认签收人信息，若属实则安排补发。\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 9603,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "联系物流公司核查签收底单及派送轨迹，确认丢件后为客户安排补发并安抚情绪。",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"联系物流公司核查签收底单及派送轨迹，确认丢件后为客户安排补发并安抚情绪。\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 3917,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "联系顺丰核实SF1380000签收人信息，确认包裹去向，若确认丢失则安排补发并跟进客户",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"联系顺丰核实SF1380000签收人信息，确认包裹去向，若确认丢失则安排补发并跟进客户\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 60024,
+    "ok": false,
+    "error": "TimeoutError: timed out"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 13360,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "核查签收人信息及派送记录，如确认丢件立即安排补发或赔偿",
+     "confidence": 1.0
+    },
+    "raw_head": "{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"核查签收人信息及派送记录，如确认丢件立即安排补发或赔偿\",\"confidence\":1.0}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 60021,
+    "ok": false,
+    "error": "TimeoutError: timed out"
+   }
+  ],
+  "consensus": {
+   "category": "logistics",
+   "severity": "P2",
+   "action": "联系快递公司核查签收底单和派送记录，确认签收人信息，若属实则安排补发。",
+   "votes": "4/4",
+   "agreement": 1.0,
+   "avg_confidence": 0.96,
+   "dissent": [],
+   "failed": [
+    {
+     "seat": "评委D",
+     "model": "amd-qwen3.8-27b",
+     "reason": "TimeoutError: timed out"
+    },
+    {
+     "seat": "评委F",
+     "model": "nvidia-glm-5.3-flash",
+     "reason": "TimeoutError: timed out"
+    }
+   ]
+  },
+  "feedback": null,
+  "wall_ms": 60033
+ },
+ "SES-20260922-D3406B": {
+  "session_id": "SES-20260922-D3406B",
+  "ts": "2026-09-22T16:20:02",
+  "ticket": {
+   "subject": "你们的产品就是垃圾！",
+   "body": "用了两周天天出问题，客服只会敷衍。再这样我就卸载，并且会发帖告诉所有人别买！",
+   "customer": "测试客户-T4-情绪投诉"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 3085,
+    "ok": true,
+    "verdict": {
+     "category": "complaint",
+     "severity": "P1",
+     "action": "立即安抚用户情绪并真诚道歉，主动联系了解具体产品问题，提供补偿方案，避免用户发帖引发舆情风险。",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"complaint\",\"severity\":\"P1\",\"action\":\"立即安抚用户情绪并真诚道歉，主动联系了解具体产品问题，提供补偿方案，避免用户发帖引发舆情风险。\",\"confidence\":0.9}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 9321,
+    "ok": true,
+    "verdict": {
+     "category": "complaint",
+     "severity": "P1",
+     "action": "立即由主管介入安抚客户情绪，排查产品故障并提供补偿方案，防范舆情扩散风险。",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"complaint\",\"severity\":\"P1\",\"action\":\"立即由主管介入安抚客户情绪，排查产品故障并提供补偿方案，防范舆情扩散风险。\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 3435,
+    "ok": true,
+    "verdict": {
+     "category": "complaint",
+     "severity": "P1",
+     "action": "立即升级至高级客服主管，诚恳道歉并提供补偿方案，优先安抚情绪防止用户公开发帖造成舆情扩散",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"complaint\",\"severity\":\"P1\",\"action\":\"立即升级至高级客服主管，诚恳道歉并提供补偿方案，优先安抚情绪防止用户公开发帖造成舆情扩散\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 60003,
+    "ok": false,
+    "error": "TimeoutError: timed out"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 33771,
+    "ok": true,
+    "verdict": {
+     "category": "complaint",
+     "severity": "P1",
+     "action": "立即升级至舆情应急小组，由资深客服专员致电安抚并承诺优先解决产品问题，避免负面舆论扩散。",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"complaint\",\"severity\":\"P1\",\"action\":\"立即升级至舆情应急小组，由资深客服专员致电安抚并承诺优先解决产品问题，避免负面舆论扩散。\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 60036,
+    "ok": false,
+    "error": "TimeoutError: timed out"
+   }
+  ],
+  "consensus": {
+   "category": "complaint",
+   "severity": "P1",
+   "action": "立即安抚用户情绪并真诚道歉，主动联系了解具体产品问题，提供补偿方案，避免用户发帖引发舆情风险。",
+   "votes": "4/4",
+   "agreement": 1.0,
+   "avg_confidence": 0.94,
+   "dissent": [],
+   "failed": [
+    {
+     "seat": "评委D",
+     "model": "amd-qwen3.8-27b",
+     "reason": "TimeoutError: timed out"
+    },
+    {
+     "seat": "评委F",
+     "model": "nvidia-glm-5.3-flash",
+     "reason": "TimeoutError: timed out"
+    }
+   ]
+  },
+  "feedback": null,
+  "wall_ms": 60043
+ },
+ "SES-20260922-C0B341": {
+  "session_id": "SES-20260922-C0B341",
+  "ts": "2026-09-22T16:21:02",
+  "ticket": {
+   "subject": "退款为什么还没到账，而且发票开错了",
+   "body": "客户 9 月 10 日申请退款，承诺 7 个工作日到账，今天第 9 天了还没到。另外发票抬头开错了，公司名多了一个字，需要重开。两件事一起处理。",
+   "customer": "测试客户-T5-混合类"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 3439,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "尽快核实退款状态并重开发票，同时向客户致歉说明进度",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"尽快核实退款状态并重开发票，同时向客户致歉说明进度\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 5777,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "核查退款进度并加急催办打款，同时按正确抬头重新开具发票后回复客户",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"核查退款进度并加急催办打款，同时按正确抬头重新开具发票后回复客户\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 2475,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "优先核实退款延迟原因并加急处理，同时安排发票重开",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"优先核实退款延迟原因并加急处理，同时安排发票重开\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 3131,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "尽快核实退款延迟原因并催促到账，同时按正确抬头重开发票。",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"尽快核实退款延迟原因并催促到账，同时按正确抬头重开发票。\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 5293,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "优先核查退款进度并加急处理，同时安排重开正确抬头的发票",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"优先核查退款进度并加急处理，同时安排重开正确抬头的发票\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 3137,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "立即核查退款状态并加急处理，同时安排重开发票，向客户说明进度并致歉",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"立即核查退款状态并加急处理，同时安排重开发票，向客户说明进度并致歉\",\"confidence\":0.95}"
+   }
+  ],
+  "consensus": {
+   "category": "billing",
+   "severity": "P2",
+   "action": "尽快核实退款状态并重开发票，同时向客户致歉说明进度",
+   "votes": "6/6",
+   "agreement": 1.0,
+   "avg_confidence": 0.95,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 5785
+ },
+ "SES-20260922-79C3AB": {
+  "session_id": "SES-20260922-79C3AB",
+  "ts": "2026-09-22T16:21:02",
+  "ticket": {
+   "subject": "退款",
+   "body": "钱呢",
+   "customer": "测试客户-T6-超短边界"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 6421,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P3",
+     "action": "尽快核实退款进度并联系用户告知到账时间",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P3\",\"action\":\"尽快核实退款进度并联系用户告知到账时间\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 5327,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P3",
+     "action": "核实用户退款订单及进度，回复退款到账时间。",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P3\",\"action\":\"核实用户退款订单及进度，回复退款到账时间。\",\"confidence\":0.9}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 35052,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P3",
+     "action": "联系用户确认退款进度并说明到账时间",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P3\",\"action\":\"联系用户确认退款进度并说明到账时间\",\"confidence\":0.9}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 8762,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "核实用户退款进度并向其反馈资金到账时间或失败原因",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"核实用户退款进度并向其反馈资金到账时间或失败原因\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 3916,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "核实该笔退款进度并向用户反馈预计到账时间",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"核实该笔退款进度并向用户反馈预计到账时间\",\"confidence\":0.9}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 9276,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P3",
+     "action": "核实退款进度及资金去向，及时回复安抚客户。",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P3\",\"action\":\"核实退款进度及资金去向，及时回复安抚客户。\",\"confidence\":0.95}"
+   }
+  ],
+  "consensus": {
+   "category": "billing",
+   "severity": "P2",
+   "action": "尽快核实退款进度并联系用户告知到账时间",
+   "votes": "6/6",
+   "agreement": 1.0,
+   "avg_confidence": 0.92,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 35056
+ },
+ "SES-20260922-108BB7": {
+  "session_id": "SES-20260922-108BB7",
+  "ts": "2026-09-22T16:23:40",
+  "ticket": {
+   "subject": "API 调用大面积超时",
+   "body": "从今天上午 10 点开始，我们生产环境的程序调用你们接口频繁 504 超时，重试也没用，影响我们上千终端用户。请立即排查，附 trace id: abc-123-def。",
+   "customer": "测试客户-T2-技术故障"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 6603,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即介入排查接口504超时问题，根据trace id abc-123-def定位系统瓶颈并恢复服务。",
+     "confidence": 0.98
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即介入排查接口504超时问题，根据trace id abc-123-def定位系统瓶颈并恢复服务。\",\"confidence\":0.98}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 3365,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即排查API网关及后端服务健康状态，优先恢复生产环境接口可用性，并同步客户预计修复时间",
+     "confidence": 0.97
+    },
+    "raw_head": "\n\n{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即排查API网关及后端服务健康状态，优先恢复生产环境接口可用性，并同步客户预计修复时间\",\"confidence\":0.97}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 7355,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即升级技术团队排查API网关及后端服务超时问题",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即升级技术团队排查API网关及后端服务超时问题\",\"confidence\":0.95}"
+   }
+  ],
+  "consensus": {
+   "category": "technical",
+   "severity": "P1",
+   "action": "立即介入排查接口504超时问题，根据trace id abc-123-def定位系统瓶颈并恢复服务。",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.97,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 9271,
+  "majority_ms": 7523
+ },
+ "SES-20260922-2F9785": {
+  "session_id": "SES-20260922-2F9785",
+  "ts": "2026-09-22T16:23:50",
+  "ticket": {
+   "subject": "快递显示签收但没收到货",
+   "body": "物流单号 SF1380000 显示已签收，但客户表示从未收到包裹，小区驿站也没有代收记录。要求核查签收人信息并补发。",
+   "customer": "测试客户-T3-物流"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 3984,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "核查签收人信息及驿站代收记录，确认包裹去向，必要时安排补发并安抚客户",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"核查签收人信息及驿站代收记录，确认包裹去向，必要时安排补发并安抚客户\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 6297,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "核查签收人信息及签收时间，联系快递员确认实际投递情况，核实后安排补发或退款",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"核查签收人信息及签收时间，联系快递员确认实际投递情况，核实后安排补发或退款\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 6021,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "核查SF1380000签收人信息及签收时间，联系快递员确认实际投递情况，核实后安排补发并跟进客户确认",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"核查SF1380000签收人信息及签收时间，联系快递员确认实际投递情况，核实后安排补发并跟进客户确认\",\"confidence\":0.9"
+   }
+  ],
+  "consensus": {
+   "category": "logistics",
+   "severity": "P2",
+   "action": "核查签收人信息及驿站代收记录，确认包裹去向，必要时安排补发并安抚客户",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.95,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 9099,
+  "majority_ms": 6302
+ },
+ "SES-20260922-427CE0": {
+  "session_id": "SES-20260922-427CE0",
+  "ts": "2026-09-22T16:23:40",
+  "ticket": {
+   "subject": "订单 88231 重复扣款且客服三天未回应",
+   "body": "客户 9 月 19 日下单后发现银行卡被扣两次 199 元，联系在线客服三次均收到机器人话术，未得到退款。客户表示再不解决就到消费者平台投诉，并要求赔偿。订单号 88231，支付流水后四位 6672。",
+   "customer": "测试客户-T1-账单P1"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 8992,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "立即核查订单88231支付流水确认重复扣款事实，优先发起退款并主动联系客户致歉，防止其向消费者平台投诉升级",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P1\",\"action\":\"立即核查订单88231支付流水确认重复扣款事实，优先发起退款并主动联系客户致歉，防止其向消费者平台投诉升级\",\"confidence\":0."
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 6140,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "立即核实订单88231支付流水后四位6672的重复扣款记录，优先发起退款并补偿客户，同时安排人工客服主动回访以化解投诉升级风险",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"立即核实订单88231支付流水后四位6672的重复扣款记录，优先发起退款并补偿客户，同时安排人工客服主动回访以化解投诉升级风险\",\"conf"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 8361,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "立即核实订单88231支付流水后四位6672的重复扣款情况，优先为客户办理199元退款并主动联系客户致歉，防止其向消费者平台投诉升级",
+     "confidence": 0.92
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P1\",\"action\":\"立即核实订单88231支付流水后四位6672的重复扣款情况，优先为客户办理199元退款并主动联系客户致歉，防止其向消费者平台投诉升级\",\"c"
+   }
+  ],
+  "consensus": {
+   "category": "billing",
+   "severity": "P1",
+   "action": "立即核查订单88231支付流水确认重复扣款事实，优先发起退款并主动联系客户致歉，防止其向消费者平台投诉升级",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.94,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 23814,
+  "majority_ms": 8995
+ },
+ "SES-20260922-3D811D": {
+  "session_id": "SES-20260922-3D811D",
+  "ts": "2026-09-22T16:23:59",
+  "ticket": {
+   "subject": "你们的产品就是垃圾！",
+   "body": "用了两周天天出问题，客服只会敷衍。再这样我就卸载，并且会发帖告诉所有人别买！",
+   "customer": "测试客户-T4-情绪投诉"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 7049,
+    "ok": true,
+    "verdict": {
+     "category": "complaint",
+     "severity": "P1",
+     "action": "立即由高级客服介入安抚用户情绪，了解具体故障并给出解决方案，同时评估舆情扩散风险",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"complaint\",\"severity\":\"P1\",\"action\":\"立即由高级客服介入安抚用户情绪，了解具体故障并给出解决方案，同时评估舆情扩散风险\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 6356,
+    "ok": true,
+    "verdict": {
+     "category": "complaint",
+     "severity": "P1",
+     "action": "立即由高级客服介入安抚用户，了解具体故障并给出解决方案，同时启动舆情监控防止负面扩散",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"complaint\",\"severity\":\"P1\",\"action\":\"立即由高级客服介入安抚用户，了解具体故障并给出解决方案，同时启动舆情监控防止负面扩散\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 4791,
+    "ok": true,
+    "verdict": {
+     "category": "complaint",
+     "severity": "P2",
+     "action": "立即升级至高级客服主管介入，安抚用户情绪并制定补偿方案，防止舆情扩散",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"complaint\",\"severity\":\"P2\",\"action\":\"立即升级至高级客服主管介入，安抚用户情绪并制定补偿方案，防止舆情扩散\",\"confidence\":0.95}"
+   }
+  ],
+  "consensus": {
+   "category": "complaint",
+   "severity": "P1",
+   "action": "立即由高级客服介入安抚用户情绪，了解具体故障并给出解决方案，同时评估舆情扩散风险",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.95,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 12208,
+  "majority_ms": 7053
+ },
+ "SES-20260922-D843E6": {
+  "session_id": "SES-20260922-D843E6",
+  "ts": "2026-09-22T16:24:04",
+  "ticket": {
+   "subject": "退款为什么还没到账，而且发票开错了",
+   "body": "客户 9 月 10 日申请退款，承诺 7 个工作日到账，今天第 9 天了还没到。另外发票抬头开错了，公司名多了一个字，需要重开。两件事一起处理。",
+   "customer": "测试客户-T5-混合类"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 3550,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "优先核查退款延迟原因并加急处理，同时安排发票重开，合并回复客户",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"优先核查退款延迟原因并加急处理，同时安排发票重开，合并回复客户\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 3456,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "优先核查退款延迟原因并加急处理，同时安排发票重开，一并回复客户",
+     "confidence": 0.92
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"优先核查退款延迟原因并加急处理，同时安排发票重开，一并回复客户\",\"confidence\":0.92}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 3440,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "核查退款延迟原因并加急处理，同时安排重开发票",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"核查退款延迟原因并加急处理，同时安排重开发票\",\"confidence\":0.95}"
+   }
+  ],
+  "consensus": {
+   "category": "billing",
+   "severity": "P2",
+   "action": "优先核查退款延迟原因并加急处理，同时安排发票重开，合并回复客户",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.94,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 8537,
+  "majority_ms": 3554
+ },
+ "SES-20260922-E0E1D8": {
+  "session_id": "SES-20260922-E0E1D8",
+  "ts": "2026-09-22T16:24:11",
+  "ticket": {
+   "subject": "退款",
+   "body": "钱呢",
+   "customer": "测试客户-T6-超短边界"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 3539,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "查询退款处理进度并回复客户预计到账时间",
+     "confidence": 0.9
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"查询退款处理进度并回复客户预计到账时间\",\"confidence\":0.9}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 3489,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "查询退款进度并主动告知客户预计到账时间",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"查询退款进度并主动告知客户预计到账时间\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 10752,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P2",
+     "action": "立即查询退款进度并主动联系用户说明到账情况",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P2\",\"action\":\"立即查询退款进度并主动联系用户说明到账情况\",\"confidence\":0.9}"
+   }
+  ],
+  "consensus": {
+   "category": "billing",
+   "severity": "P2",
+   "action": "查询退款处理进度并回复客户预计到账时间",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.92,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 41739,
+  "majority_ms": 10756
+ },
+ "SES-20260922-00FC4B": {
+  "session_id": "SES-20260922-00FC4B",
+  "ts": "2026-09-22T16:25:12",
+  "ticket": {
+   "subject": "退款",
+   "body": "钱呢",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 16145,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P3",
+     "action": "联系用户确认退款进度并说明到账时间",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P3\",\"action\":\"联系用户确认退款进度并说明到账时间\",\"confidence\":0.9}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 5585,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P3",
+     "action": "核实该笔退款进度并主动回复用户",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P3\",\"action\":\"核实该笔退款进度并主动回复用户\",\"confidence\":0.9}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 16579,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P3",
+     "action": "联系用户确认退款进度并说明到账时间",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"billing\",\"severity\":\"P3\",\"action\":\"联系用户确认退款进度并说明到账时间\",\"confidence\":0.9}"
+   }
+  ],
+  "consensus": {
+   "category": "billing",
+   "severity": "P3",
+   "action": "联系用户确认退款进度并说明到账时间",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.9,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 60024,
+  "majority_ms": 16585
+ },
+ "SES-20260922-A731FB": {
+  "session_id": "SES-20260922-A731FB",
+  "ts": "2026-09-22T16:26:37",
+  "ticket": {
+   "subject": "超长输入压测",
+   "body": "客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。客户投诉物流慢，反复催促。",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 41667,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "核实物流状态并安抚客户，优先处理配送延误问题",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"核实物流状态并安抚客户，优先处理配送延误问题\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 41864,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "核实物流状态并安抚客户，优先处理配送延误问题",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"核实物流状态并安抚客户，优先处理配送延误问题\",\"confidence\":0.95}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 8160,
+    "ok": true,
+    "verdict": {
+     "category": "logistics",
+     "severity": "P2",
+     "action": "核实物流进度并向客户反馈最新配送状态",
+     "confidence": 0.95
+    },
+    "raw_head": "{\"category\":\"logistics\",\"severity\":\"P2\",\"action\":\"核实物流进度并向客户反馈最新配送状态\",\"confidence\":0.95}"
+   }
+  ],
+  "consensus": {
+   "category": "logistics",
+   "severity": "P2",
+   "action": "核实物流状态并安抚客户，优先处理配送延误问题",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.95,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 43726,
+  "majority_ms": 41879
+ },
+ "SES-20260922-52C516": {
+  "session_id": "SES-20260922-52C516",
+  "ts": "2026-09-22T16:29:23",
+  "ticket": {
+   "subject": "API 又挂了",
+   "body": "生产环境全部请求 502，急！",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 2541,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即排查API网关和后端服务，恢复生产环境并通知相关团队",
+     "confidence": 1.0
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即排查API网关和后端服务，恢复生产环境并通知相关团队\",\"confidence\":1.0}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 5337,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即介入排查生产环境API 502故障并恢复服务",
+     "confidence": 0.99
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即介入排查生产环境API 502故障并恢复服务\",\"confidence\":0.99}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 5583,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P1",
+     "action": "立即排查生产环境API网关及后端服务状态，优先恢复服务",
+     "confidence": 0.95
+    },
+    "raw_head": "\n\n{\"category\":\"technical\",\"severity\":\"P1\",\"action\":\"立即排查生产环境API网关及后端服务状态，优先恢复服务\",\"confidence\":0.95}"
+   }
+  ],
+  "consensus": {
+   "category": "technical",
+   "severity": "P1",
+   "action": "立即排查API网关和后端服务，恢复生产环境并通知相关团队",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.98,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 60256,
+  "majority_ms": 5587
+ }
+}

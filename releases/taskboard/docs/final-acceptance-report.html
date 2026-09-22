@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任务分配机制 · 最终验收报告</title>
+<style>
+  :root { --paper:#fafaf8; --ink:#1a2530; --soft:#5a6875; --faint:#8b98a5;
+    --line:#dfe3e0; --accent:#0f4c81; --wash:#eef3f7; --orange:#c0392b; --ok:#2e6e4e; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--paper); color:var(--ink); font-family:"Source Han Sans SC","Microsoft YaHei",sans-serif; font-size:14.5px; line-height:1.65; }
+  .wrap { max-width:1040px; margin:0 auto; padding:56px 26px 90px; }
+  header { border-bottom:2px solid var(--ink); padding-bottom:20px; margin-bottom:8px; }
+  .kicker { font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:var(--faint); font-family:var(--mono); margin-bottom:12px; }
+  h1 { font-size:30px; font-weight:750; }
+  .standfirst { margin-top:10px; color:var(--soft); max-width:46em; }
+  .meta { display:flex; gap:28px; margin-top:16px; flex-wrap:wrap; }
+  .meta div .k { font-size:10.5px; letter-spacing:.1em; color:var(--faint); text-transform:uppercase; font-family:var(--mono); }
+  .meta div .v { font-size:13px; font-family:var(--mono); }
+  .verdict { display:inline-block; margin-top:16px; padding:8px 18px; border:1px solid var(--ok); color:var(--ok); font-weight:700; font-family:var(--mono); letter-spacing:.08em; font-size:14px; }
+  section { padding-top:36px; }
+  h2 { font-size:17px; font-weight:700; padding-bottom:7px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+  h2 .no { color:var(--accent); font-family:var(--mono); font-size:12.5px; font-weight:500; margin-right:8px; }
+  p { margin-bottom:10px; max-width:68em; }
+  p.lede { color:var(--soft); }
+  .note { font-size:12.5px; color:var(--faint); }
+  code { font-family:var(--mono); font-size:12.5px; background:var(--wash); padding:1px 5px; }
+  .metrics { display:flex; flex-wrap:wrap; border-top:2px solid var(--accent); border-bottom:1px solid var(--line); margin:10px 0 4px; }
+  .metric { flex:1 1 140px; padding:14px 16px 12px; border-right:1px solid var(--line2); min-width:140px; }
+  .metric:last-child { border-right:none; }
+  .metric .num { font-size:26px; font-weight:800; font-family:var(--mono); color:var(--accent); }
+  .metric .num small { font-size:13px; color:var(--faint); }
+  .metric .lab { font-size:11.5px; color:var(--soft); margin-top:2px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0 6px; font-size:13px; }
+  caption { caption-side:top; text-align:left; font-size:12.5px; color:var(--soft); padding-bottom:7px; }
+  caption b { color:var(--ink); }
+  th { text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); padding:7px 9px; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); }
+  td { padding:7px 9px; border-bottom:1px solid var(--line2); vertical-align:top; }
+  .mono { font-family:var(--mono); font-size:12px; }
+  .tag-ok { color:var(--ok); font-weight:700; } .tag-warn { color:var(--orange); font-weight:700; }
+  .chain { margin:12px 0; border-left:2px solid var(--accent); }
+  .chain .hop { padding:7px 0 7px 15px; border-bottom:1px dashed var(--line2); position:relative; font-size:13px; color:var(--soft); }
+  .chain .hop:last-child { border-bottom:none; }
+  .chain .hop::before { content:""; width:8px; height:8px; background:var(--paper); border:2px solid var(--accent); border-radius:50%; position:absolute; left:-6px; top:12px; }
+  .chain .hop b { color:var(--ink); font-family:var(--mono); font-size:12px; }
+  footer { margin-top:50px; padding-top:12px; border-top:1px solid var(--line); font-size:12px; color:var(--faint); font-family:var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Task Assignment Ledger · Final Acceptance</div>
+  <h1>任务分配机制 · 最终验收报告</h1>
+  <p class="standfirst">真实任务分配机制（台账系统 + 规则 + 首轮分配 + 异常演练）已完成部署与验证。首轮 6 条任务全部来自本会话两条交付线的真实遗留清单，无虚构数据。</p>
+  <div class="meta">
+    <div><div class="k">验收日期</div><div class="v">2026-09-21</div></div>
+    <div><div class="k">版本</div><div class="v">taskboard v1.0.0</div></div>
+    <div><div class="k">访问地址</div><div class="v">http://127.0.0.1:8792（看板 /rules /exceptions /handoff）</div></div>
+    <div><div class="k">数据</div><div class="v">data/tasks.json · 6 任务 · history 22 条</div></div>
+  </div>
+  <div class="verdict">放行结论：机制可发布（GO）· 首轮分配已完成</div>
+</header>
+
+<section>
+  <h2><span class="no">01</span>结论总览</h2>
+  <div class="metrics">
+    <div class="metric"><div class="num">8/8</div><div class="lab">验收标准逐条通过</div></div>
+    <div class="metric"><div class="num">6</div><div class="lab">首轮真实任务（全部有源可溯）</div></div>
+    <div class="metric"><div class="num">4</div><div class="lab">异常/回滚演练通过</div></div>
+    <div class="metric"><div class="num">1</div><div class="lab">重启持久性验证（6 任务/5 条 history 保留）</div></div>
+  </div>
+  <p class="lede">台账系统复用龙虾站验证过的原子写+文件锁模式，新增撤销机制与负载聚合。首轮分配的任务池来自 ModelHub 与龙虾站验收遗留——每条任务在 source 字段可追溯到具体文档章节。</p>
+</section>
+
+<section>
+  <h2><span class="no">02</span>首轮真实分配台账</h2>
+  <table>
+    <caption><b>表 2-1</b>　6 条任务（GET /api/tasks 实时可见，字段含 source/acceptance/history）</caption>
+    <thead><tr><th style="width:20%">编号</th><th style="width:30%">标题</th><th style="width:14%">负责人</th><th style="width:8%">优先级</th><th style="width:12%">截止</th><th>来源（source 字段摘录）</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">TASK-…-001</td><td>ModelHub 补 requirements 锁定文件</td><td>Agent-AutoClaw</td><td class="mono">P2</td><td class="mono">09-28</td><td>缺陷台账 D-010 + 交接文档风险清单</td></tr>
+      <tr><td class="mono">TASK-…-002</td><td>P1 转发开销补测（上游稳定期）</td><td>Agent-AutoClaw</td><td class="mono">P3</td><td class="mono">10-12</td><td>最终验收报告 §04 性能口径说明</td></tr>
+      <tr><td class="mono">TASK-…-003</td><td>v1.2：SSE 心跳 + usage 持久聚合</td><td>Agent-AutoClaw</td><td class="mono">P3</td><td class="mono">10-12</td><td>竞品评分报告 §07 v1.2 候选清单</td></tr>
+      <tr><td class="mono">TASK-…-004</td><td>龙虾站 requirements + 一键启动</td><td>用户（演练改派）</td><td class="mono">P2</td><td class="mono">09-28</td><td>龙虾验收报告 §06 D-010</td></tr>
+      <tr><td class="mono">TASK-…-005</td><td>龙虾占位替换四件套（品牌/价格/供应商/产地）</td><td>用户</td><td class="mono">P1</td><td class="mono">09-24</td><td>龙虾 handoff §3 + 社媒文案合规红线</td></tr>
+      <tr><td class="mono">TASK-…-006</td><td>任务分配机制使用一周复盘</td><td>用户</td><td class="mono">P3</td><td class="mono">10-12</td><td>分配规则 §6 + 交接说明 §3</td></tr>
+    </tbody>
+  </table>
+  <p class="note">每条任务的 history[0] 记录指派信息（时间戳 / actor=创建人 / 被指派人 / 优先级 / 截止日）；无虚构任务，来源全部可回查到本会话交付的文档章节。</p>
+</section>
+
+<section>
+  <h2><span class="no">03</span>异常与回滚演练（3/3 + 持久性）</h2>
+  <div class="chain">
+    <div class="hop"><b>演练 1 · 指派错误回滚</b>　对 004 误改派（in_progress）→ <b>POST /undo</b> 恢复 pending，history 追加「撤销」记录（含回滚目标与恢复字段），台账保留撤销痕迹 ✓</div>
+    <div class="hop"><b>演练 2 · 无响应改派</b>　004 按《异常手册》置 blocked（注明"超 48h 无响应"）→ 改派至用户裁决 → history 5 条全链留痕 ✓</div>
+    <div class="hop"><b>演练 3 · 无效输入防御</b>　指派到占位角色 → 422（提示需用户确认真人）；P9 优先级 → 422（列出可选值）✓</div>
+    <div class="hop"><b>演练 4 · 重启持久性</b>　杀进程重启 → 6 任务 / 004 的 5 条 history（含撤销与改派痕迹）完整保留 → PERSIST_OK ✓</div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="no">04</span>验收标准逐条复核（8/8）</h2>
+  <table>
+    <caption><b>表 4-1</b>　对照 Goal Brief 八条验收标准</caption>
+    <thead><tr><th style="width:34%">标准</th><th style="width:12%">判定</th><th>证据</th></tr></thead>
+    <tbody>
+      <tr><td>任务台账可追踪（唯一编号/负责人/状态/截止，持久化）</td><td class="tag-ok">✓</td><td>6 任务 JSON 落盘，重启后 PERSIST_OK；字段含 source/acceptance/history</td></tr>
+      <tr><td>首轮真实分配完成（≥5 条 + 指派记录）</td><td class="tag-ok">✓</td><td>6 条全部指派，history[0] 含时间/指派人/被指派人（表 2-1）</td></tr>
+      <tr><td>分配规则成文</td><td class="tag-ok">✓</td><td>/rules（花名册权限矩阵、优先级口径、状态机、冲突裁决、撤销纪律）</td></tr>
+      <tr><td>负载一眼可见</td><td class="tag-ok">✓</td><td>/api/board + 看板负载页：按负责人统计（open/done/overdue/P 分布）+ 截止日排序 + 逾期标红</td></tr>
+      <tr><td>异常路径有预案并演练</td><td class="tag-ok">✓</td><td>/exceptions 手册 + 演练 2/3（阻塞改派、无效输入）</td></tr>
+      <tr><td>可回滚</td><td class="tag-ok">✓</td><td>演练 1：undo 恢复快照 + 撤销痕迹；备份机制见手册 §3</td></tr>
+      <tr><td>交接闭环</td><td class="tag-ok">✓</td><td>/handoff：新成员 5 分钟实操路径（建任务→更新→查台账）+ CLI 等价命令</td></tr>
+      <tr><td>最终复核通过</td><td class="tag-ok">✓</td><td>本报告表 4-1；未通过项：无</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">05</span>遗留与边界（如实声明）</h2>
+  <table>
+    <caption><b>表 5-1</b>　不阻塞发布、需知晓</caption>
+    <thead><tr><th style="width:32%">事项</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>花名册为角色制</td><td>当前三角色：用户（最终确认人）/ Agent-AutoClaw（执行代理）/ 待定负责人（占位，API 禁止指派）。接入真人时在 app.py ROSTER 加一行即可</td></tr>
+      <tr><td>无鉴权（本地/内网）</td><td>同 ModelHub/龙虾站模式；公网前必须加令牌</td></tr>
+      <tr><td>"未参与搭建者"实操验证未含真人</td><td>交接说明已写成可独立跟随的操作序列（5 分钟路径），首位新成员首次实操即验证</td></tr>
+      <tr><td>台账无分页</td><td>当前 6 条；超 500 条时按交接文档 §5 加 limit</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  TASKBOARD v1.0.0 FINAL ACCEPTANCE · 2026-09-21<br>
+  证据：releases/taskboard/data/tasks.json · 看板 / · /rules · /exceptions · /handoff · 会话交互日志
+</footer>
+
+</div>
+</body>
+</html>

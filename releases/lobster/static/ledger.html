@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>订单台账 · 澳龙直送（演示）</title>
+<meta name="description" content="订单台账：每笔订购的客户、规格、状态与异常处理记录实时可查（演示数据）。">
+<style>
+  :root { --bg:#0b0f14; --panel:#131b24; --ink:#f2f0ea; --soft:#b9c0c6; --faint:#78828c;
+    --line:#243040; --orange:#ff6b35; --teal:#3ec9c0; --teal-dim:#3ec9c018; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--ink); font-family:"Source Han Sans SC","Microsoft YaHei",sans-serif; font-size:14.5px; line-height:1.6; }
+  .demo-bar { background:var(--orange); color:#0b0f14; text-align:center; font-size:12px; padding:6px; font-weight:700; }
+  .wrap { max-width:1100px; margin:0 auto; padding:26px 18px 80px; }
+  header { display:flex; justify-content:space-between; align-items:baseline; border-bottom:1px solid var(--line); padding-bottom:14px; flex-wrap:wrap; gap:8px; }
+  h1 { font-size:22px; } h1 span { color:var(--teal); font-family:var(--mono); font-size:14px; margin-left:10px; }
+  .back { color:var(--teal); text-decoration:none; font-size:13.5px; }
+  .toolbar { display:flex; gap:8px; margin:16px 0; flex-wrap:wrap; align-items:center; }
+  select { background:var(--panel); border:1px solid var(--line); color:var(--ink); padding:8px 10px; font-size:13.5px; }
+  button.act { background:var(--teal); border:none; color:#0b0f14; padding:8px 16px; font-weight:700; cursor:pointer; font-size:13.5px; }
+  .count { color:var(--faint); font-size:13px; margin-left:auto; font-family:var(--mono); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); padding:8px 9px; border-top:2px solid var(--orange); border-bottom:1px solid var(--line); }
+  td { padding:9px; border-bottom:1px solid #1a2430; vertical-align:top; }
+  tr:hover td { background:#101820; }
+  .mono { font-family:var(--mono); font-size:12px; }
+  .badge { display:inline-block; padding:2px 9px; font-size:11.5px; border:1px solid; font-weight:600; white-space:nowrap; }
+  .b-pending { color:var(--faint); border-color:var(--faint); }
+  .b-confirmed { color:var(--teal); border-color:var(--teal); }
+  .b-shipped { color:#7db8ff; border-color:#7db8ff; }
+  .b-delivered { color:#7ed491; border-color:#7ed491; }
+  .b-out_of_stock, .b-refunded, .b-dead_compensation { color:var(--orange); border-color:var(--orange); }
+  .ops button { background:none; border:1px solid var(--line); color:var(--soft); font-size:11.5px; padding:3px 8px; margin:2px 3px 2px 0; cursor:pointer; }
+  .ops button:hover { border-color:var(--teal); color:var(--teal); }
+  .ops button.warn:hover { border-color:var(--orange); color:var(--orange); }
+  .rules { margin-top:30px; border:1px solid var(--line); }
+  .rules h2 { font-size:15px; padding:12px 16px; border-bottom:1px solid var(--line); color:var(--orange); }
+  .rules .cols { display:grid; grid-template-columns:repeat(3,1fr); }
+  @media (max-width:820px) { .rules .cols { grid-template-columns:1fr; } }
+  .rules .col { padding:14px 16px; border-right:1px solid var(--line); }
+  .rules .col:last-child { border-right:none; }
+  .rules b.t { color:var(--teal); display:block; margin-bottom:6px; font-size:13.5px; }
+  .rules p { font-size:12.5px; color:var(--soft); margin-bottom:6px; }
+  .demo-hint { margin-top:18px; padding:12px 16px; border-left:3px solid var(--orange); background:#ff6b350d; font-size:13px; color:var(--soft); }
+  .demo-hint b { color:var(--orange); }
+  .toast { position:fixed; right:18px; bottom:18px; background:var(--panel); border:1px solid var(--teal); color:var(--ink); padding:12px 18px; font-size:13.5px; display:none; max-width:320px; }
+  .toast.show { display:block; }
+  .empty { text-align:center; color:var(--faint); padding:40px 0; }
+</style>
+</head>
+<body>
+<div class="demo-bar">演示台账 · 所有状态操作仅写入本地演示数据</div>
+<div class="wrap">
+<header>
+  <h1>订单台账<span>LEDGER</span></h1>
+  <a class="back" href="/">← 返回首页</a>
+</header>
+
+<div class="toolbar">
+  <select id="statusFilter">
+    <option value="">全部状态</option>
+    <option value="pending">待确认</option>
+    <option value="confirmed">已确认</option>
+    <option value="shipped">冷链在途</option>
+    <option value="delivered">已签收</option>
+    <option value="out_of_stock">缺货</option>
+    <option value="refunded">已退款</option>
+    <option value="dead_compensation">死虾赔付</option>
+  </select>
+  <button class="act" onclick="load()">刷新</button>
+  <span class="count" id="count"></span>
+</div>
+
+<table>
+  <thead><tr><th>台账编号</th><th>客户</th><th>规格</th><th>数量</th><th>参考金额</th><th>期望送达</th><th>状态</th><th>操作</th></tr></thead>
+  <tbody id="tbody"></tbody>
+</table>
+<div class="empty" id="empty" style="display:none;">暂无订单 — 回<a href="/" style="color:var(--teal)">首页</a>提交一笔演示订单</div>
+
+<div class="demo-hint"><b>异常分支演示</b>：点击任一订单行的「缺货」「退款」「死虾赔付」按钮，即可演示三类异常的处理流转——每次操作都会写入该订单的 history（时间戳 + 动作 + 备注），刷新后仍在，全程可追溯。</div>
+
+<div class="rules">
+  <h2>异常处理规则（缺货 / 死虾 / 退款）</h2>
+  <div class="cols">
+    <div class="col"><b class="t">① 缺货 / 断供</b>
+      <p>确认订单时库存不足 → 状态置「缺货-已退款/改期」。</p>
+      <p>客户二选一：① 全额原路退款（1 个工作日）；② 免费改期到最近到货批次并赠 5% 加量。</p>
+      <p>台账记录缺货规格与客户选择。</p></div>
+    <div class="col"><b class="t">② 死虾 / 活力不达标</b>
+      <p>签收时拍摄视频（未开箱整体 + 开箱特写），30 分钟内联系客服。</p>
+      <p>判定属实 → 当日补发同规格 1 只或全额退款，运费我方承担。</p>
+      <p>超 30 分钟或已烹饪 → 不予赔付（冷链时效特性）。</p></div>
+    <div class="col"><b class="t">③ 退款</b>
+      <p>发货前：无条件全额退款。</p>
+      <p>发货后：因客户原因拒收 → 扣除冷链运费后退款；因我方原因 → 全额退款 + 运费承担。</p>
+      <p>退款 1–3 个工作日原路返回，台账记录退款原因与金额。</p></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+</div>
+
+<script>
+let LABELS = {};
+function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.className = "toast show"; setTimeout(() => t.className = "toast", 3200); }
+async function load() {
+  const st = document.getElementById("statusFilter").value;
+  const r = await fetch("/api/orders" + (st ? "?status=" + st : ""));
+  const d = await r.json();
+  LABELS = d.status_labels || {};
+  document.getElementById("count").textContent = d.count + " 笔";
+  document.getElementById("empty").style.display = d.count ? "none" : "block";
+  document.getElementById("tbody").innerHTML = (d.orders || []).map(o => {
+    const nexts = {
+      pending: [["confirmed", "确认订单"], ["refunded", "退款"], ["out_of_stock", "缺货"]],
+      confirmed: [["shipped", "发货"], ["refunded", "退款"], ["out_of_stock", "缺货"]],
+      shipped: [["delivered", "签收"], ["dead_compensation", "死虾赔付"], ["refunded", "退款"]],
+      delivered: [["dead_compensation", "死虾赔付"]],
+    }[o.status] || [];
+    const ops = nexts.map(([s, label]) =>
+      `<button class="${s === "refunded" || s === "dead_compensation" || s === "out_of_stock" ? "warn" : ""}" onclick="transit('${o.order_id}','${s}')">${label}</button>`).join("");
+    return `<tr>
+      <td class="mono">${o.order_id}<br><span style="color:var(--faint)">${o.created_at.slice(5, 16)}</span></td>
+      <td>${o.name}<br><span class="mono" style="color:var(--faint)">${o.phone.slice(0, 3)}****${o.phone.slice(7)}</span></td>
+      <td>${o.spec_label}<br><span class="mono" style="color:var(--teal)">grade ${o.spec}</span></td>
+      <td class="mono">×${o.qty}</td>
+      <td class="mono" style="color:var(--orange)">¥${o.amount_cny}</td>
+      <td class="mono">${o.deliver_date || "—"}</td>
+      <td><span class="badge b-${o.status}">${LABELS[o.status] || o.status}</span></td>
+      <td class="ops">${ops || '<span style="color:var(--faint)">终态</span>'}</td>
+    </tr>`;
+  }).join("");
+}
+async function transit(oid, status) {
+  const r = await fetch("/api/orders/" + oid, { method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: status, note: "演示操作 " + new Date().toLocaleTimeString() }) });
+  const d = await r.json();
+  toast(r.ok ? `${oid} → ${d.label}` : "操作失败：" + (d.detail || r.status));
+  load();
+}
+document.getElementById("statusFilter").addEventListener("change", load);
+load();
+</script>
+</body>
+</html>

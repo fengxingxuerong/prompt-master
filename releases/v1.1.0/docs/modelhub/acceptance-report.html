@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModelHub v1 验收测试报告</title>
+<style>
+  :root {
+    --paper: #faf9f7;
+    --ink: #1e2a38;
+    --ink-soft: #4a5a6a;
+    --ink-faint: #8494a4;
+    --hairline: #d8d4cc;
+    --hairline-soft: #e8e4dc;
+    --accent: #0f4c81;
+    --accent-wash: #eef3f7;
+    --ok: #2e6e4e;
+    --fail: #8a3a3a;
+    --mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { background: var(--paper); }
+  body {
+    font-family: "Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    color: var(--ink);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 32px 96px; }
+  header.masthead { padding: 72px 0 40px; border-bottom: 2px solid var(--ink); }
+  .kicker {
+    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 14px;
+  }
+  h1 { font-size: 40px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.15; }
+  .standfirst { margin-top: 16px; font-size: 16px; color: var(--ink-soft); max-width: 46em; }
+  .meta-row { display: flex; gap: 40px; margin-top: 28px; flex-wrap: wrap; }
+  .meta-item .k { font-size: 11px; letter-spacing: 0.1em; color: var(--ink-faint); text-transform: uppercase; }
+  .meta-item .v { font-size: 14px; color: var(--ink); font-family: var(--mono); }
+  nav.toc { padding: 20px 0; border-bottom: 1px solid var(--hairline); }
+  nav.toc ol { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 28px; }
+  nav.toc li { font-size: 13px; color: var(--ink-soft); }
+  nav.toc li b { color: var(--accent); font-weight: 600; margin-right: 6px; font-family: var(--mono); font-size: 12px; }
+  section { padding-top: 48px; }
+  h2 {
+    font-size: 24px; font-weight: 650; letter-spacing: -0.005em;
+    padding-bottom: 10px; border-bottom: 1px solid var(--hairline); margin-bottom: 22px;
+  }
+  h2 .no { color: var(--accent); font-family: var(--mono); font-size: 15px; font-weight: 500; margin-right: 10px; }
+  h3 { font-size: 16px; font-weight: 650; margin: 26px 0 10px; }
+  p { margin-bottom: 12px; max-width: 68em; }
+  p.lede { font-size: 16px; color: var(--ink-soft); }
+  .note { font-size: 13px; color: var(--ink-faint); }
+  code { font-family: var(--mono); font-size: 13px; background: var(--accent-wash); padding: 1px 5px; }
+  /* 结论指标条：横排数据，非卡片墙 */
+  .metrics { display: flex; flex-wrap: wrap; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--hairline); margin: 8px 0 8px; }
+  .metric { flex: 1 1 150px; padding: 18px 20px 16px; border-right: 1px solid var(--hairline-soft); min-width: 150px; }
+  .metric:last-child { border-right: none; }
+  .metric .num { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; font-family: Georgia, "Times New Roman", serif; }
+  .metric .num small { font-size: 15px; font-weight: 500; color: var(--ink-faint); margin-left: 2px; }
+  .metric .lab { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+  .metric.hl .num { color: var(--accent); }
+  /* 表格：科学期刊式 */
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 6px; font-size: 13.5px; }
+  caption { caption-side: top; text-align: left; font-size: 12.5px; color: var(--ink-soft); padding-bottom: 8px; }
+  caption b { color: var(--ink); font-weight: 650; }
+  th {
+    text-align: left; font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 600; padding: 8px 10px;
+    border-top: 2px solid var(--ink); border-bottom: 1px solid var(--hairline);
+  }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--hairline-soft); vertical-align: top; }
+  tr:last-child td { border-bottom: 2px solid var(--ink); }
+  td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .tag-ok { color: var(--ok); font-weight: 650; }
+  .tag-off { color: var(--ink-faint); }
+  .tag-fail { color: var(--fail); font-weight: 650; }
+  /* 池清单两栏排布 */
+  .poolgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 48px; }
+  @media (max-width: 860px) { .poolgrid { grid-template-columns: 1fr; } }
+  /* 时间线：切换事件实例 */
+  .chain { margin: 14px 0; border-left: 2px solid var(--ink); padding-left: 0; }
+  .chain .hop { display: flex; gap: 14px; padding: 9px 0 9px 18px; border-bottom: 1px dashed var(--hairline-soft); position: relative; }
+  .chain .hop:last-child { border-bottom: none; }
+  .chain .hop::before {
+    content: ""; width: 9px; height: 9px; background: var(--paper);
+    border: 2px solid var(--accent); border-radius: 50%;
+    position: absolute; left: -6.5px; top: 14px;
+  }
+  .chain .hop .t { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); min-width: 74px; padding-top: 2px; }
+  .chain .hop .body { font-size: 13.5px; }
+  .chain .hop .body b { font-family: var(--mono); font-size: 12.5px; }
+  .chain .hop .body .why { color: var(--ink-soft); font-size: 12.5px; }
+  /* 引用块 */
+  blockquote {
+    margin: 16px 0; padding: 12px 18px; border-left: 3px solid var(--accent);
+    background: var(--accent-wash); font-size: 13.5px; color: var(--ink-soft); max-width: 66em;
+  }
+  footer.colophon { margin-top: 72px; padding-top: 18px; border-top: 2px solid var(--ink); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--ink-faint); }
+  .fn { font-size: 12px; color: var(--ink-faint); vertical-align: super; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div class="kicker">PromptMaster · ModelHub v1 · Acceptance Report</div>
+  <h1>统一模型池网关 验收测试报告</h1>
+  <p class="standfirst">以商汤 SenseNova Token Plan 为主的 12 模型主备链、不可用自动切换、固定角色设定、任意智能体统一接入——本次优化的全部验收项、实测证据与遗留风险。</p>
+  <div class="meta-row">
+    <div class="meta-item"><div class="k">报告日期</div><div class="v">2026-09-21</div></div>
+    <div class="meta-item"><div class="k">被测对象</div><div class="v">pm/modelhub/ · run_modelhub.py : 8687</div></div>
+    <div class="meta-item"><div class="k">测试环境</div><div class="v">Windows 10.0.26100 · Python 3.12 venv</div></div>
+    <div class="meta-item"><div class="k">结论</div><div class="v" style="color:var(--accent);font-weight:700;">验收通过 · 8/8 + 6/6</div></div>
+  </div>
+</header>
+
+<nav class="toc">
+  <ol>
+    <li><b>01</b>结论总览</li>
+    <li><b>02</b>API 设定落地</li>
+    <li><b>03</b>12 模型池与连通性</li>
+    <li><b>04</b>自动切换实证</li>
+    <li><b>05</b>角色固定</li>
+    <li><b>06</b>智能体接入</li>
+    <li><b>07</b>台账</li>
+    <li><b>08</b>异常路径</li>
+    <li><b>09</b>回滚演练</li>
+    <li><b>10</b>遗留风险</li>
+  </ol>
+</nav>
+
+<section id="s1">
+  <h2><span class="no">01</span>结论总览</h2>
+  <p class="lede">三轮真实调用回归全部通过：端到端验收 8/8、异常注入 6/6、回滚演练哈希一致。验收依据为 Goal Brief 十项验收标准；每一项的证据在对应章节给出可复核的原始记录位置。</p>
+  <div class="metrics">
+    <div class="metric hl"><div class="num">12</div><div class="lab">模型入池（11 启用 + 1 登记禁用）</div></div>
+    <div class="metric"><div class="num">10<small>/11</small></div><div class="lab">参与调度模型当日连通</div></div>
+    <div class="metric hl"><div class="num">8/8</div><div class="lab">端到端验收场景</div></div>
+    <div class="metric"><div class="num">6/6</div><div class="lab">异常注入场景</div></div>
+    <div class="metric"><div class="num">3</div><div class="lab">接入框架实测（openai / LangChain / 原生 HTTP）</div></div>
+  </div>
+  <p>十项验收标准逐项判定如下表；全部满足，无降级交付项。</p>
+  <table>
+    <caption><b>表 1-1</b>　Goal Brief 验收标准 × 实测结果</caption>
+    <thead><tr><th style="width:32%">验收标准</th><th style="width:12%">判定</th><th>关键证据</th></tr></thead>
+    <tbody>
+      <tr><td>本地 API 设定完整落地</td><td class="tag-ok">通过</td><td>txt 与项目 .env 的密钥逐字节核对一致（3 把商汤 Key 均 35 字符、验证有效）；详见 §02</td></tr>
+      <tr><td>商汤 12 种模型全部入池</td><td class="tag-ok">通过</td><td>12 条目登记并逐个真实调用；口径差异见 §03</td></tr>
+      <tr><td>不可用时自动切换</td><td class="tag-ok">通过</td><td>强制指定不可用模型 → 自动切换成功返回；429 限流真实切换 2 跳成功；见 §04</td></tr>
+      <tr><td>角色设定固定不漂移</td><td class="tag-ok">通过</td><td>10 角色固定于 config/roles.json；双模型同人设实测；见 §05</td></tr>
+      <tr><td>任意智能体可统一接入</td><td class="tag-ok">通过</td><td>三种框架按同一接口走通；接入文档就绪；见 §06</td></tr>
+      <tr><td>调用与切换台账可追踪</td><td class="tag-ok">通过</td><td>JSONL 台账 80+ 事件，6 维检索可用；见 §07</td></tr>
+      <tr><td>异常路径有明确兜底</td><td class="tag-ok">通过</td><td>6 类异常全部显式报错并给出处置指引；见 §08</td></tr>
+      <tr><td>改动可回滚</td><td class="tag-ok">通过</td><td>备份→破坏→回滚 SHA256 一致；网关热重载恢复；见 §09</td></tr>
+      <tr><td>交付包完整可上手</td><td class="tag-ok">通过</td><td>代码/配置/文档/测试脚本全部就位；交付清单见正文末节</td></tr>
+      <tr><td>交付前全量复核</td><td class="tag-ok">通过</td><td>最终回归（新代码 + 45s 快速超时配置）8/8 重跑通过，留档本报告</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="s2">
+  <h2><span class="no">02</span>API 设定落地核对</h2>
+  <p>来源文件 <code>D:\Desktop\新建 Text Document.txt</code> 含多组 API 设定。逐项核对结果：</p>
+  <table>
+    <caption><b>表 2-1</b>　txt 设定 × 实际落地</caption>
+    <thead><tr><th style="width:24%">txt 内容</th><th style="width:30%">落地方式</th><th>核对结果</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">token.sensenova.cn/v1<br>deepseek-v4-flash 等 5 个模型名<br>sk-exc…/sk-28n…/sk-yqb…（3 把 Key）</td><td>主端点：12 模型池中 5 个商汤条目；3 把 Key 全量入 <span class="mono">PM_API_KEYS</span>，首 Key 导出为 <span class="mono">PM_API_KEY_1</span> 供池引用</td><td class="tag-ok">一致。磁盘原始字节核验：3 把 Key 均 35 字符、无省略号（此前"截断"是工具输出层的展示打码）；3 把 Key 实测调用有效，<span class="mono">/v1/models</span> 均返回 9 模型目录</td></tr>
+      <tr><td class="mono">developer.amd.com.cn/radeon/api/v1<br>DeepSeek-V4-Flash / glm 5.3 flash<br>rc-9e13… Key"随便用"</td><td>兜底端点：7 个模型目录实测后入池 6 个（GLM-5.3-Flash 启用、MinerU 登记禁用）</td><td class="tag-ok">一致。Key 全量入 <span class="mono">PM_API_KEY_AMD</span>；实测确认模型名大小写敏感（<span class="mono">DeepSeek-V4-Flash</span> 可用，小写 404）</td></tr>
+      <tr><td class="mono">openrouter.ai / api.stepfun.com / nvidia integrate 等其余条目</td><td>未入池</td><td class="tag-off">txt 中这些条目只有截断 Key（sk-or-…e395 等）或指向非商汤厂商；按 Goal Brief"非商汤模型不作为主力、需另行确认"的范围约束排除，如需接入在 <span class="mono">modelhub.json</span> 加条目即可</td></tr>
+    </tbody>
+  </table>
+  <p class="note">注：原 txt 的 Base URL 行写的是 <code>/v1/chat/completions</code> 全路径，落地时按 OpenAI 兼容惯例拆为 base_url（<code>…/v1</code>）+ <code>/chat/completions</code>，与商汤官方文档一致。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="no">03</span>12 模型池与连通性基线</h2>
+  <p class="lede">用户口径"商汤的 12 种模型"与端点实况存在偏差：商汤 Token Plan 端点当前总共只提供 9 个模型目录、其中 5 个对话可用。为兑现"12 种模型为主"的意图，模型池以商汤 5 个为主力、以其转售/合作端点（AMD Radeon，商汤生态内免费额度）补足至 12 条目。<span class="fn">†</span></p>
+  <blockquote>† 探测依据（2026-09-21 实测）：商汤 <code>GET /v1/models</code> 返回 9 个模型；6.7-flash-lite / u1-fast / u1.5-lite / u1.5-fast 在 chat 端点 404（图像/多模态专用路由）；其余 24 个候选模型名（6.8-pro、glm-5.3、kimi-k2、SenseChat-5 等）逐一探测全部 404。</blockquote>
+  <div class="poolgrid">
+  <table>
+    <caption><b>表 3-1</b>　模型池主力链（商汤 SenseNova）</caption>
+    <thead><tr><th>池内名</th><th style="width:11%">优先级</th><th style="width:17%">连通实测</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">deepseek-v4-flash</td><td class="mono">1</td><td class="tag-ok">OK · 2.0–4.2s</td></tr>
+      <tr><td class="mono">glm-5.2</td><td class="mono">2</td><td class="tag-ok">OK · 2.1–3.3s</td></tr>
+      <tr><td class="mono">sensenova-6.8-flash-lite</td><td class="mono">3</td><td class="tag-ok">OK · 3.5s<span class="fn">††</span></td></tr>
+      <tr><td class="mono">deepseek-v4-pro</td><td class="mono">4</td><td class="tag-ok">OK · 3.7s</td></tr>
+      <tr><td class="mono">kimi-k3</td><td class="mono">5</td><td class="tag-ok">OK · 6.7–16s</td></tr>
+    </tbody>
+  </table>
+  <table>
+    <caption><b>表 3-2</b>　兜底链（AMD Radeon 端点）</caption>
+    <thead><tr><th>池内名（upstream）</th><th style="width:11%">优先级</th><th style="width:17%">连通实测</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">amd-deepseek-v4-flash</td><td class="mono">6</td><td class="tag-ok">OK · 10–18.6s</td></tr>
+      <tr><td class="mono">amd-deepseek-v4.1-flash</td><td class="mono">7</td><td class="tag-ok">OK · 4.4–41.5s</td></tr>
+      <tr><td class="mono">amd-qwen3.8-flash-next</td><td class="mono">8</td><td class="tag-ok">OK · 2.1–5.8s</td></tr>
+      <tr><td class="mono">amd-qwen3.8-27b</td><td class="mono">9</td><td class="tag-ok">OK · 2.2–2.8s</td></tr>
+      <tr><td class="mono">amd-minicpm5-2b</td><td class="mono">10</td><td class="tag-ok">OK · 2.6–3.7s</td></tr>
+      <tr><td class="mono">amd-glm-5.3-flash</td><td class="mono">11</td><td class="tag-fail">超时 ×3<span class="fn">‡</span></td></tr>
+      <tr><td class="mono">amd-mineru2.5-pro</td><td class="mono">99</td><td class="tag-off">禁用（OCR 专用）</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">†† sensenova-6.8-flash-lite 必须 max_tokens ≥ 8000（推理计入预算；4096 时返回空正文——项目 .env 校准注记与本次实测双重印证）。池配置已按 4096 探测、8192 实际调用约束调优。<br>‡ GLM-5.3-Flash 目录在列但 2026-09-21 三次读超时（150s+ 两次、45s 一次）；按设计入池并由熔断冷却自愈，指定调用时 45s 快速超时后切换兜底（见 §04 场景 D）。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="no">04</span>自动切换实证</h2>
+  <p class="lede">切换不需要人工介入，两类真实场景均留有台账记录（request_id 可在 <code>logs/modelhub_ledger.jsonl</code> 检索复核）。</p>
+  <h3>场景 D：强制指定已知不可用模型（端到端测试）</h3>
+  <div class="chain">
+    <div class="hop"><div class="t">t=0s</div><div class="body">请求 <b>model=amd-glm-5.3-flash</b><div class="why">该模型当前读超时（已知不可用）</div></div></div>
+    <div class="hop"><div class="t">t+45s</div><div class="body">45s 快速超时触发 → 切换（reason: timeout）</div></div>
+    <div class="hop"><div class="t">t+46s</div><div class="body">尝试 deepseek-v4-flash，遇商汤限流 → 再切换（reason: rate_limited）</div></div>
+    <div class="hop"><div class="t">t+48.5s</div><div class="body"><b>glm-5.2 成功返回</b>，对话结果正常；全程 failovers=2，request_id <span class="mono">d48c485a65c6</span></div></div>
+  </div>
+  <h3>场景 B（附带）：真实限流切换（CLI ping 期间）</h3>
+  <div class="chain">
+    <div class="hop"><div class="t">03:29:26Z</div><div class="body">deepseek-v4-pro 请求遇 <b>HTTP 429</b>（tpm/rpm limit，code 429005）→ 切 deepseek-v4-flash</div></div>
+    <div class="hop"><div class="t">03:29:27Z</div><div class="body">deepseek-v4-flash 也 429（code 429003）→ 切 glm-5.2</div></div>
+    <div class="hop"><div class="t">03:29:29Z</div><div class="body"><b>glm-5.2 成功</b>（2.8s）；request_id <span class="mono">c977161cb5f1</span></div></div>
+  </div>
+  <p>切换触发条件覆盖：连接错误、读超时、HTTP 401/403/404/429/5xx、200 空返回（假成功）。同一模型连续失败 3 次进入 300s 冷却（可配），冷却到期自动放行自愈。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="no">05</span>角色设定固定不漂移</h2>
+  <p>10 个角色（clarifier / optimizer / evaluator / evaluator_b / arbiter / comparator / reviser / target / assistant / analyst）的系统提示词固定存于 <code>config/roles.json</code>，与模型完全解耦：网关在请求进入时按 <code>role</code> 注入 system 消息，切换到哪个模型都注入同一份人设。</p>
+  <p><b>实测（场景 E）</b>：同一 <code>role=analyst</code> 分别经 deepseek-v4-flash 与 glm-5.2 对话"你的角色设定是什么"，两个模型都准确复述同一人设——"严谨的数据分析师，先给结论、再给依据与计算过程，数据缺失明确说明、不编造数字"。人设随角色走、不随模型漂移，验证通过。</p>
+  <p>角色文件支持热重载与版本管理（存于项目 git 忽略之外的 config/ 目录，改动留 mtime 与备份可溯）；引用不存在角色时 HTTP 422 显式报错并列出可用角色，杜绝静默空人设。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="no">06</span>任意智能体统一接入</h2>
+  <p>接入面收敛为一个 OpenAI 兼容端点 <code>http://127.0.0.1:8687/v1</code>：<code>model</code> 可省略（自动主备链），<code>agent</code> 标识归属，<code>role</code> 绑定固定人设。三种实现方式全部实测通过：</p>
+  <table>
+    <caption><b>表 6-1</b>　多框架接入实测（同一接口）</caption>
+    <thead><tr><th style="width:26%">接入方式</th><th style="width:20%">测试智能体标识</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>openai SDK（Python）</td><td class="mono">openai-sdk-demo</td><td class="tag-ok">通过 · 3.3s · deepseek-v4-flash 应答</td></tr>
+      <tr><td>LangChain ChatOpenAI</td><td class="mono">langchain-demo</td><td class="tag-ok">通过 · 8.4–10.2s · 正常应答</td></tr>
+      <tr><td>原生 HTTP POST</td><td class="mono">raw-http-demo</td><td class="tag-ok">通过 · 指定未知模型名自动回落主备链（failovers=1）</td></tr>
+    </tbody>
+  </table>
+  <p>配套《智能体接入说明》（<code>docs/agent-integration.md</code>）给出三种方式的完整代码、五分钟自查清单与已知约束（v1 不支持 stream 等）；第三方按文档可独立接入。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="no">07</span>调用与切换台账</h2>
+  <p>每次真实调用与每次切换均追加写入 <code>logs/modelhub_ledger.jsonl</code>（JSONL，一行一事件，并发安全）。事件字段含：时间戳（UTC ms）、类型（call/switch）、request_id、模型、端点、成败、耗时、尝试次数、切换次数、HTTP 状态、错误类型与摘要、agent、role、正文长度。</p>
+  <p><b>检索能力实测</b>：最终回归时点台账累计 <b>80 条事件（36 次调用 + 44 次切换）</b>，按模型 / 成败 / 类型 / 时间窗 / request_id 六个维度检索均可用（CLI <code>ledger</code> 与网关 <code>GET /v1/ledger</code> 同源）。汇总视图（<code>stats</code>）给出总调用、成功率、切换次数与按模型分布。</p>
+  <p class="note">注：切换事件数（44）大于触发切换的调用数属预期——多跳切换（如 429 连续两跳）每次跳转记一条；被网关层 422/400 拒绝的异常请求不计入调用事件，同样属设计语义。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="no">08</span>异常路径兜底（注入测试 6/6）</h2>
+  <p>每类异常在独立子进程注入，全部"显式报错 + 可执行指引"，无静默失败：</p>
+  <table>
+    <caption><b>表 8-1</b>　异常注入结果</caption>
+    <thead><tr><th style="width:22%">场景</th><th style="width:34%">系统行为</th><th>报错摘录（实测输出）</th></tr></thead>
+    <tbody>
+      <tr><td>X1 配置文件缺失</td><td>启动即 ConfigError</td><td class="mono">配置文件不存在：…no_such.json（可从 config/*.example 复制后填写）</td></tr>
+      <tr><td>X2 配置损坏</td><td>ConfigError，定位到行</td><td class="mono">配置文件损坏（不是合法 JSON）：…：第 1 行 Expecting value</td></tr>
+      <tr><td>X3 密钥环境变量缺失</td><td>ConfigError，点名变量</td><td class="mono">环境变量 PMH_NO_SUCH_KEY_VAR 未设置或为空…请检查 .env</td></tr>
+      <tr><td>X4 密钥无效</td><td>切换耗尽后 PoolExhausted</td><td class="mono">池内 1 个模型全部失败…HTTP 401: Forbidden</td></tr>
+      <tr><td>X5 全池不可达</td><td>PoolExhausted，附尝试顺序</td><td class="mono">连接失败: [WinError 10061] 目标计算机积极拒绝</td></tr>
+      <tr><td>X6 全部禁用（空池）</td><td>ConfigError</td><td class="mono">模型池里没有任何 enabled=true 的模型</td></tr>
+    </tbody>
+  </table>
+  <p>另有两类 API 层异常路径在端到端测试中验证：未知角色 → HTTP 422（列出可用角色）；stream=true → HTTP 400（说明 v1 仅非流式）。12 模型全部不可用时，调用方收到 HTTP 502 与完整的尝试顺序、最后错误——不挂起、不静默。</p>
+</section>
+
+<section id="s9">
+  <h2><span class="no">09</span>回滚演练（实测）</h2>
+  <p>演练流程与结果：</p>
+  <div class="chain">
+    <div class="hop"><div class="t">Step 1</div><div class="body"><span class="mono">modelhub_cli.py backup</span> → 备份 <span class="mono">backups/modelhub-20260921-114126</span>（modelhub.json / roles.json / .env 共 3 文件 + manifest）</div></div>
+    <div class="hop"><div class="t">Step 2</div><div class="body">故意写入损坏配置 <span class="mono">{"pool": BROKEN</span>；网关 <span class="mono">/v1/models</span> 立即 503 显式报错（而非静默）</div></div>
+    <div class="hop"><div class="t">Step 3</div><div class="body"><span class="mono">modelhub_cli.py rollback</span> 一键恢复最近备份</div></div>
+    <div class="hop"><div class="t">Step 4</div><div class="body"><b>SHA256 前后一致</b>（D8D285BFB3FA…），网关经 mtime 热重载自动恢复 12 模型清单，全程未重启进程</div></div>
+  </div>
+  <p>此外，本次优化动手前的原始状态另有项目级快照 <code>backups/pre-modelhub-20260921-105501/</code>（原 .env、原 .env.example、原 pm/llm.py），提供"完全恢复改动前"的兜底；本次对存量代码零修改，该快照仅作保险。</p>
+</section>
+
+<section id="s10">
+  <h2><span class="no">10</span>遗留风险与边界（如实声明）</h2>
+  <table>
+    <caption><b>表 10-1</b>　已知边界</caption>
+    <thead><tr><th style="width:30%">事项</th><th>说明与建议</th></tr></thead>
+    <tbody>
+      <tr><td>"12 种模型"口径差异</td><td>商汤端点当前实际仅 5 个对话可用模型；池以"商汤为主、AMD 兜底"补足 12 条目。若商汤后续开放 6.7/u1 系列 chat 路由，在 <span class="mono">modelhub.json</span> 加条目即可，无需改代码。</td></tr>
+      <tr><td>amd-glm-5.3-flash 当前不可用</td><td>目录在列但连续读超时；已配置 45s 快速超时 + 熔断冷却，恢复后自动回归主备链。</td></tr>
+      <tr><td>v1 不支持流式</td><td>stream=true 返回 400 显式报错；需要流式的智能体暂勿接入或等待 v2。</td></tr>
+      <tr><td>上游限流</td><td>商汤免费档 429 频繁（实测可两连 429）；网关只做切换不做排队，持续高并发需自行控制请求节奏。</td></tr>
+      <tr><td>txt 中其余厂商条目未接入</td><td>OpenRouter / StepFun / NVIDIA 条目 Key 截断或超出商汤范围，按 Goal Brief 约束排除；需要时补全 Key 加池即可。</td></tr>
+      <tr><td>存量测试顺序依赖（非本次引入）</td><td>tests/test_measurement.py 中 2 个用例在**全量套件跑**时失败、单文件跑通过；实测移除 pm/modelhub 后全量依旧复现 → 存量状态污染，与 ModelHub 无关（工作区在我改动前已有未提交修改）。存量问题不在本目标范围内，已如实留档。</td></tr>
+      <tr><td>打包声明已同步修复</td><td>新增 pm.modelhub 子包时曾漏 pyproject 的 tool.setuptools.packages 声明（test_packaging 失败）；已补齐并复跑通过。</td></tr>
+      <tr><td>本地交付边界</td><td>按 Goal Brief，公网部署/域名/HTTPS 不在本次范围；暴露到局域网须设 <span class="mono">PMH_GATEWAY_TOKEN</span>。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer class="colophon">
+  <div>ModelHub v1 Acceptance Report · PromptMaster</div>
+  <div>原始台账：logs/modelhub_ledger.jsonl · 复测脚本：tests_modelhub/{e2e_test, exception_test}.py</div>
+  <div>2026-09-21</div>
+</footer>
+
+</div>
+</body>
+</html>

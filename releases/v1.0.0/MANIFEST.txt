@@ -1,0 +1,24 @@
+﻿pm\modelhub\__init__.py  sha256:C5B1AEA6CA3177E5
+pm\modelhub\pool.py  sha256:57DAA6BD8F019E81
+pm\modelhub\ledger.py  sha256:B925196E08795785
+pm\modelhub\agents.py  sha256:F19EAE52D248A5B2
+pm\modelhub\server.py  sha256:03637F7AA7FEAC41
+run_modelhub.py  sha256:93E061BAEEAC9F2B
+modelhub_cli.py  sha256:2FB24164711BED39
+config\modelhub.json  sha256:D8D285BFB3FA5342
+config\roles.json  sha256:C368C383452FAB54
+config\modelhub.example.json  sha256:5C99411039E4E07F
+config\roles.example.json  sha256:FBED4EF61C47DF87
+pyproject.toml  sha256:84C5615DE4153E47
+docs\modelhub\agent-integration.md  sha256:7EA079C35C31E127
+docs\modelhub\operations.md  sha256:8129A72D6F39E11A
+docs\modelhub\acceptance-report.html  sha256:3BB3623D95EED5C1
+docs\release\test-plan.md  sha256:4D49BC84B0E9268C
+docs\release\defect-ledger.md  sha256:DD71B9907E8DBC7B
+tests_modelhub\e2e_test.py  sha256:6691FBC9ADDA4744
+tests_modelhub\exception_test.py  sha256:A25036179AF11988
+tests_modelhub\release_test.py  sha256:EB0DB8E4160D0564
+---
+snapshot created: 2026-09-21 12:49:26
+version: 1.0.0
+docs/release/release-test-report.html  sha256:898EC2266D4187DE

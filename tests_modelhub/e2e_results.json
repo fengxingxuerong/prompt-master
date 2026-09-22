@@ -1,0 +1,42 @@
+[
+ {
+  "step": "A_openai_sdk",
+  "ok": true,
+  "detail": "model=glm-5.2 latency=10861ms chars=53 request_id=8a3b107c7320"
+ },
+ {
+  "step": "B_langchain",
+  "ok": true,
+  "detail": "model=None latency=8632ms chars=89"
+ },
+ {
+  "step": "C_raw_http_unknown_model",
+  "ok": true,
+  "detail": "HTTP200 served=glm-5.2 failovers=0 latency=2386ms"
+ },
+ {
+  "step": "D_forced_failover",
+  "ok": true,
+  "detail": "requested=amd-glm-5.3-flash → served=glm-5.2（自动切换） failovers=1 latency=95416ms request_id=a869da59e847"
+ },
+ {
+  "step": "E_role_fixed",
+  "ok": true,
+  "detail": "两模型均注入固定 analyst 人设：命中角色特征 ['deepseek-v4-flash', 'glm-5.2']；回答1=我是一名严谨的数据分析师，坚持先给结论、再给依据与计算过程，且在数据缺失时明确说 / 回答2=我是一名严谨的数据分析师，始终遵循“结论先行、依据与计算过程支撑”的原则，且面对"
+ },
+ {
+  "step": "F_unknown_role_422",
+  "ok": true,
+  "detail": "HTTP422: {\"detail\":\"未知角色：no-such-role。可用角色：analyst, arbiter, assistant, clarifier, comparator, evaluator, evaluator_b, optimizer,"
+ },
+ {
+  "step": "G_stream_sse_supported",
+  "ok": true,
+  "detail": "HTTP200 ctype=text/event-stream; charset=utf-8 DONE=True 含正文=True 降级合成=True（v1.1 起流式为正式能力；上游不可流式时自动降级并在 X-Modelhub-Degraded 标注）"
+ },
+ {
+  "step": "H_ledger_traceable",
+  "ok": true,
+  "detail": "calls=118 switches=79 agents_covered=6/6 missing=无 切换留痕=40条"
+ }
+]

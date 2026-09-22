@@ -1,0 +1,22 @@
+[
+ {
+  "step": "X8_duplicate_submit",
+  "ok": true,
+  "detail": "3 次状态=[200, 200, 200] request_id 唯一=True 正文均非空=True（无脏数据：每次独立响应）"
+ },
+ {
+  "step": "X9_invalid_model_name",
+  "ok": true,
+  "detail": "HTTP200 requested=no-such-model-xyz served=glm-5.2（回落主备链，不静默）"
+ },
+ {
+  "step": "S1_soak_12rounds",
+  "ok": true,
+  "detail": "成功 12/12（成功率 100%）触发切换 4 轮 总耗时 115s 无异常=True"
+ },
+ {
+  "step": "S2_memory_stability",
+  "ok": true,
+  "detail": "WorkingSet 浸泡前=27.0MB 后=25.2MB 增长=-1.8000000000000007MB（>50MB 判异常；基线 14MB）"
+ }
+]

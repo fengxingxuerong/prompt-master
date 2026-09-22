@@ -1,0 +1,284 @@
+{
+ "label": "retest",
+ "ts": "2026-09-21 22:09:53",
+ "measurement": "urllib 同口径计时 + 正则静态检查 + py_compile",
+ "performance": [
+  {
+   "svc": "modelhub",
+   "path": "/",
+   "status": 200,
+   "ms": 78,
+   "size": 507
+  },
+  {
+   "svc": "modelhub",
+   "path": "/v1/models",
+   "status": 200,
+   "ms": 16,
+   "size": 1484
+  },
+  {
+   "svc": "modelhub",
+   "path": "/console",
+   "status": 200,
+   "ms": 3,
+   "size": 13951
+  },
+  {
+   "svc": "modelhub",
+   "path": "/v1/usage",
+   "status": 200,
+   "ms": 34,
+   "size": 9172
+  },
+  {
+   "svc": "modelhub",
+   "path": "/v1/metrics",
+   "status": 200,
+   "ms": 26,
+   "size": 1716
+  },
+  {
+   "svc": "lobster",
+   "path": "/",
+   "status": 200,
+   "ms": 85,
+   "size": 16841
+  },
+  {
+   "svc": "lobster",
+   "path": "/ledger",
+   "status": 200,
+   "ms": 4,
+   "size": 9134
+  },
+  {
+   "svc": "lobster",
+   "path": "/poster",
+   "status": 200,
+   "ms": 4,
+   "size": 6144
+  },
+  {
+   "svc": "taskboard",
+   "path": "/",
+   "status": 200,
+   "ms": 32,
+   "size": 11157
+  },
+  {
+   "svc": "taskboard",
+   "path": "/rules",
+   "status": 200,
+   "ms": 4,
+   "size": 2761
+  },
+  {
+   "svc": "taskboard",
+   "path": "/exceptions",
+   "status": 200,
+   "ms": 4,
+   "size": 1941
+  },
+  {
+   "svc": "taskboard",
+   "path": "/handoff",
+   "status": 200,
+   "ms": 4,
+   "size": 2300
+  }
+ ],
+ "seo": [
+  {
+   "svc": "modelhub",
+   "path": "/",
+   "title": false,
+   "title_len": 0,
+   "meta_desc": false,
+   "viewport": false,
+   "lang": false,
+   "h1": 0,
+   "h2": 0
+  },
+  {
+   "svc": "modelhub",
+   "path": "/console",
+   "title": true,
+   "title_len": 12,
+   "meta_desc": false,
+   "viewport": true,
+   "lang": true,
+   "h1": 1,
+   "h2": 0
+  },
+  {
+   "svc": "lobster",
+   "path": "/",
+   "title": true,
+   "title_len": 26,
+   "meta_desc": false,
+   "viewport": true,
+   "lang": true,
+   "h1": 1,
+   "h2": 4
+  },
+  {
+   "svc": "lobster",
+   "path": "/ledger",
+   "title": true,
+   "title_len": 15,
+   "meta_desc": false,
+   "viewport": true,
+   "lang": true,
+   "h1": 1,
+   "h2": 1
+  },
+  {
+   "svc": "lobster",
+   "path": "/poster",
+   "title": true,
+   "title_len": 26,
+   "meta_desc": false,
+   "viewport": true,
+   "lang": true,
+   "h1": 0,
+   "h2": 0
+  },
+  {
+   "svc": "taskboard",
+   "path": "/",
+   "title": true,
+   "title_len": 20,
+   "meta_desc": true,
+   "viewport": true,
+   "lang": true,
+   "h1": 1,
+   "h2": 3
+  }
+ ],
+ "accessibility": [
+  {
+   "svc": "modelhub",
+   "path": "/",
+   "img_total": 0,
+   "img_noalt": 0,
+   "h1_count": 0,
+   "lang_attr": false,
+   "viewport": false
+  },
+  {
+   "svc": "modelhub",
+   "path": "/console",
+   "img_total": 0,
+   "img_noalt": 0,
+   "h1_count": 1,
+   "lang_attr": true,
+   "viewport": true
+  },
+  {
+   "svc": "lobster",
+   "path": "/",
+   "img_total": 0,
+   "img_noalt": 0,
+   "h1_count": 1,
+   "lang_attr": true,
+   "viewport": true
+  },
+  {
+   "svc": "lobster",
+   "path": "/ledger",
+   "img_total": 0,
+   "img_noalt": 0,
+   "h1_count": 1,
+   "lang_attr": true,
+   "viewport": true
+  },
+  {
+   "svc": "lobster",
+   "path": "/poster",
+   "img_total": 0,
+   "img_noalt": 0,
+   "h1_count": 0,
+   "lang_attr": true,
+   "viewport": true
+  },
+  {
+   "svc": "taskboard",
+   "path": "/",
+   "img_total": 0,
+   "img_noalt": 0,
+   "h1_count": 1,
+   "lang_attr": true,
+   "viewport": true
+  }
+ ],
+ "security": [
+  {
+   "name": "taskboard_auth_challenge",
+   "value": false,
+   "note": "无 WWW-Authenticate = 写接口无强制鉴权"
+  },
+  {
+   "name": "lobster_auth_challenge",
+   "value": false,
+   "note": "无 WWW-Authenticate = 写接口无强制鉴权"
+  },
+  {
+   "name": "modelhub_auth_challenge",
+   "value": false,
+   "note": "无 WWW-Authenticate = 写接口无强制鉴权"
+  },
+  {
+   "name": "lobster_pii_plain_phones",
+   "value": 7,
+   "note": ">0 即明文手机号落盘"
+  },
+  {
+   "name": "cors_acao_present",
+   "value": false,
+   "note": "未配置=同源兜底（可接受）"
+  },
+  {
+   "name": "modelhub_requirements_lock",
+   "value": true
+  },
+  {
+   "name": "lobster_requirements_txt",
+   "value": true
+  },
+  {
+   "name": "desktop_plain_key_file",
+   "value": true,
+   "note": "桌面明文密钥（高）"
+  }
+ ],
+ "code_quality": [
+  {
+   "file": "server.py",
+   "compile": true,
+   "err": ""
+  },
+  {
+   "file": "pool.py",
+   "compile": true,
+   "err": ""
+  },
+  {
+   "file": "app.py",
+   "compile": true,
+   "err": ""
+  },
+  {
+   "file": "app.py",
+   "compile": true,
+   "err": ""
+  }
+ ],
+ "summary": {
+  "perf_ok": "12/12",
+  "seo_pass": "5/6",
+  "a11y_issues": 1,
+  "sec_issues": 3,
+  "compile_ok": 4
+ }
+}

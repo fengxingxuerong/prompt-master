@@ -1,0 +1,102 @@
+{
+ "label": "retest",
+ "ts": "2026-09-21 21:00:57",
+ "services": {
+  "modelhub": {
+   "health": {
+    "status": 200,
+    "ok": true,
+    "ms": 111
+   },
+   "pages": {
+    "/": {
+     "status": 200,
+     "size": 507,
+     "ms": 6
+    },
+    "/v1/models": {
+     "status": 200,
+     "size": 1484,
+     "ms": 5
+    },
+    "/console": {
+     "status": 200,
+     "size": 13951,
+     "ms": 4
+    }
+   },
+   "api": {
+    "status": 200,
+    "models_count": 12,
+    "ms": 3
+   }
+  },
+  "lobster": {
+   "health": {
+    "status": 200,
+    "ok": true,
+    "ms": 54
+   },
+   "pages": {
+    "/": {
+     "status": 200,
+     "size": 16689,
+     "ms": 10
+    },
+    "/ledger": {
+     "status": 200,
+     "size": 8985,
+     "ms": 4
+    },
+    "/poster": {
+     "status": 200,
+     "size": 6023,
+     "ms": 15
+    }
+   },
+   "api": {
+    "status": 200,
+    "orders_count": 7,
+    "ms": 19
+   }
+  },
+  "taskboard": {
+   "health": {
+    "status": 200,
+    "ok": true,
+    "ms": 12
+   },
+   "pages": {
+    "/": {
+     "status": 200,
+     "size": 11027,
+     "ms": 32
+    },
+    "/rules": {
+     "status": 200,
+     "size": 2761,
+     "ms": 2
+    },
+    "/exceptions": {
+     "status": 200,
+     "size": 1941,
+     "ms": 13
+    },
+    "/handoff": {
+     "status": 200,
+     "size": 2300,
+     "ms": 2
+    }
+   },
+   "api": {
+    "status": 200,
+    "tasks_count": 6,
+    "ms": 4
+   }
+  }
+ },
+ "summary": {
+  "health_ok": "3/3",
+  "pages_ok": "10/10"
+ }
+}

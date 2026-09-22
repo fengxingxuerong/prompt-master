@@ -1,0 +1,496 @@
+{
+ "version": 1,
+ "seq": 10,
+ "tasks": [
+  {
+   "task_id": "TASK-20260921-001",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "ModelHub 补 requirements 锁定文件",
+   "desc": "从 prompt-master venv 导出 pip freeze 到 releases/taskboard 同级 requirements.lock，验证干净环境可装。验收：requirements.lock 存在且版本与 venv 一致。",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-28",
+   "status": "done",
+   "acceptance": "requirements.lock 存在、pip install --dry-run 通过",
+   "source": "缺陷台账 D-010 + 交接文档风险清单（交付包依赖说明）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-28）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-21 21:01:23",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "requirements.lock 83 行已落 releases/，fastapi==0.115.12 等关键版本锁定",
+     "before": {
+      "title": "ModelHub 补 requirements 锁定文件",
+      "desc": "从 prompt-master venv 导出 pip freeze 到 releases/taskboard 同级 requirements.lock，验证干净环境可装。验收：requirements.lock 存在且版本与 venv 一致。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "pending",
+      "acceptance": "requirements.lock 存在、pip install --dry-run 通过"
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-002",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "ModelHub P1 转发开销补测（上游稳定期）",
+   "desc": "上游 401 突发结束后运行 release_test.py 的 p1，补测直连 vs 网关转发开销。验收：拿到有效直连样本 ≥3 或确认口径替代仍成立。",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P3",
+   "due": "2026-10-12",
+   "status": "pending",
+   "acceptance": "P1 用例真实数据补全或口径替代结论更新",
+   "source": "最终验收报告 §04 性能口径说明（401 突发期直连参照缺失）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P3，截止 2026-10-12）",
+     "before": null
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-003",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "ModelHub v1.2：SSE 心跳保活 + usage 持久聚合",
+   "desc": "v1.3 补充：心跳泵+持久聚合实现细节见 server.py sse_gen 与 usage_store.py",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P3",
+   "due": "2026-10-12",
+   "status": "done",
+   "acceptance": "两个子项各有一条自动化验证",
+   "source": "竞品对标评分报告 §07 遗留风险（v1.2 候选清单）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P3，截止 2026-10-12）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-21 21:12:44",
+     "action": "状态→进行中",
+     "actor": "Agent-AutoClaw",
+     "detail": "本轮执行：SSE 心跳保活 + usage 持久聚合，作为「能真实做事」的端到端验证任务",
+     "before": {
+      "title": "ModelHub v1.2：SSE 心跳保活 + usage 持久聚合",
+      "desc": "流式连接加 SSE 心跳注释行防代理超时断流；/v1/usage 改为持久聚合表。验收：长连接 >5 分钟不断，usage 重启后可查历史。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P3",
+      "due": "2026-10-12",
+      "status": "pending",
+      "acceptance": "两个子项各有一条自动化验证"
+     }
+    },
+    {
+     "ts": "2026-09-21 21:20:36",
+     "action": "状态→待复核",
+     "actor": "Agent-AutoClaw",
+     "detail": "SSE 心跳保活 + usage 持久聚合实现完毕，E2E 通过，提请复核",
+     "before": {
+      "title": "ModelHub v1.2：SSE 心跳保活 + usage 持久聚合",
+      "desc": "流式连接加 SSE 心跳注释行防代理超时断流；/v1/usage 改为持久聚合表。验收：长连接 >5 分钟不断，usage 重启后可查历史。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P3",
+      "due": "2026-10-12",
+      "status": "in_progress",
+      "acceptance": "两个子项各有一条自动化验证"
+     }
+    },
+    {
+     "ts": "2026-09-21 21:20:36",
+     "action": "状态→已完成",
+     "actor": "用户（默认确认人）",
+     "detail": "复核通过：持久化文件落盘验证、usage 端点含 persistent_daily、三服务回归全绿",
+     "before": {
+      "title": "ModelHub v1.2：SSE 心跳保活 + usage 持久聚合",
+      "desc": "流式连接加 SSE 心跳注释行防代理超时断流；/v1/usage 改为持久聚合表。验收：长连接 >5 分钟不断，usage 重启后可查历史。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P3",
+      "due": "2026-10-12",
+      "status": "review",
+      "acceptance": "两个子项各有一条自动化验证"
+     }
+    },
+    {
+     "ts": "2026-09-22 02:32:51",
+     "action": "描述更新",
+     "actor": "编辑接口实测",
+     "detail": "",
+     "before": {
+      "title": "ModelHub v1.2：SSE 心跳保活 + usage 持久聚合",
+      "desc": "流式连接加 SSE 心跳注释行防代理超时断流；/v1/usage 改为持久聚合表。验收：长连接 >5 分钟不断，usage 重启后可查历史。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P3",
+      "due": "2026-10-12",
+      "status": "done",
+      "acceptance": "两个子项各有一条自动化验证"
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-004",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+   "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-28",
+   "status": "done",
+   "acceptance": "requirements.txt + start.cmd 存在且文档引用",
+   "source": "龙虾最终验收报告 §06（D-010 建议级）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-28）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-21 20:40:51",
+     "action": "状态→进行中；改派→Agent-AutoClaw",
+     "actor": "演练-错误指派",
+     "detail": "误改派演示",
+     "before": {
+      "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+      "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "pending",
+      "acceptance": "requirements.txt + start.cmd 存在且文档引用"
+     }
+    },
+    {
+     "ts": "2026-09-21 20:40:51",
+     "action": "撤销",
+     "actor": "Agent-AutoClaw",
+     "detail": "回滚「状态→进行中；改派→Agent-AutoClaw」（2026-09-21 20:40:51）；恢复 assignee=Agent-AutoClaw status=pending",
+     "before": {
+      "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+      "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "in_progress",
+      "acceptance": "requirements.txt + start.cmd 存在且文档引用"
+     }
+    },
+    {
+     "ts": "2026-09-21 20:41:14",
+     "action": "状态→阻塞",
+     "actor": "异常手册演练",
+     "detail": "负责人超 48h 无响应，暂挂",
+     "before": {
+      "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+      "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "pending",
+      "acceptance": "requirements.txt + start.cmd 存在且文档引用"
+     }
+    },
+    {
+     "ts": "2026-09-21 20:41:14",
+     "action": "改派→用户",
+     "actor": "异常手册演练",
+     "detail": "按手册改派至最终确认人裁决",
+     "before": {
+      "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+      "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "blocked",
+      "acceptance": "requirements.txt + start.cmd 存在且文档引用"
+     }
+    },
+    {
+     "ts": "2026-09-21 21:01:23",
+     "action": "状态→已完成；改派→Agent-AutoClaw",
+     "actor": "Agent-AutoClaw",
+     "detail": "requirements.txt + start.cmd 已落龙虾包，一键启动可用",
+     "before": {
+      "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+      "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+      "assignee": "用户",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "blocked",
+      "acceptance": "requirements.txt + start.cmd 存在且文档引用"
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-005",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "龙虾站占位替换四件套（品牌/价格/供应商/产地口径）",
+   "desc": "确认品牌名、真实定价（或参考价来源）、供应商与产地宣称口径——四项决定页面与物料能否转正。验收：用户给出四项书面确认。",
+   "assignee": "用户",
+   "priority": "P1",
+   "due": "2026-09-24",
+   "status": "pending",
+   "acceptance": "用户书面确认四项，替换后页面与物料同步更新",
+   "source": "龙虾 handoff.md §3 + 社媒文案合规红线（真实运营门槛）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 用户（P1，截止 2026-09-24）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-21 21:49:23",
+     "action": "状态→进行中",
+     "actor": "红队未鉴权请求",
+     "detail": "",
+     "before": {
+      "title": "龙虾站占位替换四件套（品牌/价格/供应商/产地口径）",
+      "desc": "确认品牌名、真实定价（或参考价来源）、供应商与产地宣称口径——四项决定页面与物料能否转正。验收：用户给出四项书面确认。",
+      "assignee": "用户",
+      "priority": "P1",
+      "due": "2026-09-24",
+      "status": "pending",
+      "acceptance": "用户书面确认四项，替换后页面与物料同步更新"
+     }
+    },
+    {
+     "ts": "2026-09-21 21:49:23",
+     "action": "状态→待处理",
+     "actor": "红队还原",
+     "detail": "红队验证后还原原状态",
+     "before": {
+      "title": "龙虾站占位替换四件套（品牌/价格/供应商/产地口径）",
+      "desc": "确认品牌名、真实定价（或参考价来源）、供应商与产地宣称口径——四项决定页面与物料能否转正。验收：用户给出四项书面确认。",
+      "assignee": "用户",
+      "priority": "P1",
+      "due": "2026-09-24",
+      "status": "in_progress",
+      "acceptance": "用户书面确认四项，替换后页面与物料同步更新"
+     }
+    },
+    {
+     "ts": "2026-09-21 22:14:16",
+     "action": "状态→待处理",
+     "actor": "??????",
+     "detail": "",
+     "before": {
+      "title": "龙虾站占位替换四件套（品牌/价格/供应商/产地口径）",
+      "desc": "确认品牌名、真实定价（或参考价来源）、供应商与产地宣称口径——四项决定页面与物料能否转正。验收：用户给出四项书面确认。",
+      "assignee": "用户",
+      "priority": "P1",
+      "due": "2026-09-24",
+      "status": "pending",
+      "acceptance": "用户书面确认四项，替换后页面与物料同步更新"
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-006",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "任务分配机制使用一周复盘",
+   "desc": "使用本台账一周后复盘：指派误率、撤销次数、逾期分布，决定是否迁 SQLite 与加鉴权。验收：复盘纪要一份。",
+   "assignee": "用户",
+   "priority": "P3",
+   "due": "2026-10-12",
+   "status": "in_progress",
+   "acceptance": "复盘纪要落 docs/",
+   "source": "分配规则 §6 撤销纪律 + 交接说明 §3 日常维护（机制落地后首次复盘）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 用户（P3，截止 2026-10-12）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-21 21:01:23",
+     "action": "状态→进行中",
+     "actor": "Agent-AutoClaw",
+     "detail": "本轮套件级迭代即复盘素材：基线→优化→复测口径已建立",
+     "before": {
+      "title": "任务分配机制使用一周复盘",
+      "desc": "使用本台账一周后复盘：指派误率、撤销次数、逾期分布，决定是否迁 SQLite 与加鉴权。验收：复盘纪要一份。",
+      "assignee": "用户",
+      "priority": "P3",
+      "due": "2026-10-12",
+      "status": "pending",
+      "acceptance": "复盘纪要落 docs/"
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-007",
+   "created_at": "2026-09-22 00:00:36",
+   "created_by": "Agent-AutoClaw",
+   "title": "安全项豁免登记（W7/W8/W9 用户指令豁免）",
+   "desc": "经用户指令，三条高危安全项转入书面豁免：W7 无鉴权（TOKEN 机制保留可随时启用）、W8 PII 明文（接口已脱敏返回）、W9 桌面密钥文件（不动）。状态即为豁免登记，不需执行。验收：本条目在台账中可见即完成。",
+   "assignee": "用户",
+   "priority": "P3",
+   "due": "2026-10-13",
+   "status": "done",
+   "acceptance": "",
+   "source": "用户 2026-09-21 指令「安全方面不要考虑」+ 缺点分析报告 W7/W8/W9",
+   "history": [
+    {
+     "ts": "2026-09-22 00:00:36",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 用户（P3，截止 2026-10-13）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 00:00:36",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "豁免登记完成：书面清单见 releases/suite/security-waiver.html",
+     "before": {
+      "title": "安全项豁免登记（W7/W8/W9 用户指令豁免）",
+      "desc": "经用户指令，三条高危安全项转入书面豁免：W7 无鉴权（TOKEN 机制保留可随时启用）、W8 PII 明文（接口已脱敏返回）、W9 桌面密钥文件（不动）。状态即为豁免登记，不需执行。验收：本条目在台账中可见即完成。",
+      "assignee": "用户",
+      "priority": "P3",
+      "due": "2026-10-13",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-008",
+   "created_at": "2026-09-22 13:00:42",
+   "created_by": "Agent-AutoClaw",
+   "title": "v1.4.0 清遗留缺陷（README/W12/龙虾pytest/W16）",
+   "desc": "P2 README 总索引落地；W12 rotate_ledger.py 实测轮转；龙虾 pytest 7/7；W16 根因为 .env PM_JUDGE_JITTER 经 load_dotenv 冻结进 schemas，conftest 钉死 0.0；全量 688 收集 3 次 exit 0 全绿。",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 13:00:42",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 13:01:04",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "CHANGELOG-v1.4.0.md 已归档 releases/suite/",
+     "before": {
+      "title": "v1.4.0 清遗留缺陷（README/W12/龙虾pytest/W16）",
+      "desc": "P2 README 总索引落地；W12 rotate_ledger.py 实测轮转；龙虾 pytest 7/7；W16 根因为 .env PM_JUDGE_JITTER 经 load_dotenv 冻结进 schemas，conftest 钉死 0.0；全量 688 收集 3 次 exit 0 全绿。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-009",
+   "created_at": "2026-09-22 13:26:18",
+   "created_by": "Agent-AutoClaw",
+   "title": "桌面清单 LLM 全量入池 + 多模型并发实测",
+   "desc": "StepFun/NVIDIA/OpenRouter 三新源入池（15 条目），密钥入 .env 走 ${ENV} 引用；8 模型并发全通（NVIDIA 冷启动 124s），fan-out 4 家 6-8 分真实分布；报告归档 releases/suite/multi-llm-report.html",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 13:26:18",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 13:26:18",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "实测完成：15 条目生效，8 并发全通",
+     "before": {
+      "title": "桌面清单 LLM 全量入池 + 多模型并发实测",
+      "desc": "StepFun/NVIDIA/OpenRouter 三新源入池（15 条目），密钥入 .env 走 ${ENV} 引用；8 模型并发全通（NVIDIA 冷启动 124s），fan-out 4 家 6-8 分真实分布；报告归档 releases/suite/multi-llm-report.html",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-010",
+   "created_at": "2026-09-22 16:33:24",
+   "created_by": "Agent-AutoClaw",
+   "title": "多模型会审台实战案例（v1.0→v1.1.1 两轮优化）",
+   "desc": "自编客服工单分诊案例：6 LLM 并行研判+共识+台账+反馈闭环。实战发现 P-01~P-05 全部修复；总墙钟 155.5s→72.4s(-53%)；异常 7/7；回滚演练数据无损。报告 releases/triage/triage-report.html",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 16:33:24",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 16:33:24",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "v1.1.1 在线，验收证据齐备",
+     "before": {
+      "title": "多模型会审台实战案例（v1.0→v1.1.1 两轮优化）",
+      "desc": "自编客服工单分诊案例：6 LLM 并行研判+共识+台账+反馈闭环。实战发现 P-01~P-05 全部修复；总墙钟 155.5s→72.4s(-53%)；异常 7/7；回滚演练数据无损。报告 releases/triage/triage-report.html",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  }
+ ]
+}

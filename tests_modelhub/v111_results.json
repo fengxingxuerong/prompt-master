@@ -1,0 +1,37 @@
+[
+ {
+  "step": "V2_vkeys_lifecycle",
+  "ok": true,
+  "detail": "签发✓ vk对话✓(agent=vk-test-agent) 伪造拦截=True 停用✓ 停用后401=True 删除✓"
+ },
+ {
+  "step": "V3_usage_endpoint",
+  "ok": true,
+  "detail": "calls=79 success_rate=0.8987 agents=['vk-test-agent', '(unattributed)', 'conc-probe-2', 'conc-probe-7'] 样本[vk-test-agent/deepseek-v4-flash]={\"calls\": 2, \"success\": 2, \"latency_ms_sum\": 6080, \"content_chars_sum\": 4, \"failovers_sum\": 0, \"days\": {\"2026-09-21\": 2}"
+ },
+ {
+  "step": "V4_metrics_endpoint",
+  "ok": true,
+  "detail": "calls=79 rate=0.8987 switches=65 pool=12 circuits_open=0"
+ },
+ {
+  "step": "V5_console_page",
+  "ok": true,
+  "detail": "HTTP 200 size=13283 含四面板入口=True"
+ },
+ {
+  "step": "V6_agents_persist",
+  "ok": true,
+  "detail": "persisted=True data/agents.json落盘=True 注销=True"
+ },
+ {
+  "step": "V7_broken_vkeys_file",
+  "ok": true,
+  "detail": "ERR::ConfigError::虚拟密钥库损坏（不是合法 JSON）：C:\\Users\\ADMIN~1\\AppData\\Local\\Temp\\tmp096asv3y\\vkeys.json：第 1 行 Expecting property name encl"
+ },
+ {
+  "step": "V1_stream_sse",
+  "ok": true,
+  "detail": "model=deepseek-v4-flash chunks=4 content='1、2、3、4、5' DONE=True"
+ }
+]

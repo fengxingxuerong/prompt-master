@@ -1,0 +1,52 @@
+{
+ "2026-09-21": {
+  "calls": 2,
+  "success": 2,
+  "latency_ms_sum": 2164,
+  "content_chars_sum": 4,
+  "failovers_sum": 0,
+  "by_model": {
+   "deepseek-v4-flash": {
+    "calls": 2,
+    "success": 2
+   }
+  }
+ },
+ "2026-09-22": {
+  "calls": 107,
+  "success": 107,
+  "latency_ms_sum": 3004496,
+  "content_chars_sum": 10912,
+  "failovers_sum": 64,
+  "by_model": {
+   "deepseek-v4-flash": {
+    "calls": 26,
+    "success": 26
+   },
+   "step-step-5-preview": {
+    "calls": 15,
+    "success": 15
+   },
+   "sensenova-6.8-flash-lite": {
+    "calls": 31,
+    "success": 31
+   },
+   "glm-5.2": {
+    "calls": 16,
+    "success": 16
+   },
+   "kimi-k3": {
+    "calls": 2,
+    "success": 2
+   },
+   "amd-qwen3.8-27b": {
+    "calls": 1,
+    "success": 1
+   },
+   "amd-deepseek-v4-flash": {
+    "calls": 16,
+    "success": 16
+   }
+  }
+ }
+}

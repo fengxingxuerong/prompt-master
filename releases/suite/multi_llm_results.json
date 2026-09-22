@@ -1,0 +1,125 @@
+{
+  "timestamp": "2026-09-22 13:24:46",
+  "stage_a": [
+    {
+      "model": "step-step-5-preview",
+      "ok": true,
+      "latency_s": 11.77,
+      "served_by": null,
+      "rid": "962f409b2354",
+      "answer_head": "我是Step，由阶跃星辰（StepFun）开发的大语言模型，具备多模态推理能力，可以处理文字、图片等多种信息，擅长知识问"
+    },
+    {
+      "model": "nvidia-glm-5.3-flash",
+      "ok": false,
+      "latency_s": 90.01,
+      "err": "TimeoutError: timed out"
+    }
+  ],
+  "stage_b_concurrent8": {
+    "wall_s": 124.34,
+    "results": [
+      {
+        "model": "sensenova-6.8-flash-lite",
+        "ok": true,
+        "latency_s": 1.53,
+        "served_by": null,
+        "rid": "53b139549e17",
+        "answer_head": "2，因一加一等于二。"
+      },
+      {
+        "model": "glm-5.2",
+        "ok": true,
+        "latency_s": 3.94,
+        "served_by": null,
+        "rid": "bedc6d0110a8",
+        "answer_head": "2"
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "ok": true,
+        "latency_s": 4.68,
+        "served_by": null,
+        "rid": "a48e684a8673",
+        "answer_head": "2。因为这是算术公理。"
+      },
+      {
+        "model": "step-step-5-preview",
+        "ok": true,
+        "latency_s": 7.78,
+        "served_by": null,
+        "rid": "3d9619f1e7ec",
+        "answer_head": "2，算术定义如此。"
+      },
+      {
+        "model": "kimi-k3",
+        "ok": true,
+        "latency_s": 8.01,
+        "served_by": null,
+        "rid": "d67da93c0eaa",
+        "answer_head": "2，因为两个1相加等于2。"
+      },
+      {
+        "model": "amd-qwen3.8-27b",
+        "ok": true,
+        "latency_s": 13.36,
+        "served_by": null,
+        "rid": "482a935e153d",
+        "answer_head": "2，因基础加法。"
+      },
+      {
+        "model": "deepseek-v4-flash",
+        "ok": true,
+        "latency_s": 19.32,
+        "served_by": null,
+        "rid": "48695e4233c1",
+        "answer_head": "2，因为基本算术相加得2。"
+      },
+      {
+        "model": "nvidia-glm-5.3-flash",
+        "ok": true,
+        "latency_s": 124.33,
+        "served_by": null,
+        "rid": "c7669171cc8a",
+        "answer_head": "2，因为算术基本公理。"
+      }
+    ]
+  },
+  "stage_c_fanout4": {
+    "wall_s": 18.27,
+    "results": [
+      {
+        "model": "deepseek-v4-flash",
+        "ok": true,
+        "latency_s": 2.81,
+        "served_by": null,
+        "rid": "9a9061cb43a6",
+        "answer_head": "7分，理由：简洁与功能不足形成对比，评价客观但略偏保守。"
+      },
+      {
+        "model": "step-step-5-preview",
+        "ok": true,
+        "latency_s": 5.66,
+        "served_by": null,
+        "rid": "14dfe4e8bb8e",
+        "answer_head": "6分：肯定界面简洁的优点，但转折后直指功能不足的核心短板，"
+      },
+      {
+        "model": "glm-5.2",
+        "ok": true,
+        "latency_s": 6.76,
+        "served_by": null,
+        "rid": "bd914e2cdd52",
+        "answer_head": "8分，理由：评价客观中肯，既肯定了简洁的优点，又指出了功能不足的短板，但缺少具体改进建议。"
+      },
+      {
+        "model": "amd-qwen3.8-27b",
+        "ok": true,
+        "latency_s": 18.26,
+        "served_by": null,
+        "rid": "e8b2ccda7028",
+        "answer_head": "7分，表达清晰但过于笼"
+      }
+    ]
+  }
+}

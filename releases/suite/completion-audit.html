@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>完成度核查 · 「该做的都做好了吗」</title>
+<style>
+  :root { --paper:#fafaf8; --ink:#1a2530; --soft:#5a6875; --faint:#8b98a5;
+    --line:#dfe3e0; --accent:#0f4c81; --wash:#eef3f7; --orange:#c0392b; --ok:#2e6e4e; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--paper); color:var(--ink); font-family:"Source Han Sans SC","Microsoft YaHei",sans-serif; font-size:14.5px; line-height:1.65; }
+  .wrap { max-width:1060px; margin:0 auto; padding:56px 26px 90px; }
+  header { border-bottom:2px solid var(--ink); padding-bottom:20px; margin-bottom:8px; }
+  .kicker { font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:var(--faint); font-family:var(--mono); margin-bottom:12px; }
+  h1 { font-size:30px; font-weight:750; }
+  .standfirst { margin-top:10px; color:var(--soft); max-width:48em; }
+  .meta { display:flex; gap:28px; margin-top:16px; flex-wrap:wrap; }
+  .meta div .k { font-size:10.5px; letter-spacing:.1em; color:var(--faint); text-transform:uppercase; font-family:var(--mono); }
+  .meta div .v { font-size:13px; font-family:var(--mono); }
+  .verdict { display:inline-block; margin-top:16px; padding:8px 18px; border:1px solid var(--ok); color:var(--ok); font-weight:700; font-family:var(--mono); letter-spacing:.08em; font-size:14px; }
+  section { padding-top:34px; }
+  h2 { font-size:17px; font-weight:700; padding-bottom:7px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+  h2 .no { color:var(--accent); font-family:var(--mono); font-size:12.5px; font-weight:500; margin-right:8px; }
+  p { margin-bottom:10px; max-width:68em; }
+  p.lede { color:var(--soft); }
+  .note { font-size:12.5px; color:var(--faint); }
+  code { font-family:var(--mono); font-size:12.5px; background:var(--wash); padding:1px 5px; }
+  .metrics { display:flex; flex-wrap:wrap; border-top:2px solid var(--accent); border-bottom:1px solid var(--line); margin:10px 0 4px; }
+  .metric { flex:1 1 140px; padding:14px 16px 12px; border-right:1px solid var(--line2); min-width:140px; }
+  .metric:last-child { border-right:none; }
+  .metric .num { font-size:26px; font-weight:800; font-family:var(--mono); color:var(--accent); }
+  .metric .num small { font-size:13px; color:var(--faint); }
+  .metric .lab { font-size:11.5px; color:var(--soft); margin-top:2px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0 6px; font-size:13px; }
+  caption { caption-side:top; text-align:left; font-size:12.5px; color:var(--soft); padding-bottom:7px; }
+  caption b { color:var(--ink); }
+  th { text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); padding:7px 9px; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); }
+  td { padding:7px 9px; border-bottom:1px solid var(--line2); vertical-align:top; }
+  .mono { font-family:var(--mono); font-size:12px; }
+  .tag-ok { color:var(--ok); font-weight:700; } .tag-warn { color:var(--orange); font-weight:700; }
+  footer { margin-top:50px; padding-top:12px; border-top:1px solid var(--line); font-size:12px; color:var(--faint); font-family:var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Completion Audit · 全量盘点 · 「该做的都做好了吗」</div>
+  <h1>完成度核查报告</h1>
+  <p class="standfirst">把这个问题当成一次真实盘点来做：冻结清单 → 逐项核证据 → 结果抓到两个真实缺口（三服务停运、鉴权令牌残留），当场补齐并复验，然后才是结论。</p>
+  <div class="meta">
+    <div><div class="k">盘点日期</div><div class="v">2026-09-21</div></div>
+    <div><div class="k">范围</div><div class="v">三服务套件 + 全部报告/台账/快照（本会话两条交付线）</div></div>
+    <div><div class="k">盘点结果</div><div class="v">交付物 14/14 在位 · 缺口 2 项已补齐 · 待用户决策 4 项</div></div>
+  </div>
+  <div class="verdict">结论：技术侧该做的都做好了；运行态缺口已当场补齐；剩 4 项等你拍板</div>
+</header>
+
+<section>
+  <h2><span class="no">01</span>盘点中抓到的真实缺口（已当场补齐）</h2>
+  <p class="lede">这正是"该做的都做好了吗"最诚实的答案：静态交付物 14/14 全部在位，但<b>运行态有真实缺口</b>——三服务实际已停（后台会话随回合结束终止，无进程守护），taskboard 还带着基线鉴权测试残留的令牌环境变量（GET 401 实锤）。两个都当场补齐并复验：</p>
+  <table>
+    <caption><b>表 1-1</b>　缺口处理记录</caption>
+    <thead><tr><th style="width:30%">缺口</th><th style="width:14%">严重度</th><th>处理与复验</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">B1 三服务停运（无进程守护）</td><td class="tag-warn">高</td><td>杀残留实例 → 干净重启三服务 → HEALTH <b>3/3 OK</b> 实测；长期方案：monitor_suite.py --watch 或接入定时任务</td></tr>
+      <tr><td class="mono">B2 taskboard 带令牌运行（401）</td><td class="tag-warn">高</td><td>杀带令牌实例 → 无令牌模式重启 → LEDGER tasks=6 正常可查（鉴权机制保留，设 TASKBOARD_TOKEN 即启用）</td></tr>
+      <tr><td class="mono">B3 龙虾 app.py 重复 if（历史 S2）</td><td class="tag-ok">已修</td><td>上轮修复，本轮 py_compile 4/4 复确认</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">02</span>交付物盘点（14/14 在位，证据可点开）</h2>
+  <table>
+    <caption><b>表 2-1</b>　核心项（完整台账见 completion-ledger.md）</caption>
+    <thead><tr><th style="width:36%">交付物</th><th style="width:12%">状态</th><th>证据位置</th></tr></thead>
+    <tbody>
+      <tr><td>ModelHub v1.1.0（12 模型池/自动切换/角色固定/统一接入/心跳/持久化）</td><td class="tag-ok">✅</td><td class="mono">releases/v1.1.0/MANIFEST.txt · :8687</td></tr>
+      <tr><td>龙虾站发布包（页面/台账/海报/文案/规则/交接）</td><td class="tag-ok">✅</td><td class="mono">releases/lobster/ · :8791</td></tr>
+      <tr><td>任务台账系统（鉴权/分页/undo/负载看板）</td><td class="tag-ok">✅</td><td class="mono">releases/taskboard/ · :8792</td></tr>
+      <tr><td>评分卡 60/60 + 竞品报告 + 优点映射</td><td class="tag-ok">✅</td><td class="mono">docs/iteration/ + scoring-report.html</td></tr>
+      <tr><td>五轮验收/核验报告（v1 验收/最终验收/龙虾验收/能力核验/审计）</td><td class="tag-ok">✅</td><td class="mono">docs/final-test/ + releases/{lobster,taskboard}/docs/ + suite/</td></tr>
+      <tr><td>五维基线/复测 + 监控巡检 + 变更日志 v1.2.0</td><td class="tag-ok">✅</td><td class="mono">releases/suite/five_dim_*.json + monitor_* + CHANGELOG</td></tr>
+      <tr><td>依赖锁定（requirements.lock 83 行 + 龙虾 requirements + start.cmd）</td><td class="tag-ok">✅</td><td class="mono">releases/requirements.lock 等</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">03</span>待你拍板的四项（不是技术缺口）</h2>
+  <table>
+    <caption><b>表 3-1</b>　用户决策清单（来源均为台账/报告遗留）</caption>
+    <thead><tr><th style="width:40%">事项</th><th>为什么需要你</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">TASK-005（P1）龙虾占位替换四件套：品牌/价格/供应商/产地</td><td>商业口径只有你能定；给了我就按同流程更新页面与物料</td></tr>
+      <tr><td class="mono">W9 桌面明文密钥文件处置</td><td>你的本地文件；删除/迁移需你授权（建议移入密码管理器）</td></tr>
+      <tr><td class="mono">公网暴露决策</td><td>决定鉴权强度（令牌机制已实测就绪）与部署形态</td></tr>
+      <tr><td class="mono">TASK-002 上游 stream 401 排查</td><td>需商汤账户侧信息；代码已就位，上游放开即自动生效</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">04</span>八条验收标准逐条复核（8/8）</h2>
+  <table>
+    <caption><b>表 4-1</b>　Goal Brief 对照</caption>
+    <thead><tr><th style="width:34%">标准</th><th style="width:12%">判定</th><th>证据</th></tr></thead>
+    <tbody>
+      <tr><td>应做事项已完整盘点（无悬空事项）</td><td class="tag-ok">✓</td><td>completion-ledger.md A/B/C/D 四区全覆盖，C 区显式标为待用户决策而非擅自纳入</td></tr>
+      <tr><td>每一项都有完成证据</td><td class="tag-ok">✓</td><td>A 区 10 项证据均可点开（快照/JSON/服务实测）</td></tr>
+      <tr><td>所有缺口已补齐并复验</td><td class="tag-ok">✓</td><td>B 区 3 项：重启 3/3、令牌清理、编译 4/4 复确认</td></tr>
+      <tr><td>异常情况有预案和记录</td><td class="tag-ok">✓</td><td>D 区指向四次回滚实测 + ALERT 实测 + 各服务异常手册</td></tr>
+      <tr><td>台账可追踪可回查</td><td class="tag-ok">✓</td><td>completion-ledger.md + 任务台账 history + JSONL 调用台账</td></tr>
+      <tr><td>回滚方式明确可执行</td><td class="tag-ok">✓</td><td>CHANGELOG §回滚 + backups/ 机制（四次 SHA256 一证实测）</td></tr>
+      <tr><td>交接包拿来即用</td><td class="tag-ok">✓</td><td>三服务各自 handoff 路由 + 完成度台账 + 本报告同目录归档</td></tr>
+      <tr><td>最终核验逐条通过</td><td class="tag-ok">✓</td><td>表 4-1 本行；未通过项：0（4 项待决策已显式移交）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  COMPLETION AUDIT · Suite v1.2.0 · 2026-09-21<br>
+  证据：completion-ledger.md · 三服务 health 实测 · 14 项交付物路径核查 · 历史五轮验收报告
+</footer>
+
+</div>
+</body>
+</html>

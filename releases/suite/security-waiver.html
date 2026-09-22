@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>交付范围确认 · 安全维度已按你的指令豁免</title>
+<style>
+  :root { --bg:#fcfcfb; --ink:#16161a; --soft:#5d5d66; --faint:#9a9aa2;
+    --line:#e6e6e3; --accent:#b5925a; --accent-wash:#f7f2ea; --mono:"SF Mono",Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--ink); font-family:"Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif; font-size:15.5px; line-height:1.85; font-weight:350; }
+  .wrap { max-width:760px; margin:0 auto; padding:110px 28px 140px; }
+  .kicker { font-size:11px; letter-spacing:.34em; text-transform:uppercase; color:var(--faint); font-family:var(--mono); margin-bottom:36px; }
+  h1 { font-size:clamp(30px, 6vw, 44px); font-weight:250; letter-spacing:-.01em; line-height:1.22; margin-bottom:14px; }
+  h1 b { font-weight:650; }
+  .standfirst { font-size:16.5px; color:var(--soft); max-width:30em; margin-bottom:44px; }
+  .rule { width:56px; height:1px; background:var(--accent); margin:0 0 64px; }
+  section { margin-bottom:88px; }
+  h2 { font-size:12px; letter-spacing:.3em; text-transform:uppercase; color:var(--accent); font-family:var(--mono); font-weight:500; margin-bottom:26px; }
+  p { margin-bottom:20px; max-width:38em; }
+  .big { font-size:19px; line-height:1.75; max-width:32em; }
+  .big b { font-weight:600; }
+  ul.list { list-style:none; max-width:36em; }
+  ul.list li { padding:14px 0; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; }
+  ul.list li .n { font-family:var(--mono); font-size:12px; color:var(--accent); min-width:26px; }
+  ul.list li p { margin:0; }
+  ul.list li b { font-weight:600; }
+  .waiver-box { margin-top:56px; padding-top:36px; border-top:1px solid var(--ink); }
+  .waiver-box .label { font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--faint); font-family:var(--mono); margin-bottom:14px; }
+  .waiver-box p { font-size:17px; line-height:1.8; max-width:32em; }
+  .waiver-box p b { font-weight:650; }
+  table { width:100%; border-collapse:collapse; margin:18px 0 6px; font-size:13.5px; max-width:40em; }
+  th { text-align:left; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); padding:7px 9px; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); }
+  td { padding:8px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .mono { font-family:var(--mono); font-size:12.5px; }
+  footer { margin-top:90px; font-size:12px; color:var(--faint); font-family:var(--mono); letter-spacing:.04em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="kicker">Scope Confirmation · Security Waiver Registered</div>
+<h1>安全维度已按你的指令<b>豁免</b>，<br>交付状态不变。</h1>
+<p class="standfirst">你的指令「安全方面不要考虑」已登记为正式的范围豁免。以下说明它改变了什么、没改变什么，以及哪三件事将来仍会等你一句话。</p>
+<div class="rule"></div>
+
+<section>
+  <h2>豁免生效后的状态</h2>
+  <p class="big">三服务健康 <b>3/3</b>，全部交付物（<b>14/14</b>）与验收记录（<b>60/60 评分 · 28/28 验收 · 15/15 最终验证</b>）<b>维持不变</b>——安全项本来就不在已完成的验收口径之外，本轮只是把"待处理"正式改记为"经你确认豁免"。</p>
+  <p>此前缺点报告里的三条高危（W7 无鉴权 / W8 PII 明文 / W9 桌面密钥）全部转入<b>书面豁免清单</b>：不修、不催、不再出现在待办里。任务台账中关联条目同步标注豁免状态。</p>
+</section>
+
+<section>
+  <h2>豁免清单（正式登记）</h2>
+  <ul class="list">
+    <li><span class="n">W7</span><p><b>三服务无鉴权</b>——写接口对局域网内所有调用者开放。豁免依据：用户 2026-09-21 指令。将来想启用：设 TASKBOARD_TOKEN / LOBSTER_TOKEN / PMH_GATEWAY_TOKEN 即可，机制已实测就位。</p></li>
+    <li><span class="n">W8</span><p><b>PII 明文（手机号）</b>——orders.json 保留原文，接口已脱敏返回。豁免依据同上。将来启用：改回原文返回一行代码。</p></li>
+    <li><span class="n">W9</span><p><b>桌面明文密钥文件</b>——我不再提醒、不再列为待办。文件保留原样，未做任何删除（无授权不动你的文件）。</p></li>
+  </ul>
+</section>
+
+<section>
+  <h2>不改变的部分</h2>
+  <p>功能、性能、验收结论、监控巡检、台账与回滚机制——全部维持已验证状态。三服务当前运行正常（ModelHub :8687 / 龙虾站 :8791 / 任务台账 :8792），数据口径 models=12 / orders=7 / tasks=6。</p>
+</section>
+
+<div class="waiver-box">
+  <div class="label">Still Yours, When Ready</div>
+  <p>豁免是<b>你的决定</b>，我只负责把它执行得干净：不再催、不再计分、不再占用待办。唯一保留的动作是把这份豁免写进交接文档——将来任何人接手这套系统，都需要知道这三扇门是<b>你明知且授权敞开的</b>，而不是遗漏。哪天你想收回，说一句"把安全捡回来"就行，三条的修复路径都在缺点报告里躺着，加起来不超过一个下午。</p>
+</div>
+
+<footer>
+  SECURITY WAIVER · REGISTERED 2026-09-21 · 三服务 3/3 OK · 交付物 14/14
+</footer>
+
+</div>
+</body>
+</html>

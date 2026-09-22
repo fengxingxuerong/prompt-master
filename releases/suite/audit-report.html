@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>诊断审计 · 是否还需要优化</title>
+<style>
+  :root { --paper:#fafaf8; --ink:#1a2530; --soft:#5a6875; --faint:#8b98a5;
+    --line:#dfe3e0; --accent:#0f4c81; --wash:#eef3f7; --orange:#c0392b; --ok:#2e6e4e; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--paper); color:var(--ink); font-family:"Source Han Sans SC","Microsoft YaHei",sans-serif; font-size:14.5px; line-height:1.65; }
+  .wrap { max-width:1040px; margin:0 auto; padding:56px 26px 90px; }
+  header { border-bottom:2px solid var(--ink); padding-bottom:20px; margin-bottom:8px; }
+  .kicker { font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:var(--faint); font-family:var(--mono); margin-bottom:12px; }
+  h1 { font-size:30px; font-weight:750; }
+  .standfirst { margin-top:10px; color:var(--soft); max-width:48em; }
+  .meta { display:flex; gap:28px; margin-top:16px; flex-wrap:wrap; }
+  .meta div .k { font-size:10.5px; letter-spacing:.1em; color:var(--faint); text-transform:uppercase; font-family:var(--mono); }
+  .meta div .v { font-size:13px; font-family:var(--mono); }
+  .verdict { display:inline-block; margin-top:16px; padding:8px 18px; border:1px solid var(--ok); color:var(--ok); font-weight:700; font-family:var(--mono); letter-spacing:.08em; font-size:14px; }
+  section { padding-top:34px; }
+  h2 { font-size:17px; font-weight:700; padding-bottom:7px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+  h2 .no { color:var(--accent); font-family:var(--mono); font-size:12.5px; font-weight:500; margin-right:8px; }
+  p { margin-bottom:10px; max-width:68em; }
+  p.lede { color:var(--soft); }
+  .note { font-size:12.5px; color:var(--faint); }
+  code { font-family:var(--mono); font-size:12.5px; background:var(--wash); padding:1px 5px; }
+  .metrics { display:flex; flex-wrap:wrap; border-top:2px solid var(--accent); border-bottom:1px solid var(--line); margin:10px 0 4px; }
+  .metric { flex:1 1 140px; padding:14px 16px 12px; border-right:1px solid var(--line2); min-width:140px; }
+  .metric:last-child { border-right:none; }
+  .metric .num { font-size:26px; font-weight:800; font-family:var(--mono); color:var(--accent); }
+  .metric .num small { font-size:13px; color:var(--faint); }
+  .metric .lab { font-size:11.5px; color:var(--soft); margin-top:2px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0 6px; font-size:13px; }
+  caption { caption-side:top; text-align:left; font-size:12.5px; color:var(--soft); padding-bottom:7px; }
+  caption b { color:var(--ink); }
+  th { text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); padding:7px 9px; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); }
+  td { padding:7px 9px; border-bottom:1px solid var(--line2); vertical-align:top; }
+  .mono { font-family:var(--mono); font-size:12px; }
+  .tag-ok { color:var(--ok); font-weight:700; } .tag-warn { color:var(--orange); font-weight:700; } .tag-off { color:var(--faint); }
+  footer { margin-top:50px; padding-top:12px; border-top:1px solid var(--line); font-size:12px; color:var(--faint); font-family:var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Diagnostic Audit · Suite v1.1.0+ · 「还需要优化吗」</div>
+  <h1>诊断审计报告</h1>
+  <p class="standfirst">对三服务套件当前状态做四维诊断（内容、视觉/一致性、交互、性能），回答是否还需要优化。审计全部自动化执行、留痕可复核。</p>
+  <div class="meta">
+    <div><div class="k">审计日期</div><div class="v">2026-09-21</div></div>
+    <div><div class="k">对象</div><div class="v">ModelHub :8687 · 龙虾站 :8791 · 任务台账 :8792</div></div>
+    <div><div class="k">检查项</div><div class="v">13 项自动化 + 历史专项</div></div>
+    <div><div class="k">发现</div><div class="v" style="color:var(--ok);font-weight:700;">零高优先级问题</div></div>
+  </div>
+  <div class="verdict">最终结论：不需要立即优化——已达可交付标准；剩余建议均为锦上添花，由你拍板</div>
+</header>
+
+<section>
+  <h2><span class="no">01</span>审计结果（四维 13 项，零问题）</h2>
+  <div class="metrics">
+    <div class="metric"><div class="num">3/3</div><div class="lab">服务健康（200）</div></div>
+    <div class="metric"><div class="num">13/13</div><div class="lab">检查项通过</div></div>
+    <div class="metric"><div class="num">0</div><div class="lab">高优先级问题</div></div>
+    <div class="metric"><div class="num">0</div><div class="lab">中优先级问题</div></div>
+  </div>
+  <table>
+    <caption><b>表 1-1</b>　四维诊断结果（原始数据 audit_v12.json）</caption>
+    <thead><tr><th style="width:22%">维度</th><th style="width:44%">检查内容</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>内容准确完整</td><td>三服务 API 数据口径（models=12 / orders=7 / tasks=6）、台账/订单/用量持久化文件 JSON 可解析</td><td class="tag-ok">全部一致</td></tr>
+      <tr><td>视觉一致性</td><td>三页面/四文档 200 且尺寸与验收时一致（landing 16689B / board 11027B / console 13951B）；无外链资源依赖（离线可开）</td><td class="tag-ok">通过</td></tr>
+      <tr><td>交互与异常</td><td>taskboard 分页 limit=2 返回 2 条；未知任务 404；无效输入 422（历史实测）；ModelHub 未知模型回落</td><td class="tag-ok">通过</td></tr>
+      <tr><td>性能与加载</td><td>全部端点毫秒级（3–29ms）；usage 持久层 persistent_daily 在位；无加载劣化</td><td class="tag-ok">通过</td></tr>
+    </tbody>
+  </table>
+  <p class="note">对照基线：v1.1.0 验收时 10/10 页面、评分 60/60，本轮 13 项巡检无新增问题——优化后未引入回归。</p>
+</section>
+
+<section>
+  <h2><span class="no">02</span>优化项取舍（无模糊项）</h2>
+  <table>
+    <caption><b>表 2-1</b>　候选优化项的处置结论</caption>
+    <thead><tr><th style="width:30%">候选项</th><th style="width:14%">处置</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td>SSE 心跳真流式路径实测（当前仅降级路径覆盖）</td><td class="tag-off">暂不做</td><td>依赖商汤上游开放 stream 路由（401 能力性拒绝是上游行为）；代码已就位，上游放开即自动生效——现在做也无法实测</td></tr>
+      <tr><td>三服务统一令牌鉴权</td><td class="tag-warn">需用户确认</td><td>本地/内网口径下非必需；若要暴露公网则升级为高优先级（ModelHub 已有 PMH_GATEWAY_TOKEN 模式可复制）</td></tr>
+      <tr><td>台账迁 SQLite</td><td class="tag-off">暂不做</td><td>当前 6 条任务、单机 JSON 原子写足够；上量（>500 条）前迁移即可（交接文档已留指引）</td></tr>
+      <tr><td>P1 转发开销直连补测</td><td class="tag-off">暂不做</td><td>上游 401 突发期无直连参照；TASK-002 已在台账排队，稳定期自动可补</td></tr>
+      <tr><td>龙虾站品牌/价格占位替换</td><td class="tag-warn">需用户确认</td><td>TASK-005（P1）等用户给出品牌名、价格表、供应商口径——这是商业决策不是技术优化</td></tr>
+      <tr><td>ModelHub 多 worker / 公网部署</td><td class="tag-off">暂不做</td><td>Goal Brief 范围外（正式上线需单独确认）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">03</span>最终结论</h2>
+  <p class="lede"><b>不需要立即优化。</b>判断依据：① 自动化审计 13 项零问题（含内容、视觉、交互、性能四维）；② 全部高优先级遗留项已在历史迭代中清零（60/60 评分、28/28 验收、15/15 最终验证的记录可回查）；③ 剩余候选项全部属于"需要用户拍板的商业决策"或"依赖外部条件成熟"，技术上无活可干。</p>
+  <p><b>优化过度的风险</b>此刻大于优化不足：每次改动都有回归成本，而当前套件处于三服务全绿、口径一致、可复现可回滚的稳定态。建议切换为<b>按需优化模式</b>——台账里 TASK-002/005/006 已排队，触发条件出现再动，而不是为优化而优化。</p>
+  <p><b>留给你的决策点</b>（都不是技术问题）：① 龙虾站是否转真实运营（TASK-005 四件套）；② 是否需要公网暴露（决定鉴权优先级）；③ 三服务是否作为长期基础设施持续运行（决定监控投入）。</p>
+</section>
+
+<footer>
+  DIAGNOSTIC AUDIT · Suite v1.1.0+ · 2026-09-21<br>
+  原始数据：releases/suite/audit_v12.json · 历史基线：smoke_baseline/retest.json · 评分：60/60 · 最终验收：28/28
+</footer>
+
+</div>
+</body>
+</html>

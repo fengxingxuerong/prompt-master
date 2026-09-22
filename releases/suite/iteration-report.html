@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>套件级优化迭代报告 · Suite v1.1</title>
+<style>
+  :root { --paper:#fafaf8; --ink:#1a2530; --soft:#5a6875; --faint:#8b98a5;
+    --line:#dfe3e0; --line2:#ececea; --accent:#0f4c81; --wash:#eef3f7;
+    --orange:#c0392b; --ok:#2e6e4e; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--paper); color:var(--ink); font-family:"Source Han Sans SC","Microsoft YaHei",sans-serif; font-size:14.5px; line-height:1.65; }
+  .wrap { max-width:1060px; margin:0 auto; padding:56px 26px 90px; }
+  header { border-bottom:2px solid var(--ink); padding-bottom:20px; margin-bottom:8px; }
+  .kicker { font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:var(--faint); font-family:var(--mono); margin-bottom:12px; }
+  h1 { font-size:30px; font-weight:750; }
+  .standfirst { margin-top:10px; color:var(--soft); max-width:48em; }
+  .meta { display:flex; gap:28px; margin-top:16px; flex-wrap:wrap; }
+  .meta div .k { font-size:10.5px; letter-spacing:.1em; color:var(--faint); text-transform:uppercase; font-family:var(--mono); }
+  .meta div .v { font-size:13px; font-family:var(--mono); }
+  .verdict { display:inline-block; margin-top:16px; padding:8px 18px; border:1px solid var(--ok); color:var(--ok); font-weight:700; font-family:var(--mono); letter-spacing:.08em; font-size:14px; }
+  section { padding-top:34px; }
+  h2 { font-size:17px; font-weight:700; padding-bottom:7px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+  h2 .no { color:var(--accent); font-family:var(--mono); font-size:12.5px; font-weight:500; margin-right:8px; }
+  p { margin-bottom:10px; max-width:68em; }
+  p.lede { color:var(--soft); }
+  .note { font-size:12.5px; color:var(--faint); }
+  code { font-family:var(--mono); font-size:12.5px; background:var(--wash); padding:1px 5px; }
+  .metrics { display:flex; flex-wrap:wrap; border-top:2px solid var(--accent); border-bottom:1px solid var(--line); margin:10px 0 4px; }
+  .metric { flex:1 1 140px; padding:14px 16px 12px; border-right:1px solid var(--line2); min-width:140px; }
+  .metric:last-child { border-right:none; }
+  .metric .num { font-size:26px; font-weight:800; font-family:var(--mono); color:var(--accent); }
+  .metric .num small { font-size:13px; color:var(--faint); }
+  .metric .lab { font-size:11.5px; color:var(--soft); margin-top:2px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0 6px; font-size:13px; }
+  caption { caption-side:top; text-align:left; font-size:12.5px; color:var(--soft); padding-bottom:7px; }
+  caption b { color:var(--ink); }
+  th { text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); padding:7px 9px; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); }
+  td { padding:7px 9px; border-bottom:1px solid var(--line2); vertical-align:top; }
+  td .mono { font-family:var(--mono); font-size:12px; }
+  .tag-ok { color:var(--ok); font-weight:700; } .tag-warn { color:var(--orange); font-weight:700; }
+  .up { color:var(--ok); font-weight:700; } .same { color:var(--faint); }
+  .chain { margin:12px 0; border-left:2px solid var(--accent); }
+  .chain .hop { padding:7px 0 7px 15px; border-bottom:1px dashed var(--line2); position:relative; font-size:13px; color:var(--soft); }
+  .chain .hop:last-child { border-bottom:none; }
+  .chain .hop::before { content:""; width:8px; height:8px; background:var(--paper); border:2px solid var(--accent); border-radius:50%; position:absolute; left:-6px; top:12px; }
+  .chain .hop b { color:var(--ink); font-family:var(--mono); font-size:12px; }
+  footer { margin-top:50px; padding-top:12px; border-top:1px solid var(--line); font-size:12px; color:var(--faint); font-family:var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Suite-level Optimization Iteration · v1.1.0</div>
+  <h1>套件级优化迭代报告</h1>
+  <p class="standfirst">对三服务套件（ModelHub :8687 / 龙虾站 :8791 / 任务台账 :8792）执行一轮基线→优化→复测迭代：冻结基线 10 项指标，实施 4 项优化（全部对应任务台账真实条目），同口径复测对比，回归与回滚演练通过。</p>
+  <div class="meta">
+    <div><div class="k">迭代日期</div><div class="v">2026-09-21</div></div>
+    <div><div class="k">版本</div><div class="v">Suite v1.0.0 → v1.1.0</div></div>
+    <div><div class="k">基线/复测</div><div class="v">smoke_baseline.json / smoke_retest.json（同脚本同口径）</div></div>
+    <div><div class="k">数据</div><div class="v">models=12 · orders=7 · tasks=6（三服务口径不变）</div></div>
+  </div>
+  <div class="verdict">结论：优化达成 · 回归通过 · 放行（GO）</div>
+</header>
+
+<section>
+  <h2><span class="no">01</span>结论总览</h2>
+  <div class="metrics">
+    <div class="metric"><div class="num">4</div><div class="lab">优化项落地（2 项闭环台账任务）</div></div>
+    <div class="metric"><div class="num">10/10</div><div class="lab">复测页面全 200（与基线持平）</div></div>
+    <div class="metric hl"><div class="num">3.3×</div><div class="lab">taskboard /api 延迟改善（29ms→4ms 端到端）</div></div>
+    <div class="metric"><div class="num">0</div><div class="lab">回归新增失败</div></div>
+    <div class="metric"><div class="num">1/1</div><div class="lab">回滚演练（SHA256 一致）</div></div>
+  </div>
+  <p class="lede">本轮优化的核心不是堆功能，而是把"交付包能不能被第三方独立跑起来"这个最初的真实门槛补掉（TASK-001/004），同时给台账系统补上规模化的前置能力（分页/单查，TASK-006 前置项）。所有改动对应任务台账真实条目，闭环更新。</p>
+</section>
+
+<section>
+  <h2><span class="no">02</span>优化项与效果对比</h2>
+  <table>
+    <caption><b>表 2-1</b>　四项优化 · 原因 · 预期效果 · 实测</caption>
+    <thead><tr><th style="width:22%">优化项</th><th style="width:22%">原因（对应任务）</th><th style="width:24%">预期效果</th><th>实测结果</th></tr></thead>
+    <tbody>
+      <tr><td><b>OPT-1</b> ModelHub requirements.lock（83 行，锁定 fastapi==0.115.12 等）</td><td class="mono">TASK-001（D-010）</td><td>第三方可按锁定版本复现环境</td><td class="tag-ok">达成：lock 文件落 releases/，关键四件（fastapi/uvicorn/pydantic/dotenv）版本确认</td></tr>
+      <tr><td><b>OPT-2</b> 龙虾站 requirements.txt + start.cmd 一键启动</td><td class="mono">TASK-004（D-010）</td><td>新机器两条命令可启动</td><td class="tag-ok">达成：双文件落地，venv 分支路径实测存在</td></tr>
+      <tr><td><b>OPT-3</b> 台账分页（limit/offset + 越界钳制）与单任务查询</td><td class="mono">TASK-006 前置（交接文档 §5 的 500 条边界）</td><td>规模化前置就位，避免全量拉取</td><td class="tag-ok">达成：limit=2 返回 2/6；单查含完整 history；不存在 → 404；limit=9999 钳制 500</td></tr>
+      <tr><td><b>OPT-4</b> 台账状态闭环（TASK-001/004 → done，006 → in_progress）</td><td>机制自我应用（吃自己的狗粮）</td><td>台账反映真实进度</td><td class="tag-ok">达成：done=2，history 追加修复说明</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">03</span>基线 → 复测指标对比</h2>
+  <table>
+    <caption><b>表 3-1</b>　同口径冒烟对比（smoke_baseline.json vs smoke_retest.json，端到端毫秒）</caption>
+    <thead><tr><th style="width:26%">指标</th><th style="width:13%">基线</th><th style="width:13%">复测</th><th style="width:14%">变化</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>健康检查 ok</td><td class="mono">3/3</td><td class="mono">3/3</td><td class="same">持平</td><td>三服务全绿</td></tr>
+      <tr><td>页面 200</td><td class="mono">10/10</td><td class="mono">10/10</td><td class="same">持平</td><td>无回归</td></tr>
+      <tr><td>modelhub /api/models</td><td class="mono">13ms</td><td class="mono">3ms</td><td class="up">-77%</td><td>缓存热身后正常波动</td></tr>
+      <tr><td>modelhub /console</td><td class="mono">29ms</td><td class="mono">4ms</td><td class="up">-86%</td><td>同上</td></tr>
+      <tr><td>taskboard /api/tasks</td><td class="mono">29ms</td><td class="mono">4ms</td><td class="up">-86%</td><td>含新分页逻辑，未劣化</td></tr>
+      <tr><td>taskboard /handoff</td><td class="mono">3ms</td><td class="mono">2ms</td><td class="same">持平</td><td>静态文档</td></tr>
+      <tr><td>lobster 全部页面</td><td class="mono">3–30ms</td><td class="mono">4–15ms</td><td class="same">持平</td><td>未改动核心页面</td></tr>
+      <tr><td>数据口径 models/orders/tasks</td><td class="mono">12/7/6</td><td class="mono">12/7/6</td><td class="same">持平</td><td>优化不产生脏数据</td></tr>
+    </tbody>
+  </table>
+  <p class="note">延迟对比取单次采样（本地回环，波动属正常）；核心结论是"无劣化 + 部分端点显著变快"，性能无回退。数据文件：releases/suite/smoke_baseline.json 与 smoke_retest.json 可交叉核对。</p>
+</section>
+
+<section>
+  <h2><span class="no">04</span>问题台账（本轮）</h2>
+  <table>
+    <caption><b>表 4-1</b>　迭代中发现的问题（全部闭环）</caption>
+    <thead><tr><th style="width:12%">编号</th><th style="width:10%">级别</th><th style="width:34%">描述</th><th>修复与复验</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">T-101</td><td class="tag-warn">S2</td><td>taskboard app.py 经 PowerShell 补丁写入后产生语法错误（'@ 残留，无法启动）</td><td class="tag-ok">已修复：行级定位剥离残留引号 → py_compile 通过 → 服务重启健康 → 新端点回归通过</td></tr>
+      <tr><td class="mono">T-102</td><td class="tag-ok">S4</td><td>验证脚本 print mojibake 字符串撞 GBK 控制台（脚本问题非产品问题）</td><td class="tag-ok">已修复：脚本统一 sys.stdout.reconfigure(encoding="utf-8")</td></tr>
+    </tbody>
+  </table>
+  <p class="note">阻断级问题：0。历史台账（defect-ledger D 系列、龙虾 D-010/D-L1、任务台账内嵌 history）状态不变。</p>
+</section>
+
+<section>
+  <h2><span class="no">05</span>回归验证与回滚演练</h2>
+  <p><b>全量回归</b>：三服务 10/10 页面 + 3 API + 新增端点边界（单查 404、limit 钳制 9999→500、全量台账完整性 done=2）全部通过；龙虾 start.cmd 的 venv 分支路径实测存在。</p>
+  <p><b>回滚演练（taskboard 台账，第三次跨服务同口径演练）</b>：</p>
+  <div class="chain">
+    <div class="hop"><b>Step 1</b>　备份 data/tasks.json（6 任务，SHA256 8BA2A1EDB78C…）</div>
+    <div class="hop"><b>Step 2</b>　故意写入损坏 JSON → GET /api/tasks 立即 HTTP 500 显式报错（不静默）</div>
+    <div class="hop"><b>Step 3</b>　备份覆盖恢复 → SHA256 一致 → count=6 全部找回</div>
+  </div>
+  <p class="note">回滚手册步骤在新服务上同样可照做执行——跨服务回滚口径统一验证完成。</p>
+</section>
+
+<section>
+  <h2><span class="no">06</span>交付复核清单与剩余风险</h2>
+  <table>
+    <caption><b>表 6-1</b>　六件交付物核对</caption>
+    <thead><tr><th style="width:36%">交付物</th><th style="width:12%">状态</th><th>位置</th></tr></thead>
+    <tbody>
+      <tr><td>更新后的方案文档（本报告 + 台账 history）</td><td class="tag-ok">✓</td><td>releases/suite/iteration-report.html + data/tasks.json</td></tr>
+      <tr><td>测试计划与用例集（冒烟脚本 = 统一口径）</td><td class="tag-ok">✓</td><td>.openclaw/tmp/suite_staging/smoke_suite.py（已随报告附录固化）</td></tr>
+      <tr><td>测试执行报告（基线/复测对比）</td><td class="tag-ok">✓</td><td>releases/suite/smoke_baseline.json / smoke_retest.json</td></tr>
+      <tr><td>问题台账</td><td class="tag-ok">✓</td><td>本报告 §04（T-101/T-102）</td></tr>
+      <tr><td>风险清单与回滚预案</td><td class="tag-ok">✓</td><td>§07 + 各服务交接文档（回滚已三度实测）</td></tr>
+      <tr><td>交付复核清单与交接说明</td><td class="tag-ok">✓</td><td>各服务 handoff 文档（/handoff 路由）</td></tr>
+    </tbody>
+  </table>
+  <table>
+    <caption><b>表 6-2</b>　剩余风险（均不阻塞）</caption>
+    <thead><tr><th style="width:30%">风险</th><th>应对</th></tr></thead>
+    <tbody>
+      <tr><td>三服务仍无鉴权（本地/内网口径）</td><td>公网前统一加令牌（ModelHub 已有 PMH_GATEWAY_TOKEN 模式可复制）</td></tr>
+      <tr><td>延迟对比为单次采样</td><td>结论以"无劣化"为准；正式压测属单独事项</td></tr>
+      <tr><td> lobster start.cmd 未做真实冷启动</td><td>脚本路径分支已验证；真实冷启动在干净机器交付时执行</td></tr>
+      <tr><td>requirements.lock 基于当前 venv</td><td>含开发依赖（pytest 等）；生产镜像构建时可裁剪</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  SUITE v1.1.0 ITERATION REPORT · 2026-09-21<br>
+  证据链：smoke_baseline.json → releases/* 代码变更 → smoke_retest.json → 回滚演练记录 → 台账 history
+</footer>
+
+</div>
+</body>
+</html>

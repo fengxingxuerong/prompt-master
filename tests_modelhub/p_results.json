@@ -1,0 +1,12 @@
+[
+ {
+  "step": "P1_gateway_overhead",
+  "ok": false,
+  "detail": "有效轮次不足：直连=0 网关=4 跳过=4（上游 401/429 突发过于持续，需人工复测）"
+ },
+ {
+  "step": "P2_process_stability",
+  "ok": true,
+  "detail": "health=ok 熔断冷却中=无（全部断路器 closed 属预期健康态）"
+ }
+]

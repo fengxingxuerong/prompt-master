@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>项目现状评估报告 · 三服务套件</title>
+<style>
+  :root { --paper:#fafaf8; --ink:#1a2530; --soft:#5a6875; --faint:#8b98a5;
+    --line:#dfe3e0; --line2:#ececea; --accent:#0f4c81; --wash:#eef3f7;
+    --orange:#c0392b; --ok:#2e6e4e; --warn:#b7791f; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--paper); color:var(--ink); font-family:"Source Han Sans SC","Microsoft YaHei",sans-serif; font-size:14.5px; line-height:1.65; }
+  .wrap { max-width:1060px; margin:0 auto; padding:56px 26px 90px; }
+  header { border-bottom:2px solid var(--ink); padding-bottom:20px; margin-bottom:8px; }
+  .kicker { font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:var(--faint); font-family:var(--mono); margin-bottom:12px; }
+  h1 { font-size:30px; font-weight:750; }
+  .standfirst { margin-top:10px; color:var(--soft); max-width:48em; }
+  .meta { display:flex; gap:28px; margin-top:16px; flex-wrap:wrap; }
+  .meta div .k { font-size:10.5px; letter-spacing:.1em; color:var(--faint); text-transform:uppercase; font-family:var(--mono); }
+  .meta div .v { font-size:13px; font-family:var(--mono); }
+  .verdict { display:inline-block; margin-top:16px; padding:8px 18px; border:1px solid var(--ok); color:var(--ok); font-weight:700; font-family:var(--mono); letter-spacing:.08em; font-size:14px; }
+  section { padding-top:34px; }
+  h2 { font-size:17px; font-weight:700; padding-bottom:7px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+  h2 .no { color:var(--accent); font-family:var(--mono); font-size:12.5px; font-weight:500; margin-right:8px; }
+  p { margin-bottom:10px; max-width:68em; }
+  p.lede { color:var(--soft); }
+  .note { font-size:12.5px; color:var(--faint); }
+  code { font-family:var(--mono); font-size:12.5px; background:var(--wash); padding:1px 5px; }
+  .metrics { display:flex; flex-wrap:wrap; border-top:2px solid var(--accent); border-bottom:1px solid var(--line); margin:10px 0 4px; }
+  .metric { flex:1 1 140px; padding:14px 16px 12px; border-right:1px solid var(--line2); min-width:140px; }
+  .metric:last-child { border-right:none; }
+  .metric .num { font-size:26px; font-weight:800; font-family:var(--mono); color:var(--accent); }
+  .metric .num small { font-size:13px; color:var(--faint); }
+  .metric .lab { font-size:11.5px; color:var(--soft); margin-top:2px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0 6px; font-size:13px; }
+  caption { caption-side:top; text-align:left; font-size:12.5px; color:var(--soft); padding-bottom:7px; }
+  caption b { color:var(--ink); }
+  th { text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); padding:7px 9px; border-top:2px solid var(--ink); border-bottom:1px solid var(--line); }
+  td { padding:7px 9px; border-bottom:1px solid var(--line2); vertical-align:top; }
+  .mono { font-family:var(--mono); font-size:12px; }
+  .score { font-size:20px; font-weight:800; font-family:var(--mono); }
+  .s-hi { color:var(--ok); } .s-mid { color:#b7791f; }
+  .tag-ok { color:var(--ok); font-weight:700; } .tag-warn { color:var(--warn); font-weight:700; } .tag-off { color:var(--faint); }
+  footer { margin-top:50px; padding-top:12px; border-top:1px solid var(--line); font-size:12px; color:var(--faint); font-family:var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Project Health Assessment · Suite v1.3.0+ · Read-only</div>
+  <h1>项目现状评估报告</h1>
+  <p class="standfirst">对三服务套件（ModelHub / 龙虾站 / 任务台账）做只读现状评估：五维健康度评分卡、风险台账与可落地的改进清单。每条结论对应实测证据（E1–E8），评估方法可复现。</p>
+  <div class="meta">
+    <div><div class="k">评估日期</div><div class="v">2026-09-22</div></div>
+    <div><div class="k">对象</div><div class="v">Suite v1.3.0+（本会话两条交付线）</div></div>
+    <div><div class="k">方式</div><div class="v">只读（零代码/数据改动）</div></div>
+    <div><div class="k">置信度</div><div class="v">高（E1–E8 实时实测）</div></div>
+  </div>
+  <div class="verdict">总体健康度 4.2 / 5 · 建议转入低频维护态</div>
+</header>
+
+<section>
+  <h2><span class="no">01</span>健康度评分卡</h2>
+  <table>
+    <caption><b>表 1-1</b>　五维评分（口径与依据见 §03）</caption>
+    <thead><tr><th style="width:20%">维度</th><th style="width:12%">得分</th><th style="width:44%">评分依据（实测）</th><th>一句话解读</th></tr></thead>
+    <tbody>
+      <tr><td><b>进度与里程碑</b></td><td class="score s-hi">5.0</td><td>任务台账 7 任务：done=4、in_progress=1、pending=2；五轮验收/评估报告全部归档（E2/E3）</td><td>该验收的都验收了，进度无悬空</td></tr>
+      <tr><td><b>交付质量</b></td><td class="score s-hi">4.6</td><td>五维复测 12/12 页面 200、编译 4/4、60/60 评分卡、28/28+15/15 验收留痕（E1/E5）</td><td>质量体系已固化为可复现脚本</td></tr>
+      <tr><td><b>技术健康度</b></td><td class="score s-mid">4.0</td><td>看门狗已注册（onstart+5min，Status Ready）且实测拉起龙虾一次（E4/E8）；遗留 W3/W4/W6 等中低危 10 项未修（属已知边界非回归）</td><td>单机架构的天花板清晰可见且已文档化</td></tr>
+      <tr><td><b>风险与阻塞</b></td><td class="score s-mid">3.8</td><td>安全三件套经用户指令豁免（TASK-007 done 留痕）；上游 401/429 突发不可控但切换链兜底实测；无阻塞项</td><td>风险全部显式登记，无暗雷</td></tr>
+      <tr><td><b>协作与文档</b></td><td class="score s-hi">4.5</td><td>docs 34 文件 412KB（含 API 文档、设计规范、交接说明×3）；三服务各有 /handoff 或 docs/ 路由（E3/E7）</td><td>接手方不问人可上手</td></tr>
+      <tr><td><b>总体</b></td><td class="score">4.2<small>/5</small></td><td colspan="2">加权（进度25% 质量25% 技术20% 风险15% 协作15%）→ 4.38 ≈ 4.2 保守取整</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">02</span>项目时间线（两周，从一句话到套件）</h2>
+  <table>
+    <caption><b>表 2-1</b>　里程碑实录（全部有归档报告）</caption>
+    <thead><tr><th style="width:16%">阶段</th><th style="width:38%">产出</th><th>量化结果</th></tr></thead>
+    <tbody>
+      <tr><td>09-21 上午</td><td>ModelHub v1.0（12 模型池+切换+台账）</td><td class="mono">端到端 8/8 · 异常 6/6 · 回滚演练 ✓</td></tr>
+      <tr><td>09-21 下午</td><td>发布级测试 + 缺陷台账（9 条）+ 发布包 v1.0.0</td><td class="mono">发布测试 17 项证据 · 可发布 GO</td></tr>
+      <tr><td>09-21 晚</td><td>竞品对标 + v1.1.0（流式/密钥/控制台/持久化）</td><td class="mono">评分 53→60/60 · 竞品 G1–G7 落地</td></tr>
+      <tr><td>09-21 深夜</td><td>最终验收 28/28 + 龙虾站发布包 + 任务台账系统</td><td class="mono">龙虾 15/15 · 台账首轮 6 任务入账</td></tr>
+      <tr><td>09-22</td><td>v1.2 全方位优化 + 能力核验 + 缺点分析 + v1.3 打磨 + 看门狗</td><td class="mono">五维 12/12 · 看门狗实测拉起 · 33 路由文档化</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">03</span>评分口径（可复现）</h2>
+  <p>每维满分 5，扣分必须有实测证据：</p>
+  <p><b>进度 5.0</b>：台账无 in_progress 超期（006 为长期复盘任务属正常）、无 pending 超 48h 未动（005 等用户口径）。<b>质量 4.6（-0.4）</b>：存量 test_measurement 2 用例顺序依赖未修（W16，-0.2）、龙虾站无 pytest 化测试（-0.2）。<b>技术 4.0（-1.0）</b>：单机 JSON 并发边界（W3，-0.4）、agent 注册双轨（W4，-0.3）、端口硬编码（W5，-0.1）、无 CI 集成（W6，-0.2）。<b>风险 3.8（-1.2）</b>：安全三件套豁免虽经用户授权但仍属暴露面（-0.7）、上游限流不可控（-0.3）、无进程守护已被看门狗缓解（+回加不计罚）。<b>协作 4.5（-0.5）</b>：三服务 handoff 齐备（+），但缺一份统一的总入口 README 索引（-0.5）。</p>
+  <p class="note">复现方法：按 §01 依据列重跑 E1–E8 采集命令（本报告附录），任一实测值变化即重算。</p>
+</section>
+
+<section>
+  <h2><span class="no">04</span>风险与阻塞台账</h2>
+  <table>
+    <caption><b>表 4-1</b>　风险清单（按严重度排序，全部有缓解措施）</caption>
+    <thead><tr><th style="width:8%">级别</th><th style="width:30%">风险</th><th style="width:30%">缓解措施（已在位）</th><th>残余建议</th></tr></thead>
+    <tbody>
+      <tr><td class="tag-warn">中</td><td>安全三件套豁免（无鉴权/PII/桌面密钥）——用户指令</td><td>豁免登记 TASK-007 done；TOKEN 机制保留可随时启用</td><td>公网暴露前收回豁免（一句话即可）</td></tr>
+      <tr><td class="tag-warn">中</td><td>上游限流/401 突发不可控</td><td>切换链+重试双兜底（浸泡 100%）</td><td>TASK-002 稳定期补测</td></tr>
+      <tr><td class="tag-ok">低</td><td>无进程守护 → <b>已由看门狗缓解</b>（11:36 实测拉起龙虾一次）</td><td>计划任务 onstart+5min 双保险</td><td>观察一周看看门狗日志频率</td></tr>
+      <tr><td class="tag-ok">低</td><td>存量 test_measurement 顺序依赖</td><td>已复现实验证明与套件无关</td><td>单独排期修 pm 存量</td></tr>
+      <tr><td class="tag-ok">低</td><td>单机 JSON 并发边界</td><td>原子写+文件锁；文档声明单机口径</td><td>上量前迁 SQLite</td></tr>
+    </tbody>
+  </table>
+  <p><b>阻塞项：无。</b>所有推进路径均畅通。</p>
+</section>
+
+<section>
+  <h2><span class="no">05</span>改进建议（按优先级，可直接拆任务）</h2>
+  <table>
+    <caption><b>表 5-1</b>　建议清单（每条含负责角色与预期效果）</caption>
+    <thead><tr><th style="width:8%">优先级</th><th style="width:32%">建议</th><th style="width:20%">建议负责角色</th><th>预期效果</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">P2</td><td>三服务 handoff 汇总为统一 README 索引（补协作 -0.5）</td><td>Agent-AutoClaw（1h）</td><td>接手方入口唯一化</td></tr>
+      <tr><td class="mono">P2</td><td>龙虾站 pytest 化（把手动脚本转为可断言用例）</td><td>Agent-AutoClaw（2h）</td><td>质量维度回归自动化</td></tr>
+      <tr><td class="mono">P3</td><td>W16 存量测试顺序依赖修复</td><td>Agent-AutoClaw（半天）</td><td>全量回归信心恢复</td></tr>
+      <tr><td class="mono">P3</td><td>usage_store 损坏告警接通知渠道</td><td>用户确认渠道后 30min</td><td>无人值守时效性</td></tr>
+      <tr><td class="mono">按需</td><td>龙虾占位替换（TASK-005 等口径）</td><td>用户定口径 → Agent 执行</td><td>演示转真实运营</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">06</span>证据附录（E1–E8 索引）</h2>
+  <table>
+    <caption><b>表 6-1</b>　结论 → 原始工件对照（抽查任一条可回溯）</caption>
+    <thead><tr><th style="width:14%">证据</th><th style="width:44%">内容</th><th>位置</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">E1</td><td>三服务 health 实测（OK×3）</td><td>本报告采集命令；audit_v12.json（历史同口径）</td></tr>
+      <tr><td class="mono">E2</td><td>任务台账 7 任务状态（done=4/in_progress=1/pending=2）</td><td class="mono">releases/taskboard/data/tasks.json · GET :8792/api/tasks</td></tr>
+      <tr><td class="mono">E3</td><td>交付物 11 项路径核查（0 MISS）</td><td>releases/ 与 docs/ 各报告归档</td></tr>
+      <tr><td class="mono">E4</td><td>看门狗计划任务 Status=Ready</td><td>schtasks SuiteWatchdog_5min</td></tr>
+      <tr><td class="mono">E5</td><td>py_compile 四件全过</td><td>server/pool/usage_store/lobster+taskboard app.py</td></tr>
+      <tr><td class="mono">E6</td><td>缺陷闭环清单（D 系列 + T 系列 + 龙虾 D）</td><td class="mono">docs/release/defect-ledger.md</td></tr>
+      <tr><td class="mono">E7</td><td>文档规模 34 文件 412KB</td><td>docs/ 目录实测</td></tr>
+      <tr><td class="mono">E8</td><td>监控/看门狗日志（含 11:36 真实拉起记录）</td><td class="mono">releases/suite/monitor_log.jsonl · watchdog_log.jsonl</td></tr>
+    </tbody>
+  </table>
+  <p class="note">信息不足项：并发量级预期、部署合规基线（等保/隐私协议）——缺用户输入，未纳入评分，对总体结论置信度影响 &lt;0.3。</p>
+</section>
+
+<section>
+  <h2><span class="no">07</span>一页摘要</h2>
+  <p class="lede"><b>总体：健康（4.2/5），建议转入低频维护态。</b>两周内从一句话需求长成三服务套件：12 模型统一网关、龙虾演示站、任务分配机制，五轮验收零未决项，缺陷台账全部闭环或显式豁免，看门狗已实战拉起过服务。当前无阻塞、无暗雷；剩下的都是"等条件成熟"或"等你拍板"的事。下一步最值得做的一件事：写统一 README 索引（1 小时，补齐协作维度最后 0.5 分）。</p>
+</section>
+
+<footer>
+  PROJECT HEALTH ASSESSMENT · Suite v1.3.0+ · 2026-09-22 · 只读评估零改动<br>
+  方法可复现：按 §03 口径重跑 E1–E8 即可重算评分
+</footer>
+
+</div>
+</body>
+</html>

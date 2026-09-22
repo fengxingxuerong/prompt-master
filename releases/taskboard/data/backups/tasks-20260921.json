@@ -1,0 +1,198 @@
+{
+ "version": 1,
+ "seq": 6,
+ "tasks": [
+  {
+   "task_id": "TASK-20260921-001",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "ModelHub 补 requirements 锁定文件",
+   "desc": "从 prompt-master venv 导出 pip freeze 到 releases/taskboard 同级 requirements.lock，验证干净环境可装。验收：requirements.lock 存在且版本与 venv 一致。",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P2",
+   "due": "2026-09-28",
+   "status": "pending",
+   "acceptance": "requirements.lock 存在、pip install --dry-run 通过",
+   "source": "缺陷台账 D-010 + 交接文档风险清单（交付包依赖说明）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-28）",
+     "before": null
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-002",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "ModelHub P1 转发开销补测（上游稳定期）",
+   "desc": "上游 401 突发结束后运行 release_test.py 的 p1，补测直连 vs 网关转发开销。验收：拿到有效直连样本 ≥3 或确认口径替代仍成立。",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P3",
+   "due": "2026-10-12",
+   "status": "pending",
+   "acceptance": "P1 用例真实数据补全或口径替代结论更新",
+   "source": "最终验收报告 §04 性能口径说明（401 突发期直连参照缺失）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P3，截止 2026-10-12）",
+     "before": null
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-003",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "ModelHub v1.2：SSE 心跳保活 + usage 持久聚合",
+   "desc": "流式连接加 SSE 心跳注释行防代理超时断流；/v1/usage 改为持久聚合表。验收：长连接 >5 分钟不断，usage 重启后可查历史。",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P3",
+   "due": "2026-10-12",
+   "status": "pending",
+   "acceptance": "两个子项各有一条自动化验证",
+   "source": "竞品对标评分报告 §07 遗留风险（v1.2 候选清单）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P3，截止 2026-10-12）",
+     "before": null
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-004",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+   "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+   "assignee": "用户",
+   "priority": "P2",
+   "due": "2026-09-28",
+   "status": "blocked",
+   "acceptance": "requirements.txt + start.cmd 存在且文档引用",
+   "source": "龙虾最终验收报告 §06（D-010 建议级）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P2，截止 2026-09-28）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-21 20:40:51",
+     "action": "状态→进行中；改派→Agent-AutoClaw",
+     "actor": "演练-错误指派",
+     "detail": "误改派演示",
+     "before": {
+      "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+      "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "pending",
+      "acceptance": "requirements.txt + start.cmd 存在且文档引用"
+     }
+    },
+    {
+     "ts": "2026-09-21 20:40:51",
+     "action": "撤销",
+     "actor": "Agent-AutoClaw",
+     "detail": "回滚「状态→进行中；改派→Agent-AutoClaw」（2026-09-21 20:40:51）；恢复 assignee=Agent-AutoClaw status=pending",
+     "before": {
+      "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+      "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "in_progress",
+      "acceptance": "requirements.txt + start.cmd 存在且文档引用"
+     }
+    },
+    {
+     "ts": "2026-09-21 20:41:14",
+     "action": "状态→阻塞",
+     "actor": "异常手册演练",
+     "detail": "负责人超 48h 无响应，暂挂",
+     "before": {
+      "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+      "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "pending",
+      "acceptance": "requirements.txt + start.cmd 存在且文档引用"
+     }
+    },
+    {
+     "ts": "2026-09-21 20:41:14",
+     "action": "改派→用户",
+     "actor": "异常手册演练",
+     "detail": "按手册改派至最终确认人裁决",
+     "before": {
+      "title": "龙虾站 D-010 闭环：requirements + 一键启动脚本",
+      "desc": "龙虾发布包补 requirements.txt（fastapi/uvicorn/pydantic 版本锁定）+ start.cmd 一键启动。验收：新机器按 README 两条命令可启动。",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P2",
+      "due": "2026-09-28",
+      "status": "blocked",
+      "acceptance": "requirements.txt + start.cmd 存在且文档引用"
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-005",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "龙虾站占位替换四件套（品牌/价格/供应商/产地口径）",
+   "desc": "确认品牌名、真实定价（或参考价来源）、供应商与产地宣称口径——四项决定页面与物料能否转正。验收：用户给出四项书面确认。",
+   "assignee": "用户",
+   "priority": "P1",
+   "due": "2026-09-24",
+   "status": "pending",
+   "acceptance": "用户书面确认四项，替换后页面与物料同步更新",
+   "source": "龙虾 handoff.md §3 + 社媒文案合规红线（真实运营门槛）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 用户（P1，截止 2026-09-24）",
+     "before": null
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260921-006",
+   "created_at": "2026-09-21 20:40:21",
+   "created_by": "Agent-AutoClaw",
+   "title": "任务分配机制使用一周复盘",
+   "desc": "使用本台账一周后复盘：指派误率、撤销次数、逾期分布，决定是否迁 SQLite 与加鉴权。验收：复盘纪要一份。",
+   "assignee": "用户",
+   "priority": "P3",
+   "due": "2026-10-12",
+   "status": "pending",
+   "acceptance": "复盘纪要落 docs/",
+   "source": "分配规则 §6 撤销纪律 + 交接说明 §3 日常维护（机制落地后首次复盘）",
+   "history": [
+    {
+     "ts": "2026-09-21 20:40:21",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 用户（P3，截止 2026-10-12）",
+     "before": null
+    }
+   ]
+  }
+ ]
+}

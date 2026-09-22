@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>澳洲龙虾发布包 · 最终验收报告</title>
+<style>
+  :root { --bg:#0b0f14; --panel:#121a23; --ink:#f2f0ea; --soft:#b9c0c6; --faint:#78828c;
+    --line:#243040; --orange:#ff6b35; --teal:#3ec9c0; --wash:#3ec9c014; --mono:Consolas,monospace; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--ink); font-family:"Source Han Sans SC","Microsoft YaHei",sans-serif; font-size:14.5px; line-height:1.65; }
+  .wrap { max-width:1020px; margin:0 auto; padding:0 24px 90px; }
+  header { padding:56px 0 32px; border-bottom:1px solid var(--line); position:relative; }
+  header::after { content:""; position:absolute; right:0; top:0; width:160px; height:3px; background:linear-gradient(90deg, var(--teal), var(--orange)); }
+  .kicker { font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); margin-bottom:12px; font-family:var(--mono); }
+  h1 { font-size:32px; font-weight:750; letter-spacing:-.01em; }
+  .standfirst { margin-top:12px; color:var(--soft); max-width:44em; }
+  .meta-row { display:flex; gap:32px; margin-top:20px; flex-wrap:wrap; }
+  .meta-item .k { font-size:11px; letter-spacing:.1em; color:var(--faint); text-transform:uppercase; }
+  .meta-item .v { font-size:13px; font-family:var(--mono); }
+  .verdict { display:inline-block; margin-top:18px; padding:9px 18px; border:1px solid var(--teal); color:var(--teal); font-size:15px; font-weight:700; font-family:var(--mono); letter-spacing:.08em; }
+  section { padding-top:40px; }
+  h2 { font-size:20px; font-weight:700; padding-bottom:8px; border-bottom:1px solid var(--line); margin-bottom:18px; }
+  h2 .no { color:var(--orange); font-family:var(--mono); font-size:13px; font-weight:500; margin-right:9px; }
+  p { margin-bottom:11px; max-width:66em; }
+  p.lede { color:var(--soft); }
+  .note { font-size:12.5px; color:var(--faint); }
+  code { font-family:var(--mono); font-size:12.5px; background:var(--panel); border:1px solid var(--line); padding:1px 5px; }
+  .metrics { display:flex; flex-wrap:wrap; border-top:2px solid var(--orange); border-bottom:1px solid var(--line); margin:8px 0; }
+  .metric { flex:1 1 140px; padding:15px 16px 13px; border-right:1px solid var(--line); min-width:140px; }
+  .metric:last-child { border-right:none; }
+  .metric .num { font-size:28px; font-weight:800; font-family:var(--mono); color:var(--teal); }
+  .metric .num small { font-size:14px; color:var(--faint); }
+  .metric .lab { font-size:11.5px; color:var(--soft); margin-top:3px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0 6px; font-size:13px; }
+  caption { caption-side:top; text-align:left; font-size:12.5px; color:var(--soft); padding-bottom:7px; }
+  caption b { color:var(--ink); font-weight:700; }
+  th { text-align:left; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); font-weight:600; padding:7px 9px; border-top:2px solid var(--orange); border-bottom:1px solid var(--line); }
+  td { padding:7px 9px; border-bottom:1px solid #1a2430; vertical-align:top; }
+  .mono { font-family:var(--mono); font-size:12px; }
+  .tag-ok { color:var(--teal); font-weight:700; } .tag-warn { color:var(--orange); font-weight:700; } .tag-off { color:var(--faint); }
+  .chain { margin:14px 0; border-left:2px solid var(--teal); }
+  .chain .hop { padding:8px 0 8px 16px; border-bottom:1px dashed var(--line); position:relative; font-size:13px; color:var(--soft); }
+  .chain .hop:last-child { border-bottom:none; }
+  .chain .hop::before { content:""; width:8px; height:8px; background:var(--bg); border:2px solid var(--orange); border-radius:50%; position:absolute; left:-6px; top:13px; }
+  .chain .hop b { color:var(--ink); font-family:var(--mono); font-size:12px; }
+  blockquote { margin:14px 0; padding:11px 16px; border-left:3px solid var(--teal); background:var(--wash); font-size:13px; color:var(--soft); max-width:66em; }
+  footer { margin-top:56px; padding-top:14px; border-top:1px solid var(--line); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Aussie Lobster Release · Final Acceptance · Demo Scope</div>
+  <h1>最终验收报告</h1>
+  <p class="standfirst">对澳洲龙虾发布包（演示口径）执行验收级测试：核心流程、异常三分支、编码健壮性、回滚演练，全程留痕。品牌/价格/供应商为占位内容（显式假设），真实运营前按交接文档替换。</p>
+  <div class="meta-row">
+    <div class="meta-item"><div class="k">验收日期</div><div class="v">2026-09-21</div></div>
+    <div class="meta-item"><div class="k">版本</div><div class="v">lobster v1.0.0-demo</div></div>
+    <div class="meta-item"><div class="k">访问地址</div><div class="v">http://127.0.0.1:8791（/ 与 /ledger 与 /poster）</div></div>
+    <div class="meta-item"><div class="k">数据口径</div><div class="v">模拟数据 · demo 模式</div></div>
+  </div>
+  <div class="verdict">放行结论：可发布（演示口径 GO）</div>
+</header>
+
+<section>
+  <h2><span class="no">01</span>结论总览</h2>
+  <div class="metrics">
+    <div class="metric"><div class="num">15/15</div><div class="lab">验收用例全过（0 失败）</div></div>
+    <div class="metric"><div class="num">3</div><div class="lab">异常分支全部走通并入账</div></div>
+    <div class="metric"><div class="num">1</div><div class="lab">真实缺陷发现并修复（D-L1）</div></div>
+    <div class="metric"><div class="num">6</div><div class="lab">交付物（页/台账/海报/文案/规则/交接）</div></div>
+  </div>
+  <p class="lede">六条验收标准全部满足。过程中发现并修复一个真实编码缺陷（D-L1：不带 charset 的 JSON 中文请求体被存为 mojibake），以中间件方式无损还原，修复后干净路径回归通过。遗留事项均为"真实运营前"占位替换与合规确认，不阻塞演示发布。</p>
+</section>
+
+<section>
+  <h2><span class="no">02</span>核心流程验证（7/7）</h2>
+  <table>
+    <caption><b>表 2-1</b>　端到端实测（全部真实 HTTP 交互，台账 JSONL/JSON 落盘）</caption>
+    <thead><tr><th style="width:34%">用例</th><th style="width:12%">结果</th><th>实测证据</th></tr></thead>
+    <tbody>
+      <tr><td>E2E-1 创建测试订单</td><td class="tag-ok">PASS</td><td class="mono">LOB-20260921-6651 · B级×1 · ¥599 · status=pending</td></tr>
+      <tr><td>E2E-2 台账可查</td><td class="tag-ok">PASS</td><td class="mono">GET /api/orders count=1，字段完整（spec_label 中文正确）</td></tr>
+      <tr><td>E2E-3 正向流转</td><td class="tag-ok">PASS</td><td class="mono">pending→confirmed→shipped，history 逐条追加</td></tr>
+      <tr><td>E2E-4 死虾赔付分支</td><td class="tag-ok">PASS</td><td class="mono">shipped→dead_compensation，补发备注入 history</td></tr>
+      <tr><td>E2E-5 缺货分支</td><td class="tag-ok">PASS</td><td class="mono">LOB-…-F8B9 confirmed→out_of_stock（改期+加量口径）</td></tr>
+      <tr><td>E2E-6 退款分支</td><td class="tag-ok">PASS</td><td class="mono">LOB-…-3088 →refunded（发货前全额退）</td></tr>
+      <tr><td>E2E-8 无效输入</td><td class="tag-ok">PASS</td><td class="mono">空名/坏手机号/未知规格/超量 → HTTP 422 显式拒绝（幂等无脏数据）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">03</span>编码健壮性（本轮发现的真实缺陷）</h2>
+  <p><b>D-L1（S3 已修复）</b>：不带 <code>charset</code> 的 JSON 请求体中文被按 Latin-1 字节序列写入台账，产生 mojibake（"????"）。<b>根因</b>：部分客户端（如 PowerShell Invoke-RestMethod）序列化行为非 UTF-8。<b>修复</b>：FastAPI 中间件统一拦截 POST/PATCH JSON 体，对可无损往返的 mojibake 执行 <code>latin-1→utf-8</code> 重解码，无法修复的原样透传（不掩盖）。</p>
+  <table>
+    <caption><b>表 3-1</b>　修复后回归（verify_dl1_v4.py 实测输出）</caption>
+    <thead><tr><th style="width:34%">用例</th><th style="width:12%">结果</th><th>证据</th></tr></thead>
+    <tbody>
+      <tr><td>坏客户端（latin-1 mojibake body）POST</td><td class="tag-ok">PASS</td><td class="mono">HTTP 200，LOB-…-F92C</td></tr>
+      <tr><td>坏客户端 PATCH 中文 note</td><td class="tag-ok">PASS</td><td class="mono">history note="冷链延误赔付演示"（已还原）</td></tr>
+      <tr><td>干净 UTF-8 路径回归</td><td class="tag-ok">PASS</td><td class="mono">"干净路径备注OK" 原样入库，中间件不误伤</td></tr>
+    </tbody>
+  </table>
+  <p class="note">浏览器表单与台账页前端走 fetch+JSON.stringify（恒 UTF-8），本缺陷仅影响脚本类客户端；中间件保证任意客户端落库一致。</p>
+</section>
+
+<section>
+  <h2><span class="no">04</span>回滚演练（1/1）</h2>
+  <div class="chain">
+    <div class="hop"><b>Step 1</b>　备份 data/orders.json（3 笔订单，SHA256 72048BBAED2D…）</div>
+    <div class="hop"><b>Step 2</b>　故意写入损坏 JSON <span class="mono">{BROKEN</span></div>
+    <div class="hop"><b>Step 3</b>　GET /api/orders 立即 500 + 中文报错指明"台账文件损坏，可用 backups 恢复"（不静默、不丢数据——备份文件完好）</div>
+    <div class="hop"><b>Step 4</b>　copy 备份覆盖恢复 → SHA256 一致 → count=3 全部找回</div>
+  </div>
+  <p class="note">结论：回滚步骤可执行、可恢复，操作记录已留档（交接文档 §4）。</p>
+</section>
+
+<section>
+  <h2><span class="no">05</span>验收标准逐条复核</h2>
+  <table>
+    <caption><b>表 5-1</b>　六条验收标准（Goal Brief 对照）</caption>
+    <thead><tr><th style="width:36%">标准</th><th style="width:12%">判定</th><th>证据</th></tr></thead>
+    <tbody>
+      <tr><td>产品页上线且内容完整（品种/规格价格/冷链/订购入口，移动端+桌面端）</td><td class="tag-ok">✓</td><td>落地页 200（15.1KB）；响应式断点 760/820px；内联 SVG 主视觉（无外链依赖，离线可开）</td></tr>
+      <tr><td>每笔订购都有可追踪台账</td><td class="tag-ok">✓</td><td>演示订单 LOB-20260921-6651：提交→入账→三次流转→history 4 条，GET 实时可见</td></tr>
+      <tr><td>三类异常有规则且各演示一条分支</td><td class="tag-ok">✓</td><td>缺货/死虾/退款三分支全部走通并入账（表 2-1 E2E-4/5/6）</td></tr>
+      <tr><td>部署与交接文档齐全</td><td class="tag-ok">✓</td><td>docs/handoff.md：访问方式、日常操作、占位替换指南、责任分工</td></tr>
+      <tr><td>可执行的回滚方式且已演练</td><td class="tag-ok">✓</td><td>§04 演练记录（备份→破坏→恢复→一致）</td></tr>
+      <tr><td>交付前逐条复核并出报告</td><td class="tag-ok">✓</td><td>本报告；台账/报告/代码三方可交叉核对</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="no">06</span>遗留清单与真实运营门槛</h2>
+  <table>
+    <caption><b>表 6-1</b>　不阻塞演示发布、但真实运营前必须处理</caption>
+    <thead><tr><th style="width:34%">事项</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>占位替换四件套</td><td>品牌名、真实定价、供应商/产地口径、支付说明——替换指南在 handoff.md §3</td></tr>
+      <tr><td>鉴权与公网防护</td><td>演示版无鉴权；公网前必须加管理口令 + 限流 + HTTPS 反代</td></tr>
+      <tr><td>进口/检疫/食品经营资质</td><td>Goal Brief 范围外，用户自行办理确认后方可真实交易</td></tr>
+      <tr><td>支付通道</td><td>范围外；接入后金额字段从"参考价"切"实付价"</td></tr>
+      <tr><td>台账存储升级</td><td>单机 JSON → SQLite/PostgreSQL（上量前）</td></tr>
+      <tr><td class="mono">D-L1 残余边界</td><td>中间件只修可无损往返的 mojibake；真乱码（双重损坏）仍原样入库并可见——符合"不掩盖"原则</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <div>Aussie Lobster Release · Final Acceptance Report · Demo Scope</div>
+  <div>证据：releases/lobster/data/orders.json · data/backups/* · 会话交互日志</div>
+  <div>2026-09-21</div>
+</footer>
+
+</div>
+</body>
+</html>

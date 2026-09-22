@@ -585,3 +585,63 @@ def test_ci_lower_never_below_the_scale_floor():
     assert agg.sem > 1.5, "构造大 SEM 才有意义"
     assert agg.ci_lower == 1.0, f"下界必须夹在量纲下限上，实际 {agg.ci_lower}"
     assert agg.passed is False
+
+
+# ---- 评分提示词自身的可核对性（rubric 里写的算式必须真的等于 WEIGHTS）----
+def test_every_rubric_example_arithmetic_matches_weights() -> None:
+    """`<评分样例>` 里每条「加权 = 0.25×4 + … = 6.35」都必须自己算得通。
+
+    为什么值得钉：示例是评委真正照抄的对象。示例算式与 `WEIGHTS` 不一致时，模型学到的是
+    那套错的权重分配，而代码按对的权重算——分歧直接进分数，且没人会发现，因为双方都
+    "照标准办了"。顺带把没写算式的两条用字面维度分校验一遍（它们也参与校准）。
+    """
+    import re
+
+    from pm.prompts import EVALUATOR_SYSTEM
+    from pm.schemas import WEIGHTS
+
+    order = [
+        "task_completion",
+        "format_adherence",
+        "constraint_compliance",
+        "robustness",
+        "quality",
+    ]
+    canonical = [WEIGHTS[k] for k in order]
+    formulas = re.findall(
+        r"加权 = ((?:[\d.]+×[\d.]+)(?: \+ [\d.]+×[\d.]+)*) = ([\d.]+)", EVALUATOR_SYSTEM
+    )
+    assert len(formulas) >= 2, (
+        f"带算式的样例少于 2 条（找到 {len(formulas)}），确认是有意的再改这条"
+    )
+    for expr, total in formulas:
+        pairs = [tuple(map(float, term.split("×"))) for term in expr.split(" + ")]
+        assert len(pairs) == 5, f"每条示例都该给满 5 个维度：{expr}"
+        assert [round(w, 3) for w, _ in pairs] == canonical, f"权重序列与 WEIGHTS 不符：{expr}"
+        got = round(sum(w * d for w, d in pairs), 2)
+        assert got == float(total), f"示例算错：{expr} = {got}，却写着 {total}"
+
+    # 样例 2 / 样例 3 只列了维度值，同样要能复现它们印在提示词里的总分
+    dims2 = [WEIGHTS[k] * v for k, v in zip(order, [9, 9, 8, 8, 8], strict=True)]
+    assert round(sum(dims2), 2) == 8.45, "样例 2 的维度值与 8.45 不符"
+    dims3 = [WEIGHTS[k] * v for k, v in zip(order, [3, 8, 3, 1, 2], strict=True)]
+    assert round(sum(dims3), 2) == 3.55, "样例 3 的维度值与 3.55 不符"
+
+
+def test_core_deliverable_anchor_and_its_anti_overkill_guard() -> None:
+    """新加的锚必须成对存在：扣"核心缺位"，同时**不许误杀真·信息不足**。
+
+    只留前半句会把"正确拒答"也压到 7 分以下——那是用一个偏差换另一个偏差。
+    人工校准里同一批数据既有该扣的（6.0）也有不该扣的（8.5/8.7），分界就是这条护栏；
+    而且护栏必须**可执行**（先在 issues 里点名输入中哪条信息本可支撑结论，点不出来就不许扣），
+    否则它只是一句态度，挡不住模型的条件反射式扣分。
+    """
+    from pm.prompts import EVALUATOR_SYSTEM
+
+    assert "核心交付物缺位" in EVALUATOR_SYSTEM
+    assert "封顶 **7.0**" in EVALUATOR_SYSTEM
+    assert "真正的信息不足" in EVALUATOR_SYSTEM and "别反向误杀" in EVALUATOR_SYSTEM
+    guard = EVALUATOR_SYSTEM[EVALUATOR_SYSTEM.index("真正的信息不足") :]
+    assert "必须在 issues 里点名" in guard and "就按不足处理" in guard
+    # 护栏要举出"该给高分"的具体输入形状，否则抽象表述容易被忽略
+    assert "你们平台真的很差劲" in EVALUATOR_SYSTEM

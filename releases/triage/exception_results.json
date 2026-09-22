@@ -1,0 +1,71 @@
+[
+ {
+  "case": "E1-空主题",
+  "expect": 422,
+  "got": 422,
+  "pass": true,
+  "detail": "{\"detail\":[{\"type\":\"string_too_short\",\"loc\":[\"body\",\"subject\"],\"msg\":\"String should have at least 1 character\",\"input\":\""
+ },
+ {
+  "case": "E2-超长输入(15.4k字符)",
+  "expect": 200,
+  "got": 200,
+  "pass": true,
+  "wall_s": 43.7,
+  "consensus": "logistics",
+  "in_chars": 18200
+ },
+ {
+  "case": "E3-未知会话反馈",
+  "expect": 404,
+  "got": 404,
+  "pass": true
+ },
+ {
+  "case": "E4-非法评分",
+  "expect": 422,
+  "got": 422,
+  "pass": true
+ },
+ {
+  "case": "E5-网关坏模型名",
+  "expect": "4xx/502 非崩溃",
+  "got": null,
+  "pass": false,
+  "detail": "TimeoutError: timed out"
+ },
+ {
+  "case": "E6-台账留痕",
+  "pass": true,
+  "ledger_total": 98,
+  "review": 84,
+  "late_review": 0,
+  "feedback": 0,
+  "consensus": 14,
+  "fail_sample_fields": [
+   "error",
+   "in_chars",
+   "kind",
+   "latency_ms",
+   "model",
+   "ok",
+   "out_chars",
+   "seat",
+   "session_id",
+   "ts",
+   "usage"
+  ]
+ },
+ {
+  "case": "E7-异常后健康检查",
+  "pass": true,
+  "body": {
+   "status": "ok",
+   "service": "triage-panel",
+   "version": "1.1.0",
+   "reviewers": 6,
+   "ledger_entries": 98,
+   "sessions": 14
+  }
+ }
+]

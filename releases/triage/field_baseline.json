@@ -1,0 +1,132 @@
+{
+ "v10_baseline_sessions": [
+  {
+   "session_id": "SES-20260922-8FE25E",
+   "subject": "订单 88231 重复扣款且客服三天未回应",
+   "wall_ms": 60236,
+   "n_valid": 2,
+   "n_total": 6,
+   "consensus": "billing",
+   "sev": "P1"
+  },
+  {
+   "session_id": "SES-20260922-8C44D9",
+   "subject": "API 调用大面积超时",
+   "wall_ms": 60237,
+   "n_valid": 4,
+   "n_total": 6,
+   "consensus": "technical",
+   "sev": "P1"
+  },
+  {
+   "session_id": "SES-20260922-DAB0D6",
+   "subject": "快递显示签收但没收到货",
+   "wall_ms": 60033,
+   "n_valid": 4,
+   "n_total": 6,
+   "consensus": "logistics",
+   "sev": "P2"
+  },
+  {
+   "session_id": "SES-20260922-D3406B",
+   "subject": "你们的产品就是垃圾！",
+   "wall_ms": 60043,
+   "n_valid": 4,
+   "n_total": 6,
+   "consensus": "complaint",
+   "sev": "P1"
+  },
+  {
+   "session_id": "SES-20260922-C0B341",
+   "subject": "退款为什么还没到账，而且发票开错了",
+   "wall_ms": 5785,
+   "n_valid": 6,
+   "n_total": 6,
+   "consensus": "billing",
+   "sev": "P2"
+  },
+  {
+   "session_id": "SES-20260922-79C3AB",
+   "subject": "退款",
+   "wall_ms": 35056,
+   "n_valid": 6,
+   "n_total": 6,
+   "consensus": "billing",
+   "sev": "P2"
+  }
+ ],
+ "v11_retest_sessions": [
+  {
+   "session_id": "SES-20260922-108BB7",
+   "subject": "API 调用大面积超时",
+   "wall_ms": 9271,
+   "majority_ms": 7523,
+   "n_valid": 3,
+   "consensus": "technical"
+  },
+  {
+   "session_id": "SES-20260922-2F9785",
+   "subject": "快递显示签收但没收到货",
+   "wall_ms": 9099,
+   "majority_ms": 6302,
+   "n_valid": 3,
+   "consensus": "logistics"
+  },
+  {
+   "session_id": "SES-20260922-427CE0",
+   "subject": "订单 88231 重复扣款且客服三天未回应",
+   "wall_ms": 23814,
+   "majority_ms": 8995,
+   "n_valid": 3,
+   "consensus": "billing"
+  },
+  {
+   "session_id": "SES-20260922-3D811D",
+   "subject": "你们的产品就是垃圾！",
+   "wall_ms": 12208,
+   "majority_ms": 7053,
+   "n_valid": 3,
+   "consensus": "complaint"
+  },
+  {
+   "session_id": "SES-20260922-D843E6",
+   "subject": "退款为什么还没到账，而且发票开错了",
+   "wall_ms": 8537,
+   "majority_ms": 3554,
+   "n_valid": 3,
+   "consensus": "billing"
+  },
+  {
+   "session_id": "SES-20260922-E0E1D8",
+   "subject": "退款",
+   "wall_ms": 41739,
+   "majority_ms": 10756,
+   "n_valid": 3,
+   "consensus": "billing"
+  },
+  {
+   "session_id": "SES-20260922-00FC4B",
+   "subject": "退款",
+   "wall_ms": 60024,
+   "majority_ms": 16585,
+   "n_valid": 3,
+   "consensus": "billing"
+  },
+  {
+   "session_id": "SES-20260922-A731FB",
+   "subject": "超长输入压测",
+   "wall_ms": 43726,
+   "majority_ms": 41879,
+   "n_valid": 3,
+   "consensus": "logistics"
+  },
+  {
+   "session_id": "SES-20260922-52C516",
+   "subject": "API 又挂了",
+   "wall_ms": 60256,
+   "majority_ms": 5587,
+   "n_valid": 3,
+   "consensus": "technical"
+  }
+ ]
+}

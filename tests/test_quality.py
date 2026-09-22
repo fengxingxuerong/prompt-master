@@ -325,7 +325,11 @@ def test_optimize_node_records_quality_warning(monkeypatch):
 
 
 def test_full_loop_with_meta_leak_optimizer(monkeypatch):
-    """优化器持续元话语泄漏时：质量门重试 + 警告注入评估，流程仍能跑完。"""
+    """优化器持续元话语泄漏时：质量门重试 + 警告注入评估，流程仍能跑完。
+
+    W16 修复：改用 fake_backend 上下文（ContextVar 任务级隔离），不再改动
+    模块级 _SCENARIO/_GLOBAL——之前全量跑会污染 test_measurement 的聚合状态。
+    """
     import pm.testing as t
 
     calls = {"n": 0}
@@ -336,20 +340,19 @@ def test_full_loop_with_meta_leak_optimizer(monkeypatch):
             return META_LEAK_PROMPT, _fake_meta()
         return t._fake_plain(role, system, user, overrides)
 
-    monkeypatch.setattr("pm.llm.plain_call", fake_plain)
-    monkeypatch.setattr("pm.llm.structured_call", t._fake_structured)
-    monkeypatch.setenv("PM_EVAL_CACHE", "0")
-    monkeypatch.setenv("PM_TARGET_CACHE", "0")
-    t.reset()
-    t._SCENARIO = "progress"
-    try:
+    with t.fake_backend("progress"):
+        monkeypatch.setattr("pm.llm.structured_call", t._fake_structured)
+        monkeypatch.setattr("pm.llm.plain_call", fake_plain)
         app = build_app()
         final = app.invoke(
             initial_state(task="分析销售数据", target_model="fake", n_test_cases=2),
             {"configurable": {"thread_id": "quality-loop"}, "recursion_limit": 100},
         )
-    finally:
-        t._SCENARIO = "progress"
+        assert final["status"] in ("passed", "max_iterations", "failed", "early_stopped")
+        assert len(final.get("prompt_quality_issues", [])) >= 1
+        eval_traces = [t_ for t_ in final["trace"] if t_["node"] == "evaluate"]
+        assert eval_traces, "evaluate 应被执行"
+        assert calls["n"] >= 1
     # 流程仍能到达终态
     assert final["status"] in ("passed", "max_iterations", "failed", "early_stopped")
     # 质量警告被记录

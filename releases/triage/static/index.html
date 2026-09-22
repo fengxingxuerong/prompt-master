@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多模型会审台 · 客服工单智能分诊</title>
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--card:#1c2330;--line:#2a3342;--ink:#e6edf3;--mut:#8b98a9;--blue:#4f8ff7;--green:#3fb27f;--red:#e0645c;--amber:#d9a53f;--mono:"Cascadia Code",Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;padding:28px 18px}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-size:22px;font-weight:650;margin-bottom:4px}
+.sub{color:var(--mut);font-size:13px;margin-bottom:22px}
+.cols{display:grid;grid-template-columns:380px 1fr;gap:18px}
+@media(max-width:860px){.cols{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.panel h2{font-size:14px;color:var(--mut);font-weight:600;letter-spacing:.06em;margin-bottom:12px;text-transform:uppercase}
+label{display:block;font-size:12.5px;color:var(--mut);margin:10px 0 4px}
+input,textarea{width:100%;background:var(--card);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:9px 12px;font:inherit}
+textarea{min-height:130px;resize:vertical}
+button{background:var(--blue);border:none;border-radius:8px;color:#fff;padding:10px 20px;font:600 14px/1 inherit;cursor:pointer;margin-top:14px}
+button:hover{filter:brightness(1.1)}
+button:disabled{background:#3a4356;cursor:not-allowed}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--mut);cursor:pointer;font-size:12.5px;margin-top:8px;display:inline-block}
+.demo:hover{color:var(--ink);border-color:var(--blue)}
+.empty{color:var(--mut);text-align:center;padding:50px 0;font-size:13.5px}
+.status{font-family:var(--mono);font-size:12.5px;color:var(--amber);padding:6px 0}
+.consensus{display:flex;gap:14px;flex-wrap:wrap;margin:14px 0}
+.cbox{flex:1;min-width:130px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.cbox .v{font-size:22px;font-weight:700;font-family:var(--mono)}
+.cbox .v.cat{color:var(--blue);font-size:17px}
+.cbox .v.p1{color:var(--red)} .cbox .v.p2{color:var(--amber)} .cbox .v.p3{color:var(--green)}
+.cbox .k{color:var(--mut);font-size:11.5px;margin-top:3px}
+table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:600;font-size:12px}
+td.mono{font-family:var(--mono);font-size:12px}
+.ok{color:var(--green)} .bad{color:var(--red)}
+.dissent{margin-top:12px;font-size:13px;color:var(--mut)}
+.dissent b{color:var(--ink)}
+.action-bar{display:flex;gap:10px;align-items:center;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.action-bar select,.action-bar input{width:auto}
+.action-bar select{min-width:110px}
+.action-bar input{width:280px}
+.fb-msg{color:var(--green);font-size:13px;margin-left:8px}
+.err{background:#2a1a1a;border:1px solid var(--red);border-radius:8px;padding:10px 14px;color:#f0b0aa;font-size:13px;margin-top:10px}
+.ledger-link{color:var(--blue);text-decoration:none;font-size:12.5px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>多模型会审台 <span style="color:var(--mut);font-weight:400;font-size:15px">客服工单智能分诊</span></h1>
+<div class="sub">6 个 LLM 评委并行研判 → 共识汇总 → 人工反馈 · 调用台账全程留痕 · <a class="ledger-link" href="/api/ledger?limit=20" target="_blank">查看台账</a></div>
+<div class="cols">
+  <div class="panel">
+    <h2>工单录入</h2>
+    <label>工单主题</label>
+    <input id="subject" placeholder="例：订单重复扣款">
+    <label>工单正文</label>
+    <textarea id="body" placeholder="客户反馈详情…"></textarea>
+    <button id="go" onclick="submitTicket()">提交会审</button>
+    <span class="demo" onclick="loadDemo()">载入示例工单</span>
+    <div id="err" class="err" style="display:none"></div>
+  </div>
+  <div class="panel">
+    <h2>会审结果</h2>
+    <div id="status" class="status"></div>
+    <div id="empty" class="empty">提交工单后，6 位 AI 评委将并行给出分类/严重度/动作研判，这里展示共识结果。</div>
+    <div id="result" style="display:none">
+      <div class="consensus" id="cbox"></div>
+      <div class="dissent" id="dissent"></div>
+      <table id="vtable">
+        <thead><tr><th>评委</th><th>模型</th><th>分类</th><th>严重度</th><th>置信</th><th>延迟</th><th>状态</th></tr></thead>
+        <tbody id="vbody"></tbody>
+      </table>
+      <div class="action-bar">
+        <label style="margin:0">反馈：</label>
+        <select id="rating"><option value="5">5 很准</option><option value="4">4 较准</option><option value="3">3 一般</option><option value="2">2 偏差</option><option value="1">1 误判</option></select>
+        <input id="comment" placeholder="修正意见（可选）">
+        <button onclick="sendFeedback()">提交反馈</button>
+        <span id="fbmsg" class="fb-msg"></span>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<script>
+const CATS={billing:"账单",technical:"技术",logistics:"物流",complaint:"投诉",other:"其他"};
+function loadDemo(){
+  document.getElementById("subject").value="订单 88231 重复扣款且客服三天未回应";
+  document.getElementById("body").value="客户在 9 月 19 日下单后发现自己的银行卡被扣了两次 199 元，联系在线客服三次均回复机器人话术，未得到退款。客户表示再不解决就到消费者平台投诉，并要求赔偿。订单号 88231，支付流水后四位 6672。";
+}
+function submitTicket(){
+  const subject=document.getElementById("subject").value.trim();
+  const body=document.getElementById("body").value.trim();
+  const err=document.getElementById("err");
+  if(!subject||!body){err.style.display="block";err.textContent="主题和正文都不能为空";return}
+  err.style.display="none";
+  const btn=document.getElementById("go");btn.disabled=true;
+  document.getElementById("empty").style.display="none";
+  document.getElementById("result").style.display="none";
+  document.getElementById("status").textContent="6 位评委并行研判中…（约 10-130s，视最慢评委而定）";
+  fetch("/api/reviews",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({subject,body})})
+    .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
+    .then(s=>{render(s);btn.disabled=false;document.getElementById("status").textContent=""})
+    .catch(e=>{document.getElementById("status").textContent="";err.style.display="block";err.textContent="会审失败："+e.message;btn.disabled=false});
+}
+function render(s){
+  document.getElementById("result").style.display="block";
+  const c=s.consensus;
+  const sevCls=c&&c.severity==="P1"?"p1":(c&&c.severity==="P2"?"p2":"p3");
+  document.getElementById("cbox").innerHTML=`
+    <div class="cbox"><div class="v cat">${c&&c.category?CATS[c.category]||c.category:"—"}</div><div class="k">共识分类（${c&&c.votes||"0/0"} 票）</div></div>
+    <div class="cbox"><div class="v ${sevCls}">${c&&c.severity||"—"}</div><div class="k">严重度</div></div>
+    <div class="cbox"><div class="v">${c&&c.agreement!=null?Math.round(c.agreement*100)+"%":"—"}</div><div class="k">一致率</div></div>
+    <div class="cbox"><div class="v">${s.wall_ms!=null?(s.wall_ms/1000).toFixed(1)+"s":"—"}</div><div class="k">会审耗时</div></div>
+    <div style="width:100%;font-size:13px;color:#c4cdd8">建议动作：${c&&c.action||"—"}</div>`;
+  let d="";
+  if(c&&c.dissent&&c.dissent.length)d+=`<div><b>异议：</b>${c.dissent.map(x=>x.seat+"→"+(CATS[x.category]||x.category)).join("、")}</div>`;
+  if(c&&c.failed&&c.failed.length)d+=`<div style="color:var(--red)"><b>失格评委：</b>${c.failed.map(x=>x.seat+"（"+(x.reason||"").slice(0,40)+"…）").join("、")}</div>`;
+  document.getElementById("dissent").innerHTML=d;
+  document.getElementById("vbody").innerHTML=s.verdicts.map(v=>{
+    const vd=v.verdict;
+    return `<tr>
+      <td>${v.seat}</td><td class="mono">${v.model}</td>
+      <td>${vd?(CATS[vd.category]||vd.category):"—"}</td>
+      <td>${vd?vd.severity:"—"}</td>
+      <td class="mono">${vd?vd.confidence:"—"}</td>
+      <td class="mono">${(v.latency_ms/1000).toFixed(1)}s</td>
+      <td class="${v.verdict?"ok":"bad"}">${v.verdict?"有效":(v.parse_error?"解析失败":"调用失败")}</td></tr>`;
+  }).join("");
+  document.getElementById("fbmsg").textContent="";
+}
+function sendFeedback(){
+  const sid=window._sid;if(!sid)return;
+  fetch(`/api/sessions/${sid}/feedback`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({rating:parseInt(document.getElementById("rating").value),comment:document.getElementById("comment").value})})
+    .then(r=>r.json()).then(()=>{document.getElementById("fbmsg").textContent="已留痕 ✓"});
+}
+const _origRender=render;render=function(s){window._sid=s.session_id;_origRender(s)};
+</script>
+</body>
+</html>
