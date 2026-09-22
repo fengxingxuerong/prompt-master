@@ -1,6 +1,6 @@
 {
  "version": 1,
- "seq": 10,
+ "seq": 11,
  "tasks": [
   {
    "task_id": "TASK-20260921-001",
@@ -485,6 +485,43 @@
       "desc": "自编客服工单分诊案例：6 LLM 并行研判+共识+台账+反馈闭环。实战发现 P-01~P-05 全部修复；总墙钟 155.5s→72.4s(-53%)；异常 7/7；回滚演练数据无损。报告 releases/triage/triage-report.html",
       "assignee": "Agent-AutoClaw",
       "priority": "P2",
+      "due": "2026-09-22",
+      "status": "pending",
+      "acceptance": ""
+     }
+    }
+   ]
+  },
+  {
+   "task_id": "TASK-20260922-011",
+   "created_at": "2026-09-22 17:05:22",
+   "created_by": "Agent-AutoClaw",
+   "title": "v1.4.1 全面缺口修复（G-01~G-06）",
+   "desc": "版本管理恢复+tag、看门狗/监控纳入8793、CI补releases套件、会审台8用例、轮转自动化、告警落盘notifications.jsonl（含恢复留痕实测）；回归三套件全过；报告 releases/suite/fix-report-v141.html",
+   "assignee": "Agent-AutoClaw",
+   "priority": "P1",
+   "due": "2026-09-22",
+   "status": "done",
+   "acceptance": "",
+   "source": "",
+   "history": [
+    {
+     "ts": "2026-09-22 17:05:22",
+     "action": "创建并指派",
+     "actor": "Agent-AutoClaw",
+     "detail": "指派给 Agent-AutoClaw（P1，截止 2026-09-22）",
+     "before": null
+    },
+    {
+     "ts": "2026-09-22 17:05:22",
+     "action": "状态→已完成",
+     "actor": "Agent-AutoClaw",
+     "detail": "6/6 闭环，回归全过，tag v1.4.1",
+     "before": {
+      "title": "v1.4.1 全面缺口修复（G-01~G-06）",
+      "desc": "版本管理恢复+tag、看门狗/监控纳入8793、CI补releases套件、会审台8用例、轮转自动化、告警落盘notifications.jsonl（含恢复留痕实测）；回归三套件全过；报告 releases/suite/fix-report-v141.html",
+      "assignee": "Agent-AutoClaw",
+      "priority": "P1",
       "due": "2026-09-22",
       "status": "pending",
       "acceptance": ""
