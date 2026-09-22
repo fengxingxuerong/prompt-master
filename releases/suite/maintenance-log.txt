@@ -1,0 +1,40 @@
+﻿=== MAINTENANCE BASELINE 2026-09-22 17:35:42 ===
+检修对象: releases/triage (会审台) · 目标: G-07 异步化 + G-12 SSE 进度
+窗口: 即时起 ~30min · 滚动重启中断 <10s · 执行人 Agent-AutoClaw
+--- 检查点 1: 四服务在线 ---
+port 8687: LISTENING
+port 8791: LISTENING
+port 8792: LISTENING
+port 8793: LISTENING
+--- 检查点 2: 会审台版本与状态 ---
+version=1.1.1 sessions=16 ledger=112 reviewers=6
+--- 检查点 3: 测试资产 ---
+triage tests: 
+--- 检查点 4: git 锚点 ---
+last: 6a25a8a docs: 能力探针台账补全（C11-C14/边界E系列/抽查复
+tag v1.4.1 exists: True
+--- 检查点 5: 回滚锚点文件 ---
+app_v1.0.py.bak: True
+app_v1.1.py.bak: True
+--- 检查点 6: 问题定位（G-07 现状读数） ---
+同步接口行为: POST /api/reviews 阻塞至会审完成（实测基线 60.4s，最长可 ~130s）
+
+=== IMPL & RECHECK (17:38-18:05) ===
+改动: app.py v1.1.1→v1.2.0（异步提交/SSE/事件总线），备份 app_v1.1.1.py.bak 留存原始状态
+复验1 测试套件: 10/10 passed（8 旧用例修正版本断言+wait=1 显式路径，新增 2 用例覆盖异步与 SSE）
+复验2 真机交互 V1: 异步提交 31ms 返回（旧同步基线 60417ms，提速 99.95%）
+复验3 真机交互 V2: SSE 收到 progress=6（逐票实时）+ done=1
+复验4 真机交互 V3: 终态 status=done consensus=technical/P2 majority_at=6091ms
+复验5 真机交互 V4: wait=1 兼容路径返回 status=done（同步行为保留）
+VERDICT: PASS
+
+=== ROLLBACK DRILL (18:07) ===
+回退: v1.2.0 → v1.1.1（app_v1.1.1.py.bak）重启 ROLLED_BACK v1.1.1 sessions=20 ledger=139
+恢复: v1.1.1 → v1.2.0（app_v1.2.0.py.bak）重启 RESTORED v1.2.0 sessions=20 ledger=139
+DATA_INTACT: yes（往返回退数据零丢失）
+
+=== ISSUE LEDGER UPDATE ===
+G-07 同步阻塞: 已解决（异步提交+wait=1 兼容）
+G-12 UI 无实时进度: 已解决服务端（SSE 端点在位；前端 UI 接 SSE 列入遗留）
+遗留: 前端 index.html 仍走旧轮询文案 → 下轮接 SSE
+遗留: TASK-002 stream 401 / G-09 龙虾四件套 → 待用户信息

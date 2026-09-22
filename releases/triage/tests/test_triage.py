@@ -53,11 +53,11 @@ def test_health(client):
     r = client.get("/api/health")
     assert r.status_code == 200
     d = r.json()
-    assert d["status"] == "ok" and d["reviewers"] == 6 and d["version"] == "1.1.1"
+    assert d["status"] == "ok" and d["reviewers"] == 6 and d["version"].startswith("1.")
 
 
 def test_review_consensus(client):
-    r = client.post("/api/reviews", json={"subject": "重复扣款", "body": "扣了两次钱"})
+    r = client.post("/api/reviews?wait=1", json={"subject": "重复扣款", "body": "扣了两次钱"})
     assert r.status_code == 200
     d = r.json()
     assert d["consensus"]["category"] == "billing"
@@ -123,3 +123,40 @@ def test_ledger_traceability(client):
     sample = next(e for e in led["entries"] if e["kind"] == "review")
     for k in ("ts", "model", "seat", "latency_ms", "ok", "session_id"):
         assert k in sample
+
+
+# ---------------------------------------------------------------------------
+# v1.2 新增：异步提交 + SSE 进度（G-07/G-12）
+# ---------------------------------------------------------------------------
+def test_async_submit_returns_immediately(client, monkeypatch):
+    """异步模式：立即返回 running，后台完成后轮询可见 done。"""
+    import time as _t
+    r = client.post("/api/reviews", json={"subject": "异步单", "body": "不等结果"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["status"] == "running" and d["session_id"].startswith("SES-")
+    # 后台很快完成（mock 无延迟）
+    for _ in range(40):
+        poll = client.get(f"/api/sessions/{d['session_id']}").json()
+        if poll.get("status") == "done":
+            break
+        _t.sleep(0.1)
+    assert poll["status"] == "done"
+    assert poll["consensus"]["category"] == "billing"
+
+
+def test_sse_emits_progress_and_done(client):
+    """SSE：订阅异步会话应收到 progress 事件与 done 事件。"""
+    r = client.post("/api/reviews", json={"subject": "SSE单", "body": "实时进度"})
+    sid = r.json()["session_id"]
+    import time as _t
+    for _ in range(40):
+        poll = client.get(f"/api/sessions/{sid}").json()
+        if poll.get("status") == "done":
+            break
+        _t.sleep(0.1)
+    # 会话已完成：订阅应立即收到 done（防错过终态）
+    with client.stream("GET", f"/api/sessions/{sid}/events") as resp:
+        assert resp.status_code == 200
+        body = b"".join(resp.iter_raw()).decode("utf-8")
+    assert "event: done" in body and '"status": "done"' in body

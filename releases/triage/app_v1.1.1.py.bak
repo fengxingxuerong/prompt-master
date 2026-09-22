@@ -10,7 +10,6 @@ v1.0 实战暴露的问题 → v1.1 修复对照：
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 import threading
@@ -183,24 +182,7 @@ def parse_verdict(text: str) -> dict:
 
 
 # ---------- 核心流程 ----------
-_progress_queues: dict[str, list] = {}
-_q_lock = threading.Lock()
-
-
-def _push_event(sid: str, event: str, data: dict) -> None:
-    """向该会话的 SSE 订阅者投递事件（无订阅者则静默丢弃）。"""
-    with _q_lock:
-        qs = _progress_queues.get(sid)
-        if qs:
-            for q in qs:
-                q.append((event, json.dumps(data, ensure_ascii=False)))
-
-
 def run_panel(session: dict) -> None:
-    _run_panel_core(session, notify=True)
-
-
-def _run_panel_core(session: dict, notify: bool = False) -> None:
     ticket = session["ticket"]
     user_msg = f"工单主题：{ticket['subject']}\n工单正文：{ticket['body']}"
     t0 = time.time()
@@ -219,12 +201,6 @@ def _run_panel_core(session: dict, notify: bool = False) -> None:
                        "error": r.get("error"), "in_chars": len(user_msg),
                        "out_chars": len(r.get("content", "") or ""),
                        "usage": r.get("usage", {})})
-        if notify:
-            _push_event(session["session_id"], "progress", {
-                "type": "review", "seat": rv["seat"], "model": rv["model"],
-                "ok": r["ok"], "has_verdict": bool(rec.get("verdict")),
-                "latency_ms": r["latency_ms"],
-                "elapsed_ms": round((time.time() - t0) * 1000)})
         if not r["ok"]:
             rec["error"] = r["error"]
             return rec
@@ -276,10 +252,6 @@ def _run_panel_core(session: dict, notify: bool = False) -> None:
                    "n_ok": sum(1 for v in verdicts if v.get("verdict")),
                    "n_total": len(verdicts)})
     save_session(session)
-    if notify:
-        _push_event(session["session_id"], "done", {
-            "session_id": session["session_id"], "status": "done",
-            "consensus": session["consensus"], "wall_ms": session["wall_ms"]})
 
 
 def build_consensus(verdicts: list) -> dict:
@@ -316,24 +288,13 @@ class ReviewIn(BaseModel):
 
 
 @app.post("/api/reviews")
-def create_review(req: ReviewIn, wait: int = 0):
-    """wait=1 保留旧行为（同步等完成）；默认异步：立即返回 session_id，后台会审。
-
-    G-07：异步模式解决多用户排队——提交即得 session_id，前端走 SSE/轮询取进度。
-    """
+def create_review(req: ReviewIn):
     sid = f"SES-{time.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
     session = {"session_id": sid, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                "ticket": req.model_dump(), "status": "running",
                "verdicts": [], "consensus": None, "feedback": None}
-    if wait:
-        run_panel(session)
-        return session
-    save_session(session)  # 先落 running 状态，轮询/SSE 立即可见
-    threading.Thread(target=_run_panel_core, args=(session, True),
-                     daemon=True, name=f"panel-{sid}").start()
-    return {"session_id": sid, "status": "running",
-            "events": f"/api/sessions/{sid}/events",
-            "poll": f"/api/sessions/{sid}"}
+    run_panel(session)
+    return session
 
 
 @app.get("/api/sessions")
@@ -373,48 +334,6 @@ def give_feedback(sid: str, fb: FeedbackIn):
     return {"ok": True, "feedback": s["feedback"]}
 
 
-@app.get("/api/sessions/{sid}/events")
-async def session_events(sid: str):
-    """SSE 实时进度：progress 事件逐票推送，done 事件收尾。
-
-    G-12：前端实时看到每位评委的研判结果，替代整段盲等。
-    订阅时若会话已完成，直接推 done（避免错过终态）。
-    """
-    from fastapi.responses import StreamingResponse
-
-    async def gen():
-        q: list = []
-        with _q_lock:
-            _progress_queues.setdefault(sid, []).append(q)
-        try:
-            all_s = load_sessions()
-            sess = all_s.get(sid)
-            if sess and sess.get("status") == "done":
-                yield f"event: done\ndata: {json.dumps({'session_id': sid, 'status': 'done', 'consensus': sess.get('consensus'), 'wall_ms': sess.get('wall_ms')}, ensure_ascii=False)}\n\n"
-                return
-            idle = 0
-            while idle < 600:  # 最长 ~5 分钟无事件则断开
-                if q:
-                    event, data = q.pop(0)
-                    idle = 0
-                    yield f"event: {event}\ndata: {data}\n\n"
-                    if event == "done":
-                        return
-                else:
-                    idle += 1
-                    yield ": keep-alive\n\n"
-                    await asyncio.sleep(0.5)
-        finally:
-            with _q_lock:
-                qs = _progress_queues.get(sid)
-                if qs and q in qs:
-                    qs.remove(q)
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache",
-                                      "X-Accel-Buffering": "no"})
-
-
 @app.get("/api/reviewer_health")
 def reviewer_health():
     return load_health()
@@ -436,7 +355,7 @@ def health():
     led_n = 0
     if LEDGER.exists():
         led_n = len(LEDGER.read_text(encoding="utf-8").strip().splitlines())
-    return {"status": "ok", "service": "triage-panel", "version": "1.2.0",
+    return {"status": "ok", "service": "triage-panel", "version": "1.1.1",
             "reviewers": len(REVIEWERS), "ledger_entries": led_n,
             "sessions": len(load_sessions())}
 

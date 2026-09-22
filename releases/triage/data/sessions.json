@@ -1312,5 +1312,273 @@
   "feedback": null,
   "wall_ms": 60286,
   "majority_ms": 8215
+ },
+ "SES-20260922-8387FD": {
+  "session_id": "SES-20260922-8387FD",
+  "ts": "2026-09-22T17:37:12",
+  "ticket": {
+   "subject": "重复扣款",
+   "body": "扣了两次钱",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 12,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "48 小时内退款",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\": \"billing\", \"severity\": \"P1\", \"action\": \"48 小时内退款\", \"confidence\": 0.9}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 12,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "48 小时内退款",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\": \"billing\", \"severity\": \"P1\", \"action\": \"48 小时内退款\", \"confidence\": 0.9}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 12,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "48 小时内退款",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\": \"billing\", \"severity\": \"P1\", \"action\": \"48 小时内退款\", \"confidence\": 0.9}"
+   }
+  ],
+  "consensus": {
+   "category": "billing",
+   "severity": "P1",
+   "action": "48 小时内退款",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.9,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 12,
+  "majority_ms": 11
+ },
+ "SES-20260922-E5195A": {
+  "session_id": "SES-20260922-E5195A",
+  "ts": "2026-09-22T17:37:25",
+  "ticket": {
+   "subject": "重复扣款",
+   "body": "扣了两次钱",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 12,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "48 小时内退款",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\": \"billing\", \"severity\": \"P1\", \"action\": \"48 小时内退款\", \"confidence\": 0.9}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 12,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "48 小时内退款",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\": \"billing\", \"severity\": \"P1\", \"action\": \"48 小时内退款\", \"confidence\": 0.9}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 12,
+    "ok": true,
+    "verdict": {
+     "category": "billing",
+     "severity": "P1",
+     "action": "48 小时内退款",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\": \"billing\", \"severity\": \"P1\", \"action\": \"48 小时内退款\", \"confidence\": 0.9}"
+   }
+  ],
+  "consensus": {
+   "category": "billing",
+   "severity": "P1",
+   "action": "48 小时内退款",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.9,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 10,
+  "majority_ms": 8
+ },
+ "SES-20260922-3F7F6A": {
+  "session_id": "SES-20260922-3F7F6A",
+  "ts": "2026-09-22T17:38:35",
+  "ticket": {
+   "subject": "真机异步验证",
+   "body": "客户端在异步模式下提交工单，验证立即返回与后台完成。",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 4892,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "建议技术人员核实异步验证流程，确保客户端返回与后台完成状态一致",
+     "confidence": 0.85
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"建议技术人员核实异步验证流程，确保客户端返回与后台完成状态一致\",\"confidence\":0.85}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 3916,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P2",
+     "action": "建议技术团队排查真机异步验证流程，确认后台任务完成状态与回调机制是否正常",
+     "confidence": 0.82
+    },
+    "raw_head": "\n\n{\"category\":\"technical\",\"severity\":\"P2\",\"action\":\"建议技术团队排查真机异步验证流程，确认后台任务完成状态与回调机制是否正常\",\"confidence\":0.82}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 5994,
+    "ok": true,
+    "verdict": {
+     "category": "technical",
+     "severity": "P3",
+     "action": "确认异步验证机制并说明后台处理流程",
+     "confidence": 0.9
+    },
+    "raw_head": "{\"category\":\"technical\",\"severity\":\"P3\",\"action\":\"确认异步验证机制并说明后台处理流程\",\"confidence\":0.9}"
+   }
+  ],
+  "consensus": {
+   "category": "technical",
+   "severity": "P2",
+   "action": "建议技术人员核实异步验证流程，确保客户端返回与后台完成状态一致",
+   "votes": "3/3",
+   "agreement": 1.0,
+   "avg_confidence": 0.86,
+   "dissent": [],
+   "failed": []
+  },
+  "feedback": null,
+  "wall_ms": 60176,
+  "majority_ms": 6091
+ },
+ "SES-20260922-7E5073": {
+  "session_id": "SES-20260922-7E5073",
+  "ts": "2026-09-22T17:39:36",
+  "ticket": {
+   "subject": "同步兼容验证",
+   "body": "wait=1 保持旧行为。",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 19590,
+    "ok": false,
+    "error": "HTTPError: HTTP Error 502: Bad Gateway"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 19579,
+    "ok": false,
+    "error": "HTTPError: HTTP Error 502: Bad Gateway"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 19591,
+    "ok": false,
+    "error": "HTTPError: HTTP Error 502: Bad Gateway"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 19592,
+    "ok": false,
+    "error": "HTTPError: HTTP Error 502: Bad Gateway"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 19587,
+    "ok": false,
+    "error": "HTTPError: HTTP Error 502: Bad Gateway"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 19582,
+    "ok": false,
+    "error": "HTTPError: HTTP Error 502: Bad Gateway"
+   }
+  ],
+  "consensus": {
+   "category": null,
+   "note": "无有效研判（全部失败），需人工介入"
+  },
+  "feedback": null,
+  "wall_ms": 19595,
+  "majority_ms": null
  }
 }
