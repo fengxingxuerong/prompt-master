@@ -64,12 +64,13 @@ $env:TRIAGE_TOKEN = "your-token"; .venv\Scripts\python.exe releases\triage\app.p
 
 | 版本 | 文件 | 说明 |
 |---|---|---|
-| v1.2.0（当前） | app.py | 异步提交 + SSE 实时进度（G-07/G-12）+ /api/usage-board |
-| v1.1.1 | app_v1.1.1.py.bak | majority-return + 健康度 + JSON 容错 + 白名单 |
-| v1.1 | app_v1.1.py.bak | 无白名单校验 |
-| v1.0 | app_v1.0.py.bak | 朴素基线（全员等待、裸 json.loads） |
+| v1.3.1（当前） | app.py | 异步提交 + SSE + 会审历史页 + TRIAGE_TOKEN 鉴权（M3.1）+ sessions SQLite（M3.4c） |
+| v1.2.0 | git tag/历史 | 异步提交 + SSE 实时进度（G-07/G-12）+ /api/usage-board |
+| v1.1.1 | releases/archive/bak-20260924/app_v1.1.1.py.bak | majority-return + 健康度 + JSON 容错 + 白名单 |
+| v1.1 | releases/archive/bak-20260924/app_v1.1.py.bak | 无白名单校验 |
+| v1.0 | releases/archive/bak-20260924/app_v1.0.py.bak | 朴素基线（全员等待、裸 json.loads） |
 
-回滚：`copy releases\triage\app_v1.1.py.bak releases\triage\app.py` 后重启（杀 8793 进程 → 重新运行 app.py）。数据文件向后兼容，无需迁移。
+回滚：**首选 git tag**（`git checkout v1.4.6 -- releases/triage/app.py` 后重启）；历史 .bak 已归档至 `releases/archive/bak-20260924/`（见其 manifest.md），`copy` 回原名 + 重启等效。数据文件向后兼容，无需迁移。
 
 ## 已知风险
 
