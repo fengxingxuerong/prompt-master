@@ -21,11 +21,10 @@ import argparse
 import json
 import os
 import re
-import sys
+import sqlite3
 import threading
 import time
-import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -34,12 +33,13 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
-TASKS = DATA / "tasks.json"
+TASKS = DATA / "tasks.json"  # JSON 快照：仅作 SQLite 首次启动的种子数据（M3.4 后不再更新）
+DB = DATA / "tasks.db"  # SQLite 真值源（WAL；*.db* 已 gitignore）
 STATIC = ROOT / "static"
 DOCS = ROOT / "docs"
 
 _LOCK = threading.Lock()
-app = FastAPI(title="Task Assignment Ledger", version="1.0.0")
+app = FastAPI(title="Task Assignment Ledger", version="1.1.0")
 
 
 @app.middleware("http")
@@ -72,21 +72,73 @@ VALID_ASSIGNEES = {r["name"] for r in ROSTER}
 PHONE_NONE = None  # 台账无个人隐私字段
 
 
+def _db_connect() -> sqlite3.Connection:
+    """M3.4a 存储地基（2026-09-24）：SQLite WAL 替代单机 JSON——跨进程并发写安全。
+
+    W3（单机 JSON 并发边界）收口：threading.Lock 只护进程内，多 worker/多进程
+    场景下 JSON 全量覆盖会互相踩踏；SQLite 事务 + busy_timeout 把并发写串行化，
+    不再有半截文件。连接按操作即开即关（无跨线程共享连接）。
+    """
+    conn = sqlite3.connect(DB, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def _init_db(conn: sqlite3.Connection) -> None:
+    """建表 + 一次性导入 JSON 快照（seeded 旗标保证只导一次，之后 JSON 只读不动）。"""
+    conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS tasks (task_id TEXT PRIMARY KEY, data TEXT NOT NULL)")
+    if conn.execute("SELECT 1 FROM meta WHERE key='seeded'").fetchone():
+        return
+    if TASKS.exists():
+        try:
+            data = json.loads(TASKS.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"JSON 快照损坏且尚无数据库：{e}（data/backups/ 有备份，见异常手册）",
+            ) from e
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('seq', ?)",
+                         (str(int(data.get("seq", 0))),))
+            for t in data.get("tasks", []):
+                conn.execute("INSERT OR REPLACE INTO tasks (task_id, data) VALUES (?, ?)",
+                             (t["task_id"], json.dumps(t, ensure_ascii=False)))
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('seeded', ?)", (TASKS.name,))
+    else:
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('seeded', 'none')")
+
+
 def _load() -> dict:
-    if not TASKS.exists():
-        return {"version": 1, "seq": 0, "tasks": []}
+    """返回与 JSON 时代完全同构的文档（{version, seq, tasks}），路由层零改动。"""
+    conn = _db_connect()
     try:
-        data = json.loads(TASKS.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"台账文件损坏：{e}（data/backups/ 有备份，见异常手册）")
-    return data
+        _init_db(conn)
+        tasks = [json.loads(r["data"]) for r in conn.execute("SELECT data FROM tasks ORDER BY rowid")]
+        seq_row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
+        return {"version": 1, "seq": int(seq_row["value"]) if seq_row else 0, "tasks": tasks}
+    finally:
+        conn.close()
 
 
 def _save(data: dict) -> None:
-    DATA.mkdir(parents=True, exist_ok=True)
-    tmp = TASKS.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, TASKS)
+    """单事务全量替换：要么整体生效要么整体回滚，不再有半截 JSON。"""
+    conn = _db_connect()
+    try:
+        with conn:
+            conn.execute("DELETE FROM tasks")
+            conn.executemany(
+                "INSERT INTO tasks (task_id, data) VALUES (?, ?)",
+                [(t["task_id"], json.dumps(t, ensure_ascii=False)) for t in data["tasks"]],
+            )
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('seq', ?)",
+                         (str(int(data.get("seq", 0))),))
+    finally:
+        conn.close()
 
 
 class TaskIn(BaseModel):
@@ -146,7 +198,13 @@ async def fix_latin1_body(request: Request, call_next):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "task-ledger", "time": time.time()}
+    try:
+        n = len(_load()["tasks"])
+        storage = "sqlite(wal)"
+    except Exception as e:  # noqa: BLE001 - 健康端点永不 500，存储异常如实暴露
+        n, storage = -1, f"error: {type(e).__name__}"
+    return {"status": "ok", "service": "task-ledger", "time": time.time(),
+            "storage": storage, "tasks": n}
 
 
 @app.get("/api/roster")

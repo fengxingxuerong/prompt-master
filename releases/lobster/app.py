@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 import threading
 import time
 import uuid
@@ -29,12 +30,13 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
-ORDERS = DATA / "orders.json"
+ORDERS = DATA / "orders.json"  # JSON 快照：仅作 SQLite 首次启动的种子数据（M3.4 后不再更新）
+DB = DATA / "orders.db"  # SQLite 真值源（WAL；*.db* 已 gitignore）
 STATIC = ROOT / "static"
 
 _LOCK = threading.Lock()
 
-app = FastAPI(title="Aussie Lobster Release", version="1.0.0-demo")
+app = FastAPI(title="Aussie Lobster Release", version="1.1.0-demo")
 
 SPECS = {
     "A": {"label": "澳龙 600–800g（1 只装）", "ref_price_cny": 399, "unit": "只"},
@@ -62,21 +64,66 @@ def mask_phone(ph: str) -> str:
     return ph[:3] + "****" + ph[-4:]
 
 
+def _db_connect() -> sqlite3.Connection:
+    """M3.4b 存储地基（2026-09-24）：SQLite WAL 替代单机 JSON——跨进程并发写安全。
+
+    同 taskboard M3.4a 模式：连接即开即关，事务 + busy_timeout 把并发写串行化。
+    """
+    conn = sqlite3.connect(DB, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def _init_db(conn: sqlite3.Connection) -> None:
+    """建表 + 一次性导入 JSON 快照（seeded 旗标保证只导一次，之后 JSON 只读不动）。"""
+    conn.execute("CREATE TABLE IF NOT EXISTS orders (order_id TEXT PRIMARY KEY, data TEXT NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    if conn.execute("SELECT 1 FROM meta WHERE key='seeded'").fetchone():
+        return
+    if ORDERS.exists():
+        try:
+            data = json.loads(ORDERS.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"JSON 快照损坏且尚无数据库：{e}（可用 backups 恢复，见交接文档）",
+            ) from e
+        with conn:
+            for o in data.get("orders", []):
+                conn.execute("INSERT OR REPLACE INTO orders (order_id, data) VALUES (?, ?)",
+                             (o["order_id"], json.dumps(o, ensure_ascii=False)))
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('seeded', ?)", (ORDERS.name,))
+    else:
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('seeded', 'none')")
+
+
 def _load() -> dict:
-    if not ORDERS.exists():
-        return {"version": 1, "orders": []}
+    """返回与 JSON 时代完全同构的文档（{version, orders}），路由层零改动。"""
+    conn = _db_connect()
     try:
-        data = json.loads(ORDERS.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"台账文件损坏：{e}（可用 backups 恢复，见交接文档）") from e
-    return data
+        _init_db(conn)
+        orders = [json.loads(r["data"]) for r in conn.execute("SELECT data FROM orders ORDER BY rowid")]
+        return {"version": 1, "orders": orders}
+    finally:
+        conn.close()
 
 
 def _save(data: dict) -> None:
-    DATA.mkdir(parents=True, exist_ok=True)
-    tmp = ORDERS.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, ORDERS)
+    """单事务全量替换：要么整体生效要么整体回滚，不再有半截 JSON。"""
+    conn = _db_connect()
+    try:
+        with conn:
+            conn.execute("DELETE FROM orders")
+            conn.executemany(
+                "INSERT INTO orders (order_id, data) VALUES (?, ?)",
+                [(o["order_id"], json.dumps(o, ensure_ascii=False)) for o in data["orders"]],
+            )
+    finally:
+        conn.close()
 
 
 class OrderIn(BaseModel):
@@ -108,7 +155,13 @@ async def require_token(request: Request, call_next):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "lobster-release", "mode": "demo", "time": time.time()}
+    try:
+        n = len(_load()["orders"])
+        storage = "sqlite(wal)"
+    except Exception as e:  # noqa: BLE001 - 健康端点永不 500，存储异常如实暴露
+        n, storage = -1, f"error: {type(e).__name__}"
+    return {"status": "ok", "service": "lobster-release", "mode": "demo",
+            "time": time.time(), "storage": storage, "orders": n}
 
 
 @app.post("/api/orders")

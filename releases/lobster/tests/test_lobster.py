@@ -1,4 +1,5 @@
 ﻿import sys
+
 sys.stdout.reconfigure(encoding="utf-8")
 
 def test_health(client):
@@ -24,6 +25,8 @@ def test_create_order_invalid_spec(client):
     assert r.status_code == 422
 
 def test_list_orders_masks_phone(client):
+    # M3.4b 密封化：先自播种一笔订单，不再依赖真实台账数据
+    client.post("/api/orders", json={"name": "seed", "phone": "13800138009", "spec": "A", "qty": 1})
     r = client.get("/api/orders")
     d = r.json()
     assert r.status_code == 200 and d["count"] > 0

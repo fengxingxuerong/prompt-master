@@ -41,3 +41,8 @@ Thumbs.db
 *.egg-info/
 build/
 dist/
+
+# SQLite 运行库（M3.4 起三服务存储真值源，快照 JSON 仍跟踪）
+*.db
+*.db-wal
+*.db-shm
