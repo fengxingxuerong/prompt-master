@@ -147,6 +147,38 @@ app = FastAPI(
     version="2.1.0",
 )
 
+
+# --------------------------------------------------------------------------
+# 停机排空（M3.5 stderr 噪音治理，2026-09-24）
+# --------------------------------------------------------------------------
+# 此前进程退出时任务线程池没有排空钩子：排队任务被解释器强杀、在跑任务的异常
+# 无人取回（未检索的 Future 异常 → 退出期 "Exception ignored" 类 stderr 噪音），
+# 记录也可能停在 pending。现在 uvicorn 收到停机信号后先排空线程池：
+# 排队任务取消（记录标 failed），在跑任务等它自然收尾（正常落库/落盘）。
+#
+# PM_DRAIN_TIMEOUT：排空等待上限（秒，浮点）。不设 = 无限等（与旧版 atexit join
+# 语义一致）；设了（如 30）则到点后对卡死任务转入不等待退出。
+# 注册走 app.router.on_shutdown 而非 @app.on_event——后者已弃用，其
+# DeprecationWarning 本身就是新噪音源（治理噪音不能再制造噪音）。
+def _drain_task_pool() -> None:
+    raw = os.getenv("PM_DRAIN_TIMEOUT", "").strip()
+    drain_timeout: float | None
+    try:
+        drain_timeout = float(raw) if raw else None
+    except ValueError:
+        logger.warning("PM_DRAIN_TIMEOUT=%r 不是数字，按无限排空处理", raw)
+        drain_timeout = None
+    try:
+        cancelled = _scheduler.shutdown(wait=True, timeout=drain_timeout)
+        if cancelled:
+            logger.info("停机排空完成，取消排队任务：%s", ", ".join(cancelled))
+    except Exception:
+        logger.exception("停机排空线程池失败（不阻塞退出）")
+
+
+app.router.on_shutdown.append(_drain_task_pool)
+
+
 # CORS：默认**不开**。这个服务会烧 API 余额，旧版 `allow_origins=["*"]` 等于允许任意网页
 # 跳板提交任务（H3）。确实需要跳源调用时，用 PM_ALLOW_ORIGINS="https://a,https://b" 显式开启。
 _origins = [o.strip() for o in os.getenv("PM_ALLOW_ORIGINS", "").split(",") if o.strip()]
@@ -390,7 +422,7 @@ async def web_console(request: Request) -> str:
     tests/test_web_console.py 有断言比对两者。
     """
     nonce = getattr(request.state, "csp_nonce", "")
-    return WEB_CONSOLE_HTML.replace(CSP_NONCE_PLACEHOLDER, nonce)
+    return cast("str", WEB_CONSOLE_HTML.replace(CSP_NONCE_PLACEHOLDER, nonce))
 
 
 @app.get("/api/health")

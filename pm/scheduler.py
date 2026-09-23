@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
@@ -164,12 +165,16 @@ class TaskManager:
         self._max_records = (
             max_records if max_records is not None else _int_env("PM_MAX_TASKS", 200)
         )
+        # M3.5 停机排空旗标：True 后拒绝新任务，shutdown 幂等
+        self._drained = False
 
     # ------------------------------------------------------------------
     # 单任务
     # ------------------------------------------------------------------
     def submit(self, run_id: str, **kwargs: Any) -> str:
         """提交单个优化任务，异步执行。返回 run_id。"""
+        if self._drained:
+            raise RuntimeError("TaskManager 已停机排空，拒绝新任务（M3.5 生命周期钩子）")
         if self.store.get_task(run_id) is not None:
             raise ValueError(f"run_id {run_id} 已存在")
         self.store.put_task(TaskRecord(run_id=run_id, status="pending"))
@@ -213,7 +218,7 @@ class TaskManager:
             if report:
                 return cast("str", report)
             if rec.report_path and rec.report_path.exists():
-                return rec.report_path.read_text(encoding="utf-8")
+                return cast("str", rec.report_path.read_text(encoding="utf-8"))
         # 进程重启 / 记录被淘汰后，仍可从 logs/ 找回
         fallback = _log_dir() / f"report_{run_id}.md"
         if fallback.exists():
@@ -268,6 +273,75 @@ class TaskManager:
         reports = {rid: rpt for rid in ids if (rpt := self.get_report(rid))}
         statuses = self.get_race_status(race_id) or {}
         return _build_race_report(race, statuses.get("runs", {}), reports)
+
+    # ------------------------------------------------------------------
+    # 生命周期（M3.5 stderr 噪音治理）
+    # ------------------------------------------------------------------
+    def shutdown(self, wait: bool = True, timeout: float | None = None) -> list[str]:
+        """停机排空：取消排队未启动的任务、等待在跑任务收尾并取回其结果。
+
+        治什么：此前进程退出时线程池没有排空钩子——排队任务被解释器强杀、
+        在跑任务的异常无人取回（未检索的 Future 异常 → 退出期
+        "Exception ignored" 类 stderr 噪音），任务记录也可能永远停在 pending。
+
+        语义：
+        - 排队未启动 → 取消，记录标 failed（error 注明停机取消），run_id 进返回值
+        - 在跑 → wait=True 时等待其自然收尾（正常落库/落盘，不留退出噪音）；
+          timeout 给了则到点后对未完成者转入不等待（交给缓存/断点机制，下次启动续）
+        - wait=False：只取消排队项并立刻返回（在跑项的异常仍会被取回一次以消音）
+        - 幂等：重复调用直接返回空列表；之后 submit 抛 RuntimeError
+
+        返回：被取消（未开始执行）的 run_id 列表（排序后），供日志与测试断言。
+        """
+        with self._lock:
+            if self._drained:
+                return []
+            self._drained = True
+            futures = dict(self._futures)
+
+        cancelled: list[str] = []
+        for rid, fut in futures.items():
+            if fut.cancel():
+                cancelled.append(rid)
+                self.store.update_task(
+                    rid, status="failed", error="任务在停机排空时被取消（未开始执行）"
+                )
+
+        # 先关闸（不再接新活，在跑任务继续执行），再按需等待收尾
+        self._executor.shutdown(wait=False, cancel_futures=False)
+
+        if wait:
+            deadline = None if timeout is None else time.monotonic() + timeout
+            for rid, fut in futures.items():
+                if rid in cancelled:
+                    continue
+                # 已完成的 future 也要取回一次结果/异常（消掉未检索异常的退出噪音源）
+                remaining = None
+                if not fut.done() and deadline is not None:
+                    remaining = max(0.0, deadline - time.monotonic())
+                try:
+                    fut.result(timeout=remaining)
+                except TimeoutError:
+                    logger.warning(
+                        "任务 %s 停机排空超时（%.1fs），转入不等待退出", rid, timeout or 0.0
+                    )
+                except Exception:  # noqa: BLE001 - 只为检索异常消音；记录由 _run_task 落 failed
+                    pass
+        else:
+            # 不等待场景：已完成的 future 仍要把异常取回一次（消音）
+            for fut in futures.values():
+                if fut.done():
+                    with contextlib.suppress(Exception):
+                        fut.result(timeout=0)
+
+        with self._lock:
+            self._futures.clear()
+        logger.info(
+            "线程池已排空：取消 %d 个排队任务，等待在跑任务收尾=%s",
+            len(cancelled),
+            wait,
+        )
+        return sorted(cancelled)
 
     # ------------------------------------------------------------------
     # 内部
