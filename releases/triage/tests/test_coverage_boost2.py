@@ -3,6 +3,9 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+from fastapi.testclient import TestClient
+
 _app_dir = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_app_dir))
 _spec = importlib.util.spec_from_file_location("triage_app", _app_dir / "app.py")
@@ -11,22 +14,69 @@ sys.modules["triage_app"] = triage
 _spec.loader.exec_module(triage)
 
 
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    """本地密封夹具（本文件唯一的 API 级用例使用）：隔离存储路径 + 静默评委。"""
+    monkeypatch.setattr(triage, "DATA", tmp_path)
+    monkeypatch.setattr(triage, "LEDGER", tmp_path / "ledger.jsonl")
+    monkeypatch.setattr(triage, "SESSIONS", tmp_path / "sessions.json")  # 不存在 → 不导入真实快照
+    monkeypatch.setattr(triage, "DB", tmp_path / "sessions.db")
+    monkeypatch.setattr(triage, "HEALTH_FILE", tmp_path / "health.json")
+    monkeypatch.setattr(
+        triage, "call_llm",
+        lambda *a, **k: {"ok": True, "latency_ms": 1, "content": "{}", "usage": {}})
+    monkeypatch.delenv("TRIAGE_TOKEN", raising=False)
+    return TestClient(triage.app)
+
+
 # ---------------------------------------------------------------------------
-# triage_app：save_sessions/load_sessions 坏文件兜底、健康度、B904 路径
+# triage_app：sessions 存储层（M3.4c SQLite 化）坏库兜底、roundtrip、导入语义
 # ---------------------------------------------------------------------------
 def test_load_sessions_corrupt_returns_empty(tmp_path, monkeypatch):
-    """sessions.json 损坏 → 返回空 dict（D-013 教训：坏文件不崩）。"""
-    p = tmp_path / "sessions.json"
-    p.write_text("{corrupted", encoding="utf-8")
-    monkeypatch.setattr(triage, "SESSIONS", p)
+    """DB 文件损坏 → 返回空 dict（D-013 教训：坏存储不崩，等价旧版坏 JSON 兜底）。"""
+    p = tmp_path / "sessions.db"
+    p.write_text("{corrupted not a db", encoding="utf-8")
+    monkeypatch.setattr(triage, "DB", p)
+    monkeypatch.setattr(triage, "SESSIONS", tmp_path / "sessions.json")  # 不存在
     assert triage.load_sessions() == {}
 
 
 def test_save_sessions_roundtrip(tmp_path, monkeypatch):
-    p = tmp_path / "sessions.json"
-    monkeypatch.setattr(triage, "SESSIONS", p)
+    monkeypatch.setattr(triage, "DB", tmp_path / "sessions.db")
+    monkeypatch.setattr(triage, "SESSIONS", tmp_path / "sessions.json")  # 不存在
     triage.save_sessions({"SES-X": {"session_id": "SES-X"}})
     assert triage.load_sessions()["SES-X"]["session_id"] == "SES-X"
+
+
+def test_sessions_import_once_db_is_truth(tmp_path, monkeypatch):
+    """JSON 快照一次性导入：导入后 DB 是真值源，删快照/新增互不影响。"""
+    import json as _json
+    (tmp_path / "sessions.json").write_text(
+        _json.dumps({"SES-OLD": {"session_id": "SES-OLD", "status": "done"}}), encoding="utf-8")
+    monkeypatch.setattr(triage, "DB", tmp_path / "sessions.db")
+    monkeypatch.setattr(triage, "SESSIONS", tmp_path / "sessions.json")
+    assert triage.load_sessions()["SES-OLD"]["session_id"] == "SES-OLD"
+    # DB 上新增（单行 upsert 不动 SES-OLD）
+    triage.save_session({"session_id": "SES-NEW", "status": "running"})
+    (tmp_path / "sessions.json").unlink()  # 快照删了也不影响
+    fresh = triage.load_sessions()
+    assert set(fresh) == {"SES-OLD", "SES-NEW"}
+
+
+def test_give_feedback_single_row_write(client):
+    """反馈单行读改写：目标会话更新、其他会话数据不受影响（写放大清零的行为面验证）。"""
+    r1 = client.post("/api/reviews", json={"subject": "单A", "body": "b"})
+    r2 = client.post("/api/reviews", json={"subject": "单B", "body": "b"})
+    sid_a, sid_b = r1.json()["session_id"], r2.json()["session_id"]
+    import time as _t
+    for _ in range(120):
+        if client.get(f"/api/sessions/{sid_b}").json().get("status") == "done":
+            break
+        _t.sleep(0.1)
+    fb = client.post(f"/api/sessions/{sid_a}/feedback", json={"rating": 4})
+    assert fb.status_code == 200 and fb.json()["ok"] is True
+    assert client.get(f"/api/sessions/{sid_a}").json()["feedback"]["rating"] == 4
+    assert client.get(f"/api/sessions/{sid_b}").json()["feedback"] is None
 
 
 

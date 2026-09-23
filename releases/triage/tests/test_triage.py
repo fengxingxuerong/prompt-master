@@ -33,7 +33,8 @@ def client(tmp_path, monkeypatch):
     """隔离的数据目录 + 固定评委返回。"""
     monkeypatch.setattr(triage, "DATA", tmp_path)
     monkeypatch.setattr(triage, "LEDGER", tmp_path / "ledger.jsonl")
-    monkeypatch.setattr(triage, "SESSIONS", tmp_path / "sessions.json")
+    monkeypatch.setattr(triage, "SESSIONS", tmp_path / "sessions.json")  # 不存在 → 不导入真实快照
+    monkeypatch.setattr(triage, "DB", tmp_path / "sessions.db")  # M3.4c：sessions 真值源
     monkeypatch.setattr(triage, "HEALTH_FILE", tmp_path / "health.json")
     # 清空模型白名单缓存，避免测试环境连真网关
     monkeypatch.setattr(triage, "_model_cache", {"ts": 0.0, "names": set()})

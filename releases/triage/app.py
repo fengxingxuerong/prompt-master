@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import re
+import sqlite3
 import threading
 import time
 import urllib.request
@@ -32,7 +33,8 @@ APP_DIR = Path(__file__).resolve().parent
 DATA = APP_DIR / "data"
 DATA.mkdir(exist_ok=True)
 LEDGER = DATA / "ledger.jsonl"
-SESSIONS = DATA / "sessions.json"
+SESSIONS = DATA / "sessions.json"  # JSON 快照：仅作 SQLite 首次启动的种子数据（M3.4 后不再更新）
+DB = DATA / "sessions.db"  # SQLite 真值源（WAL；*.db* 已 gitignore）
 HEALTH_FILE = DATA / "reviewer_health.json"
 
 HUB = "http://127.0.0.1:8687/v1/chat/completions"
@@ -96,32 +98,85 @@ def append_ledger(rec: dict) -> None:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
-_sessions_cache: dict = {"mtime": 0.0, "data": {}}
+def _db_connect() -> sqlite3.Connection:
+    """M3.4c 存储地基（2026-09-24）：sessions 从单机 JSON 迁 SQLite WAL。
+
+    同 taskboard/lobster M3.4a/b 模式：连接即开即关，事务 + busy_timeout
+    把并发写串行化；ledger.jsonl 是纯追加台账不受写放大影响，维持 JSONL。
+    """
+    conn = sqlite3.connect(DB, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def _init_db(conn: sqlite3.Connection) -> None:
+    """建表 + 一次性导入 JSON 快照（seeded 旗标保证只导一次；坏快照不阻塞建库，D-013）。"""
+    conn.execute("CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, data TEXT NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    if conn.execute("SELECT 1 FROM meta WHERE key='seeded'").fetchone():
+        return
+    if SESSIONS.exists():
+        try:
+            data = json.loads(SESSIONS.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - 坏快照不复活也不阻塞，D-013 教训
+            data = {}
+        with conn:
+            for sid, s in (data or {}).items():
+                conn.execute("INSERT OR REPLACE INTO sessions (session_id, data) VALUES (?, ?)",
+                             (sid, json.dumps(s, ensure_ascii=False)))
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('seeded', ?)", (SESSIONS.name,))
+    else:
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('seeded', 'none')")
 
 
 def load_sessions() -> dict:
-    """perf：mtime 缓存——文件未变时直接返回内存副本（perf-opt 2026-09-22）。"""
+    """返回 {session_id: session} 全量视图（形状与 JSON 时代一致，路由层零改动）。
+
+    DB 层异常返回空 dict（D-013 教训：坏存储不崩，等价旧版坏 JSON 兜底）。
+    """
     try:
-        mtime = SESSIONS.stat().st_mtime if SESSIONS.exists() else 0.0
-    except OSError:
-        mtime = 0.0
-    if mtime and mtime == _sessions_cache["mtime"]:
-        return _sessions_cache["data"]
-    if not SESSIONS.exists():
+        conn = _db_connect()
+        try:
+            _init_db(conn)
+            return {r["session_id"]: json.loads(r["data"])
+                    for r in conn.execute("SELECT session_id, data FROM sessions")}
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
         return {}
-    try:
-        data = json.loads(SESSIONS.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return {}
-    _sessions_cache["mtime"] = mtime
-    _sessions_cache["data"] = data
-    return data
 
 
 def save_sessions(all_sessions: dict) -> None:
+    """全量替换（兼容保留）。常规写路径请用 save_session 单行 upsert。"""
     with _lock:
-        SESSIONS.write_text(json.dumps(all_sessions, ensure_ascii=False, indent=1),
-                            encoding="utf-8")
+        conn = _db_connect()
+        try:
+            with conn:
+                _init_db(conn)
+                conn.execute("DELETE FROM sessions")
+                conn.executemany(
+                    "INSERT INTO sessions (session_id, data) VALUES (?, ?)",
+                    [(sid, json.dumps(s, ensure_ascii=False)) for sid, s in all_sessions.items()],
+                )
+        finally:
+            conn.close()
+
+
+def save_session(session: dict) -> None:
+    """M3.4c 写放大治理：单行 upsert——每次会写只动一行，不再全量重写所有会话。"""
+    with _lock:
+        conn = _db_connect()
+        try:
+            with conn:
+                _init_db(conn)
+                conn.execute("INSERT OR REPLACE INTO sessions (session_id, data) VALUES (?, ?)",
+                             (session["session_id"], json.dumps(session, ensure_ascii=False)))
+        finally:
+            conn.close()
 
 
 def load_health() -> dict:
@@ -147,14 +202,6 @@ def bump_health(seat: str, ok: bool) -> None:
         h[seat] = rec
         HEALTH_FILE.write_text(json.dumps(h, ensure_ascii=False, indent=1),
                                encoding="utf-8")
-
-
-def save_session(session: dict) -> None:
-    with _lock:
-        all_s = load_sessions()
-        all_s[session["session_id"]] = session
-        SESSIONS.write_text(json.dumps(all_s, ensure_ascii=False, indent=1),
-                            encoding="utf-8")
 
 
 _model_cache: dict = {"ts": 0.0, "names": set()}
@@ -403,14 +450,21 @@ class FeedbackIn(BaseModel):
 
 @app.post("/api/sessions/{sid}/feedback")
 def give_feedback(sid: str, fb: FeedbackIn):
-    all_s = load_sessions()
-    s = all_s.get(sid)
-    if not s:
-        raise HTTPException(404, f"会话不存在：{sid}")
-    s["feedback"] = {"rating": fb.rating, "comment": fb.comment,
-                     "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    all_s[sid] = s
-    save_sessions(all_s)
+    """M3.4c：单行读改写——反馈只动目标会话一行，不再全量 load+save（写放大清零）。"""
+    conn = _db_connect()
+    try:
+        _init_db(conn)
+        row = conn.execute("SELECT data FROM sessions WHERE session_id=?", (sid,)).fetchone()
+        if not row:
+            raise HTTPException(404, f"会话不存在：{sid}")
+        s = json.loads(row["data"])
+        s["feedback"] = {"rating": fb.rating, "comment": fb.comment,
+                         "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        with conn:
+            conn.execute("UPDATE sessions SET data=? WHERE session_id=?",
+                         (json.dumps(s, ensure_ascii=False), sid))
+    finally:
+        conn.close()
     append_ledger({"kind": "feedback", "session_id": sid,
                    "rating": fb.rating, "comment": fb.comment[:100]})
     return {"ok": True, "feedback": s["feedback"]}

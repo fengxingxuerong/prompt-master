@@ -1857,5 +1857,370 @@
   },
   "wall_ms": 60029,
   "majority_ms": 7130
+ },
+ "SES-20260923-50E07C": {
+  "session_id": "SES-20260923-50E07C",
+  "ts": "2026-09-23T23:27:31",
+  "ticket": {
+   "subject": "无令牌单",
+   "body": "未设 token 应放行",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   }
+  ],
+  "consensus": {
+   "category": null,
+   "note": "无有效研判（全部失败），需人工介入"
+  },
+  "feedback": null,
+  "wall_ms": 18,
+  "majority_ms": null
+ },
+ "SES-20260923-A6066F": {
+  "session_id": "SES-20260923-A6066F",
+  "ts": "2026-09-23T23:27:31",
+  "ticket": {
+   "subject": "s",
+   "body": "b",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   }
+  ],
+  "consensus": {
+   "category": null,
+   "note": "无有效研判（全部失败），需人工介入"
+  },
+  "feedback": null,
+  "wall_ms": 13,
+  "majority_ms": null
+ },
+ "SES-20260923-A6055C": {
+  "session_id": "SES-20260923-A6055C",
+  "ts": "2026-09-23T23:46:10",
+  "ticket": {
+   "subject": "s",
+   "body": "b",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   }
+  ],
+  "consensus": {
+   "category": null,
+   "note": "无有效研判（全部失败），需人工介入"
+  },
+  "feedback": null,
+  "wall_ms": 9,
+  "majority_ms": null
+ },
+ "SES-20260923-0176D3": {
+  "session_id": "SES-20260923-0176D3",
+  "ts": "2026-09-23T23:46:25",
+  "ticket": {
+   "subject": "s",
+   "body": "b",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   }
+  ],
+  "consensus": {
+   "category": null,
+   "note": "无有效研判（全部失败），需人工介入"
+  },
+  "feedback": null,
+  "wall_ms": 9,
+  "majority_ms": null
+ },
+ "SES-20260924-C69D0E": {
+  "session_id": "SES-20260924-C69D0E",
+  "ts": "2026-09-24T00:18:15",
+  "ticket": {
+   "subject": "s",
+   "body": "b",
+   "customer": "测试客户"
+  },
+  "status": "done",
+  "verdicts": [
+   {
+    "seat": "评委A",
+    "model": "deepseek-v4-flash",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委B",
+    "model": "glm-5.2",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委C",
+    "model": "sensenova-6.8-flash-lite",
+    "source": "sensenova",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委D",
+    "model": "amd-qwen3.8-27b",
+    "source": "amd",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委E",
+    "model": "step-step-5-preview",
+    "source": "stepfun",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   },
+   {
+    "seat": "评委F",
+    "model": "nvidia-glm-5.3-flash",
+    "source": "nvidia",
+    "latency_ms": 1,
+    "ok": true,
+    "verdict": {},
+    "raw_head": "{}"
+   }
+  ],
+  "consensus": {
+   "category": null,
+   "note": "无有效研判（全部失败），需人工介入"
+  },
+  "feedback": null,
+  "wall_ms": 10,
+  "majority_ms": null
  }
 }

@@ -33,7 +33,8 @@ def client(tmp_path, monkeypatch):
     """隔离数据目录 + 静默评委 + 强制还原 TRIAGE_TOKEN（防宿主环境泄漏进断言，W16 教训）。"""
     monkeypatch.setattr(triage, "DATA", tmp_path)
     monkeypatch.setattr(triage, "LEDGER", tmp_path / "ledger.jsonl")
-    monkeypatch.setattr(triage, "SESSIONS", tmp_path / "sessions.json")
+    monkeypatch.setattr(triage, "SESSIONS", tmp_path / "sessions.json")  # 不存在 → 不导入真实快照
+    monkeypatch.setattr(triage, "DB", tmp_path / "sessions.db")  # M3.4c：sessions 真值源
     monkeypatch.setattr(triage, "HEALTH_FILE", tmp_path / "health.json")
     monkeypatch.setattr(triage, "_model_cache", {"ts": 0.0, "names": set()})
     monkeypatch.setattr(
