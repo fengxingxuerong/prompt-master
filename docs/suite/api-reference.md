@@ -1,8 +1,10 @@
 # API 接口文档（三服务全端点 · v1.3.0）
 
-> 生成日期 2026-09-22 · 覆盖 33 个路由（ModelHub 18 / 龙虾 7 / 任务台账 8）
+> 生成日期 2026-09-22 · 覆盖 33 个路由（ModelHub 18 / 龙虾 7 / 任务台账 8；会审台端点见 `releases/triage/README.md`）
 > 全部端点经实测核对；错误码为实测行为。鉴权说明：三服务默认本地开放；设
-> `PMH_GATEWAY_TOKEN` / `LOBSTER_TOKEN` / `TASKBOARD_TOKEN` 后，写接口需 `X-API-Key` 头。
+> `PMH_GATEWAY_TOKEN` / `LOBSTER_TOKEN` / `TASKBOARD_TOKEN` / `TRIAGE_TOKEN` 后，
+> 受保护接口需 `X-API-Key` 头。注意会审台更严：设 `TRIAGE_TOKEN` 后除 `/api/health`
+> 与页面 GET 外**全部**端点（含数据读）都要令牌（M3.1，2026-09-23）。
 
 ## 一、ModelHub（http://127.0.0.1:8687）
 

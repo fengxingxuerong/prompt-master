@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import threading
 import time
@@ -21,7 +22,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from notify_center import list_notifications, load_config, notify
@@ -63,6 +64,28 @@ UNHEALTHY_STREAK = 2  # 连续失败 2 次即视为不健康（不阻塞汇总�
 _lock = threading.Lock()
 app = FastAPI(title="Triage Panel", version="1.3.1")
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    """鉴权（M3.1 安全收口 2026-09-23）：设了 TRIAGE_TOKEN 后，除 /api/health 与页面
+    （/ 与 /static/*）GET 外，其余端点（含全部写操作与 /api 数据读）均需 X-API-Key。
+
+    与 taskboard/lobster 同款环境变量门控模式：默认未设 = 本地全开放（便利优先），
+    局域网/公网暴露前必须设置。比 taskboard 版更收紧的一处：/api/sessions* 等数据读
+    也在保护范围内——工单正文含客户内容（W8 教训：明文 PII 不应无凭据可读）。
+    """
+    token = (os.getenv("TRIAGE_TOKEN") or "").strip()
+    if token:
+        path = request.url.path
+        page_get = request.method in ("GET", "HEAD") and (
+            path == "/" or path.startswith("/static/") or path == "/api/health")
+        if not page_get:
+            from fastapi.responses import JSONResponse
+            if (request.headers.get("X-API-Key") or "").strip() != token:
+                return JSONResponse(status_code=401,
+                                    content={"detail": "需要 X-API-Key 令牌"})
+    return await call_next(request)
 
 
 # ---------- 基础设施 ----------

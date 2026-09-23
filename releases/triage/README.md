@@ -34,6 +34,16 @@ cd D:\projects\prompt-master
 # 就绪后访问 http://127.0.0.1:8793
 ```
 
+### 鉴权（M3.1 安全收口 · 2026-09-23）
+
+默认**不设** `TRIAGE_TOKEN` = 本地全开放（行为与历史版本一致）。局域网/公网暴露前设置它：
+
+```powershell
+$env:TRIAGE_TOKEN = "your-token"; .venv\Scripts\python.exe releases\triage\app.py
+```
+
+设了之后：`/api/health` 与页面（`/`、`/static/*`）GET 豁免；**其余全部端点**（含 `POST /api/reviews` 等写操作与 `/api/sessions*` 等数据读）需请求头 `X-API-Key: <token>`。数据读也凭据化是因为工单正文含客户内容（W8 教训），比 taskboard/lobster 只护写接口更收紧一档。测试覆盖见 `tests/test_auth.py`（7 用例三态）。
+
 ## API 一览
 
 | 方法 | 路径 | 说明 |
