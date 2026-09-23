@@ -50,6 +50,18 @@ STATUS_LABEL = {
 PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
 
 
+def mask_phone(ph: str) -> str:
+    """手机号脱敏（M3.2 存储脱敏 2026-09-23）：保留前 3 后 4，中间 ****。
+
+    幂等：已是掩码形态或非 11 位原样返回——存储层（create_order）与
+    接口层（list_orders）共用，对旧明文数据与新掩码数据双重安全。
+    """
+    ph = str(ph or "")
+    if "*" in ph or len(ph) != 11:
+        return ph
+    return ph[:3] + "****" + ph[-4:]
+
+
 def _load() -> dict:
     if not ORDERS.exists():
         return {"version": 1, "orders": []}
@@ -111,7 +123,8 @@ def create_order(o: OrderIn):
         "order_id": oid,
         "created_at": now,
         "name": o.name,
-        "phone": o.phone,
+        # M3.2 存储脱敏：入岸即掩码，落盘不再保留 11 位明文（W8 存储侧收口）
+        "phone": mask_phone(o.phone),
         "spec": o.spec,
         "spec_label": SPECS[o.spec]["label"],
         "ref_price_cny": SPECS[o.spec]["ref_price_cny"],
@@ -138,12 +151,12 @@ def list_orders(status: str | None = None):
         if status not in STATUSES:
             raise HTTPException(status_code=422, detail=f"无效状态 {status!r}")
         rows = [r for r in rows if r["status"] == status]
-    # PII 脱敏（W8）：接口返回手机号只留尾 4 位；落盘原文保留仅供客服核对（demo 边界）
+    # PII 脱敏（W8）：M3.2 起存储层即掩码（create_order 入岸掩码 + mask_storage_phones.py
+    # 存量迁移）；此处对历史/异常数据兜底再掩一次（mask_phone 幂等）。
     masked = []
     for r in list(reversed(rows)):
         r2 = dict(r)
-        ph = str(r2.get("phone", ""))
-        r2["phone"] = (ph[:3] + "****" + ph[-4:]) if len(ph) == 11 else ph
+        r2["phone"] = mask_phone(r2.get("phone", ""))
         masked.append(r2)
     return {"count": len(rows), "orders": masked, "status_labels": STATUS_LABEL}
 
