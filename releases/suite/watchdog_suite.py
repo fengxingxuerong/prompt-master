@@ -14,6 +14,7 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8")
 import argparse
 import json
+import os
 import subprocess
 import time
 import urllib.request
@@ -22,6 +23,39 @@ from pathlib import Path
 ROOT = Path(r"D:\projects\prompt-master\releases")
 PY = r"D:\projects\prompt-master\.venv\Scripts\python.exe"
 LOG = ROOT / "suite" / "watchdog_log.jsonl"
+
+
+def _load_dotenv_env() -> dict:
+    """M3.3（2026-09-23）：加载仓库根 .env，供拉起的服务继承鉴权 TOKEN 等配置。
+
+    背景：三服务（lobster/taskboard/triage）自身不 load_dotenv，而看门狗经
+    schtasks 拉起时只有极简系统环境——没有这一步，.env 里写的
+    TRIAGE_TOKEN/LOBSTER_TOKEN/TASKBOARD_TOKEN 永远到不了服务进程。
+    规则：只取简单 KEY=VALUE 行；剥离一层成对引号；系统已有环境变量优先
+    （setdefault 语义），即 shell 显式 export > .env 文件。
+    """
+    env_path = ROOT.parent / ".env"
+    out: dict = {}
+    try:
+        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip()
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+                v = v[1:-1]
+            if k:
+                out.setdefault(k, v)
+    except OSError:
+        pass
+    return out
+
+
+# 合并口径：系统环境 > .env 文件
+_ENV_FILE = _load_dotenv_env()
+
 SERVICES = [
     {"name": "modelhub", "url": "http://127.0.0.1:8687/api/health", "cmd": [PY, str(ROOT / ".." / "run_modelhub.py"), "--port", "8687"], "cwd": str(ROOT / "..")},
     {"name": "lobster", "url": "http://127.0.0.1:8791/api/health", "cmd": [PY, str(ROOT / "lobster" / "app.py"), "--port", "8791"], "cwd": str(ROOT / "lobster")},
@@ -53,6 +87,22 @@ def notify(source: str, message: str) -> None:
                                 ensure_ascii=False) + "\n")
     except Exception:
         pass
+def _notify_center(source: str, message: str) -> None:
+    """M2.2 修正（M3.3 顺带）：超时任务告警优先写会审台通知中心（/api/notifications 可见）。
+
+    原实现误用了本地 notify() 不支持的 level/base_dir 参数，TypeError 被
+    except 静默吞掉——告警从未真正落盘。修复后失败仍回退 G-06 本地日志。
+    """
+    try:
+        ns: dict = {}
+        nc = ROOT / "triage" / "notify_center.py"
+        exec(compile(nc.read_text(encoding="utf-8"), str(nc), "exec"), ns)
+        ns["notify"](source, message, level="warn", base_dir=ROOT / "triage" / "data")
+    except Exception as exc:
+        print(f"[watchdog] notify_center fallback: {exc}")
+        notify(source, message)
+
+
 def _check_stale_tasks() -> None:
     """M2.2：任务台账 pending/处理中超 24h → 落提醒通知（每次巡检最多提醒一次/任务）。"""
     try:
@@ -79,8 +129,7 @@ def _check_stale_tasks() -> None:
             except Exception:
                 continue
             if overdue_h >= 24 and seen.get(tid) != due:
-                notify("watchdog", f"任务 {tid} 已到期超 24h 未处理（due={due}）：{t.get('title', '')[:40]}", level="warn",
-                       base_dir=ROOT / "triage" / "data")
+                _notify_center("watchdog", f"任务 {tid} 已到期超 24h 未处理（due={due}）：{t.get('title', '')[:40]}")
                 seen[tid] = due
                 changed = True
         if changed:
@@ -101,10 +150,11 @@ def _rotate_ledgers() -> None:
 def patrol() -> list[str]:
     actions = []
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+    child_env = {**_ENV_FILE, **os.environ}  # 系统 > .env（M3.3：TOKEN 等配置透传给服务）
     for svc in SERVICES:
         if alive(svc["url"]):
             continue
-        subprocess.Popen(svc["cmd"], cwd=svc["cwd"],
+        subprocess.Popen(svc["cmd"], cwd=svc["cwd"], env=child_env,
                          creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         actions.append(f"{svc['name']}: DOWN → 拉起 (port from {svc['url']})")

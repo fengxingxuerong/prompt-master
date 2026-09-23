@@ -27,6 +27,8 @@ PY = D:\projects\prompt-master\.venv\Scripts\python.exe
 
 三服务当前健康：以 `/api/health` 实测为准；历史巡检证据 `releases/suite/monitor_log.jsonl`、`watchdog_log.jsonl`。
 
+鉴权（M3.3，2026-09-23）：默认本地全开放；在 `.env` 写 `TASKBOARD_TOKEN` / `LOBSTER_TOKEN` / `TRIAGE_TOKEN`（网关另有 `PMH_GATEWAY_TOKEN`）后，受保护接口需 `X-API-Key` 头。看门狗会把 `.env` 的 KEY=VALUE 透传给拉起的服务进程（schtasks 极简环境下同样生效）。口径详见 `docs/suite/api-reference.md` 头注与会审台 README。
+
 ## 三、报告与台账索引（按主题）
 
 | 主题 | 文件 |
