@@ -250,6 +250,29 @@ def apply_caps(dims: DimensionScores, details: dict[str, Any]) -> tuple[float, b
     return weighted, weighted >= PASS_THRESHOLD
 
 
+def prepare(
+    prompt: str, task: str, test_input: str, test_output: str
+) -> tuple[list[dict[str, str]], list[str], str] | None:
+    """协议的**输入侧**单一实现：清单 + 无来源数字候选 + 要追加到 user 段的清单块。
+
+    主管道与校准脚本必须共用它。两边各拼一遍的话，A/B 测的就不再是将来上线的那条路径
+    —— 而"清单怎么拼、数字怎么点名"恰恰是协议里最容易悄悄漂移的部分。
+    清单太薄时返回 None（由调用方决定是回退印象式还是报错）。
+    """
+    from .prompts import EVALUATOR_CHECKLIST, render
+
+    checklist = build_checklist(prompt, task)
+    if not checklist_usable(checklist):
+        return None
+    numbers = unsourced_numbers(test_input, test_output)
+    block = render(
+        EVALUATOR_CHECKLIST,
+        checklist="\n".join(f"- {r['item']}" for r in checklist),
+        numbers="、".join(numbers) or "（无候选）",
+    )
+    return checklist, numbers, block
+
+
 def evaluate_with_checklist(
     role: str,
     user_prompt: str,

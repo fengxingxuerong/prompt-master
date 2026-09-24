@@ -17,7 +17,6 @@ from .. import llm
 from ..assertions import RULE_MODE
 from ..cache import eval_cache, key_for_eval
 from ..prompts import (
-    EVALUATOR_CHECKLIST,
     EVALUATOR_RULES,
     EVALUATOR_SYSTEM,
     EVALUATOR_USER,
@@ -37,15 +36,10 @@ from ..schemas import (
     judge_disagreement_threshold,
     measurement_noise,
 )
-from ..scoring import (
-    MODE_CHECKLIST,
-    build_checklist,
-    checklist_usable,
-    scoring_mode,
-    unsourced_numbers,
-)
+from ..scoring import MODE_CHECKLIST, build_checklist, scoring_mode
 from ..scoring import evaluate_with_checklist as scoring_evaluate
 from ..scoring import merge_checklist_results as scoring_merge
+from ..scoring import prepare as scoring_prepare
 from ..state import State
 from .common import _apply
 from .execute import _case_ground_truth
@@ -441,29 +435,25 @@ def _evaluate_one(
         # 规则模式：把 expected 当核对清单（不是字面片段）交给评委逐条核验
         user_prompt += render(EVALUATOR_RULES, rules=rules)
 
-    # 判定式协议（PM_SCORING_MODE=checklist）：清单由代码从被测提示词摊出。
+    # 判定式协议（PM_SCORING_MODE=checklist）：清单与数字候选由 `pm.scoring.prepare` 生成，
+    # 校准脚本用的是同一个函数 —— 两份拼法迟早长得不一样，那时 A/B 测的就不是上线的那条路。
     # 清单太薄（基线臂常常是裸需求）就不走这条路 —— 但**必须留痕**：同一轮里一部分用例
     # 走判定式、一部分偷偷走印象式，聚合分就成了两种口径的平均，Δ 再也读不出东西。
     checklist: list[dict[str, Any]] | None = None
     numbers: list[str] = []
     key_suffix = ""
     if scoring_mode() == MODE_CHECKLIST:
-        built = build_checklist(prompt, task)
-        n_prompt_items = sum(1 for r in built if not r["item"].startswith("通用："))
-        if checklist_usable(built):
-            checklist = built
-            numbers = unsourced_numbers(run["test_input"], run["output"])
-            user_prompt += render(
-                EVALUATOR_CHECKLIST,
-                checklist="\n".join(f"- {r['item']}" for r in built),
-                numbers="、".join(numbers) or "（无候选）",
-            )
-            key_suffix = "\n<CHECKLIST>" + "|".join(r["item"] for r in built)
+        prep = scoring_prepare(prompt, task, str(run["test_input"]), str(run["output"]))
+        if prep is not None:
+            checklist, numbers, block = prep
+            user_prompt += block
+            key_suffix = "\n<CHECKLIST>" + "|".join(r["item"] for r in checklist)
         else:
+            thin = sum(
+                1 for r in build_checklist(prompt, task) if not r["item"].startswith("通用：")
+            )
             logger.warning(
-                "case#%d 判定式回退印象式：被测提示词只摊出 %d 条可核对条目（<2）",
-                idx,
-                n_prompt_items,
+                "case#%d 判定式回退印象式：被测提示词只摊出 %d 条可核对条目（<2）", idx, thin
             )
             key_suffix = "\n<CHECKLIST>thin-fallback"
 

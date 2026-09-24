@@ -84,7 +84,7 @@ class Anchors(list):
 
     pending: list[dict[str, Any]]
 
-    def __new__(cls, iterable: Any = (), *, pending: Any = ()) -> "Anchors":
+    def __new__(cls, iterable: Any = (), *, pending: Any = ()) -> Anchors:
         obj = super().__new__(cls, iterable)
         obj.pending = list(pending)
         return obj
@@ -177,41 +177,21 @@ def evaluate_sample(
 
 
 def _evaluate_checklist(role: str, sample: dict[str, Any], base_user: str) -> EvaluationResult:
-    """判定式协议跑一条锚点：评委只出二值判定，分数由 pm.scoring 算。"""
-    from pm.prompts import EVALUATOR_CHECKLIST, EVALUATOR_SYSTEM_CHECKLIST
-    from pm.scoring import (
-        apply_caps,
-        build_checklist,
-        checklist_usable,
-        score_checklist,
-        unsourced_numbers,
-    )
-    from pm.schemas import ChecklistEvaluation
+    """判定式协议跑一条锚点：清单与数字候选的拼法、算分全部走 `pm.scoring` 那一份实现。
 
-    checklist = build_checklist(sample["prompt"], sample["original_task"])
-    if not checklist_usable(checklist):
+    不在这里重复拼清单：主管道用的是同一份 `scoring.prepare`，两份实现迟早会长得不一样，
+    那时候 A/B 测的就不是"将来会上线的那条路径"了。
+    """
+    from pm.scoring import evaluate_with_checklist, prepare
+
+    prep = prepare(
+        sample["prompt"], sample["original_task"], sample["test_input"], sample["test_output"]
+    )
+    if prep is None:
         raise ValueError("被测提示词的标签段摊不出够用的清单，判定式对这条不适用")
-    candidates = unsourced_numbers(sample["test_input"], sample["test_output"])
-    user = base_user + render(
-        EVALUATOR_CHECKLIST,
-        checklist="\n".join(f"- {r['item']}" for r in checklist),
-        numbers="、".join(candidates) or "（无候选）",
-    )
-    ce, _meta = structured_call(role, ChecklistEvaluation, EVALUATOR_SYSTEM_CHECKLIST, user)
-    dims, detail = score_checklist(ce, checklist, unsourced_candidates=candidates)
-    weighted, passed = apply_caps(dims, detail)
-    return EvaluationResult(
-        dimension_scores=dims,
-        model_reported_score=weighted,
-        issues=ce.issues,
-        suggestions=ce.suggestions,
-        should_revise=not passed,
-        judge=role,
-        scoring_mode="checklist",
-        checklist_detail=detail,
-        weighted_score=weighted,
-        passed=passed,
-    )
+    checklist, numbers, block = prep
+    ev, _meta = evaluate_with_checklist(role, base_user + block, checklist, numbers)
+    return ev
 
 
 # --------------------------------------------------------------------------
