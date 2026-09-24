@@ -142,7 +142,10 @@ def _resolve_placeholders(obj: Any, env_map: dict[str, str]) -> Any:
         s = obj.strip()
         if s.startswith("${") and s.endswith("}"):
             env_name = s[2:-1].strip()
-            val = env_map.get(env_name, "")
+            # strip 后再判空：`PM_API_KEY_1=   ` 这种"看起来填了其实没填"的值，
+            # 不 strip 就会通过 `if not val`，症状是上游一律 401，
+            # 而 401 不会告诉你是环境变量空着——恰恰是本函数想避免的那类静默。
+            val = env_map.get(env_name, "").strip()
             if not val:
                 raise ConfigError(
                     f"环境变量 {env_name} 未设置或为空（配置里引用了 ${{{env_name}}}）。"
@@ -172,7 +175,10 @@ def _break_threshold() -> int:
         v = int(raw) if raw else 3
     except ValueError:
         v = 3
-    return max(1, v)
+    # 与 _timeout_seconds / _cooldown_seconds 同一条纪律：不是正数就回退默认。
+    # 原来写的是 max(1, v)，于是 PMH_BREAK_THRESHOLD=-2 这种手误会变成"一击即断"——
+    # 比默认值更激进，一次偶发抖动就把模型踢出链路（症状是"池子莫名其妙只剩一个模型"）。
+    return v if v >= 1 else 3
 
 
 def _cooldown_seconds() -> float:
