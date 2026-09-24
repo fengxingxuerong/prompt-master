@@ -10,12 +10,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 # 注入生成链路的资产正文上限：参考块太长会挤占 Optimizer 的注意力
 _ASSET_CLIP = 1200
+# 记忆检索默认只看最近 N 个运行记录（PM_MEMORY_SCAN_LIMIT 可覆盖）。
+# 200 是"不拖慢主管道"的经验值，不是"历史只有 200 条"——超出部分必须告警披露。
+_SCAN_LIMIT_DEFAULT = 200
 # 相似度门槛：低于它说明历史里没有真正的同类任务，硬塞参考只会带偏。
 # 0.10 是首版的教训（实测）：0.275 的"语义族邻居"（分诊 vs 情绪分类，都是
 # 分类+提取）不足以保证结构可借鉴——OPTIMIZER 照抄了错误任务语义，v0 被评委
@@ -46,6 +52,26 @@ def _sim_grams(text: str) -> set[str]:
     return _text_bigrams(cleaned)
 
 
+def _scan_limit() -> int:
+    """本次检索最多扫最近多少个 run_*.json（PM_MEMORY_SCAN_LIMIT，默认 200）。
+
+    非法值回退默认并告警，而不是当成 0：这个数决定"历史有多少被看得见"，
+    把它读成 0 等于静默关掉记忆层，与"历史里没有同类任务"长得一模一样。
+    """
+    raw = (os.getenv("PM_MEMORY_SCAN_LIMIT") or "").strip()
+    if not raw:
+        return _SCAN_LIMIT_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        logger.warning("PM_MEMORY_SCAN_LIMIT=%r 不是整数，回退默认 %d", raw, _SCAN_LIMIT_DEFAULT)
+        return _SCAN_LIMIT_DEFAULT
+    if val < 1:
+        logger.warning("PM_MEMORY_SCAN_LIMIT=%d 小于 1，回退默认 %d", val, _SCAN_LIMIT_DEFAULT)
+        return _SCAN_LIMIT_DEFAULT
+    return val
+
+
 def find_similar_asset(
     task: str, exclude_run_id: str | None = None, log_dir: Path | None = None
 ) -> dict[str, Any] | None:
@@ -69,7 +95,19 @@ def find_similar_asset(
 
     best: tuple[float, dict[str, Any]] | None = None
     files = sorted(log_dir.glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for f in files[:200]:  # 扫描上限：记忆检索不该拖慢主管道
+    # 扫描上限：记忆检索不该拖慢主管道，但"扫不动了"必须是看得见的信息而不是静默失忆。
+    # 曾经这里是硬编码 200 且无任何输出：logs/ 涨到 1000+ 个 run 文件后，八成历史
+    # 对检索不可见，表现只是"这次没找到参考"——和真的没有同类任务无法区分。
+    limit = _scan_limit()
+    if limit < len(files):
+        logger.warning(
+            "记忆检索被扫描上限截断：只看了最近 %d 个运行记录（共 %d 个，%.0f%% 未参与检索）；"
+            "需要更大范围请调 PM_MEMORY_SCAN_LIMIT",
+            limit,
+            len(files),
+            100 * (len(files) - limit) / len(files),
+        )
+    for f in files[:limit]:
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):

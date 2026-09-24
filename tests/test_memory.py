@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -112,3 +114,66 @@ def test_optimize_node_injects_memory_hint(log_dir, monkeypatch):
         out = optimize_node(state)  # type: ignore[arg-type]
     ev = [e for e in out["trace"] if e["event"] == "optimize_done"][-1]
     assert ev.get("memory_hint", {}).get("run_id") == "good1", "命中资产必须写进 trace"
+
+
+# ---------------------------------------------------------------------------
+# 扫描上限（PM_MEMORY_SCAN_LIMIT）：截断必须"看得见"，且改上限能差分复现
+# ---------------------------------------------------------------------------
+_T0 = 1_700_000_000  # 固定基准时间戳；mtime 只用来定"最近 N 个"，必须显式设置避免同秒抖动
+
+
+def _age(log_dir: Path, run_id: str, age_seconds: int) -> None:
+    t = _T0 + age_seconds
+    os.utime(log_dir / f"run_{run_id}.json", (t, t))
+
+
+def _seed_two_runs_with_different_ages(log_dir: Path) -> str:
+    """造两条记录：完全匹配的那条刻意最旧，较匹配的那条最新。
+
+    这样"扫描上限"就有了可观测的后果：上限=1 只会看到最新那条，
+    返回的 run_id 直接暴露它有没有把旧记录砍掉。
+    """
+    exact = "对电商客服对话做分类分诊，提取订单号"
+    _write_run(log_dir, "exact-but-old", exact)
+    _write_run(log_dir, "close-and-new", "对电商客服对话做分类分诊，提取退款单号")
+    _age(log_dir, "exact-but-old", 0)
+    _age(log_dir, "close-and-new", 600)
+    return exact
+
+
+def test_scan_limit_truncation_is_disclosed(log_dir, monkeypatch, caplog):
+    """被截断时必须留一条说清"扫了多少/共多少"的告警 —— 静默少扫与"没有同类任务"长一样。"""
+    exact = _seed_two_runs_with_different_ages(log_dir)
+    monkeypatch.setenv("PM_MEMORY_SCAN_LIMIT", "1")
+    with caplog.at_level(logging.WARNING, logger="pm.memory"):
+        hit = find_similar_asset(exact, log_dir=log_dir)
+    assert hit and hit["run_id"] == "close-and-new"
+    assert "截断" in caplog.text, caplog.text
+    assert "1" in caplog.text and "2" in caplog.text, f"告警要写清扫了几条/共几条：{caplog.text}"
+
+
+def test_raising_scan_limit_recovers_the_older_asset(log_dir, monkeypatch):
+    """差分断言：同一份历史，上限放到 2 就能命中被截掉的那条 —— 证明截断是唯一的因。"""
+    exact = _seed_two_runs_with_different_ages(log_dir)
+    monkeypatch.setenv("PM_MEMORY_SCAN_LIMIT", "2")
+    assert find_similar_asset(exact, log_dir=log_dir)["run_id"] == "exact-but-old"
+
+
+def test_no_warning_when_history_fits_in_the_limit(log_dir, monkeypatch, caplog):
+    """没截断就不许告警：否则这条日志很快被当成噪音忽略掉。"""
+    exact = _seed_two_runs_with_different_ages(log_dir)
+    monkeypatch.setenv("PM_MEMORY_SCAN_LIMIT", "500")
+    with caplog.at_level(logging.WARNING, logger="pm.memory"):
+        find_similar_asset(exact, log_dir=log_dir)
+    assert "截断" not in caplog.text
+
+
+@pytest.mark.parametrize("raw", ["abc", "0", "-5"])
+def test_illegal_scan_limit_falls_back_with_warning(log_dir, monkeypatch, caplog, raw):
+    """非法上限回退默认并告警，绝不能读成 0（那等于把记忆层静默关掉）。"""
+    exact = _seed_two_runs_with_different_ages(log_dir)
+    monkeypatch.setenv("PM_MEMORY_SCAN_LIMIT", raw)
+    with caplog.at_level(logging.WARNING, logger="pm.memory"):
+        hit = find_similar_asset(exact, log_dir=log_dir)
+    assert hit and hit["run_id"] == "exact-but-old", f"回退到 200 后两条都该可见：{hit}"
+    assert "PM_MEMORY_SCAN_LIMIT" in caplog.text
