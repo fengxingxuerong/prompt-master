@@ -123,7 +123,9 @@ def test_unanswered_item_counts_as_violation() -> None:
         for k, v in items.items()
         if k != "[约束] 缺失必须标注「数据缺失」"
     ]
-    ev = ChecklistEvaluation(n_items_checked=len(verdicts), verdicts=verdicts, unsourced=[], quality_band=4)
+    ev = ChecklistEvaluation(
+        n_items_checked=len(verdicts), verdicts=verdicts, unsourced=[], quality_band=4
+    )
     dims, detail = S.score_checklist(ev, _CHECKLIST)
     assert detail["unanswered"] == ["[约束] 缺失必须标注「数据缺失」"]
     assert dims.constraint_compliance == 8.0
@@ -135,7 +137,9 @@ def test_text_paraphrase_still_matches() -> None:
     verdicts = [
         CheckVerdict(item=r["item"] + " 。", satisfied=True, evidence="x") for r in _CHECKLIST
     ]
-    ev = ChecklistEvaluation(n_items_checked=len(verdicts), verdicts=verdicts, unsourced=[], quality_band=4)
+    ev = ChecklistEvaluation(
+        n_items_checked=len(verdicts), verdicts=verdicts, unsourced=[], quality_band=4
+    )
     dims, detail = S.score_checklist(ev, _CHECKLIST)
     assert detail["unanswered"] == [] and detail["violations"] == []
     assert dims.constraint_compliance == 9.5
