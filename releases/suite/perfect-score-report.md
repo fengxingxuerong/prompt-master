@@ -21,7 +21,7 @@
 | 0 skipped | 0（豁免需确认） | ✅ skips=NONE（skillmd 桩改造为覆盖迁移守卫测试，真跑） | final_skip_check 输出 |
 | 连续复跑一致 | 两次结果一致 | ✅ 三连跑 29/29 + main+lobster 两轮 exit=0 | 本报告 |
 | ruff 零告警 | 0 错误 0 警告 | ✅ All checks passed | ruff 输出 |
-| 覆盖率（核心目录） | 分支覆盖达标+豁免清单 | ✅ 74%（app 71% / notify 93%）+ 豁免清单见下 | .cov7.txt |
+| 覆盖率（核心目录） | 分支覆盖达标+豁免清单 | ✅ 74%（app 71% / notify 93%）+ 豁免清单见下 | `releases/archive/coverage-notes-20260925/.cov7.txt`（⚠️ 2026-09-25 归档：口径是 **triage 的 412 stmts**，不是 `pm/`；且本仓库没有覆盖率门禁，这个数字复跑才会有） |
 
 ## 三、覆盖率豁免清单（不可测/低价值代码，逐条列明）
 

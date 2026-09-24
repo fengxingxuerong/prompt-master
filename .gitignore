@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest_tmp/
 .mypy_cache/
 .ruff_cache/
 
@@ -17,6 +18,10 @@ __pycache__/
 logs/
 *.db
 *.log
+
+# 一次性终端输出别再落回仓库根（历史证据已归档到 releases/archive/coverage-notes-20260925/）
+/.cov*.txt
+/pytest_summary.txt
 
 # 覆盖率产物
 .coverage

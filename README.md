@@ -1,57 +1,90 @@
-# PromptMaster Suite · 总索引（三服务 + 套件资产）
+# PromptMaster · 给 Agent 用的提示词质检与优化闭环
 
-> 最后更新 2026-09-22 · 本文件是三服务套件的**唯一总入口**。接手方从这里出发，不需要问人。
+> 一句话：把一句需求变成**被测过、被评过、被证伪过一轮**的提示词，并如实说清哪里还不行。
+> 产出是「最终提示词 + 交付报告 + 可选 SKILL.md + 机器可读 JSON」，不是"看起来更好"的一段话。
 
-## 一、三服务一览
+本仓库有两块东西，别走错门：
 
-| 服务 | 地址 | 健康检查 | 用途 | 详细文档 |
-|---|---|---|---|---|
-| **ModelHub** 统一模型池网关 | http://127.0.0.1:8687 | `/api/health` | 12 模型主备链自动切换、固定角色、虚拟密钥、统一 OpenAI 兼容接入 | `/handoff` 无 → 见 `docs/modelhub/`（验收报告、操作手册）与 `docs/suite/api-reference.md` |
-| **龙虾站**（演示） | http://127.0.0.1:8791 | `/api/health` | 澳洲龙虾演示发布包：落地页/订单台账/海报 | `releases/lobster/docs/handoff.md`（或 `/ledger` 页面内链接） |
-| **任务台账** | http://127.0.0.1:8792 | `/api/health` | 任务分配、状态流转、撤销、负载看板 | `/rules` `/exceptions` `/handoff` |
+| 是什么 | 在哪 | 入口文档 |
+|---|---|---|
+| **PromptMaster 本产品**（提示词优化/评测/校准） | `pm/`、`run.py`、`run_server.py` | 本文 ↓ 与 `docs/agent-cli-guide.md` |
+| **套件三服务**（ModelHub 网关 / 龙虾站 / 任务台账，随仓发布） | `releases/`、`config/` | `docs/suite/README.md` |
 
-## 二、启动与守护
+## 一、一分钟跑通
 
 ```bash
-PY = D:\projects\prompt-master\.venv\Scripts\python.exe
-# 单独启动任一服务：
-%PY% run_modelhub.py --port 8687          # ModelHub
-%PY% releases\lobster\app.py --port 8791  # 龙虾站
-%PY% releases\taskboard\app.py --port 8792 # 任务台账
+# 0) 装依赖（Python ≥3.11）
+pip install -r requirements.txt
 
-# 看门狗（推荐）：崩溃/缺失自动拉起
-%PY% releases\suite\watchdog_suite.py --once     # 单次巡检+拉起
-%PY% releases\suite\watchdog_suite.py            # 前台守护
-%PY% releases\suite\watchdog_suite.py --install  # 注册计划任务（开机自启+5min 巡检）【已注册】
+# 1) 无 Key，先看代码能不能跑（不证明效果）
+python run.py --selftest
+PM_FAKE_BACKEND=progress python run.py --task "让 AI 分析销售数据" --fast   # 假后端跑完整流程
+
+# 2) 真实运行：配 Key（cp .env.example .env 后填 PM_API_KEY，或 export）
+python run.py --preflight                       # 花大钱之前先逐角色冒烟，必做
+python run.py --task "让 AI 分析销售数据" --target-model deepseek-v3
+
+# 3) 长任务别占终端：起常驻服务，用子命令
+python run_server.py &                          # REST + Web 控制台 + MCP 同源，:8080
+python run.py submit --task "……"                # 秒回 run_id
+python run.py wait <run_id>                     # 轮询到终态，输出结果 JSON
 ```
 
-三服务当前健康：以 `/api/health` 实测为准；历史巡检证据 `releases/suite/monitor_log.jsonl`、`watchdog_log.jsonl`。
+`python run.py --help` 会列出全部参数与**子命令**（`submit/status/report/wait/history/calibrate/library`）。
+退出码是给 Agent 做分支的协议：`0` 达标交付 / `1` 未达标但已交付 / `2` 参数或配置错误 / `3` 运行失败。
+加 `--json` 时 stdout 恰好一个 JSON 对象，进度全部走 stderr。
 
-鉴权（M3.3，2026-09-23）：默认本地全开放；在 `.env` 写 `TASKBOARD_TOKEN` / `LOBSTER_TOKEN` / `TRIAGE_TOKEN`（网关另有 `PMH_GATEWAY_TOKEN`）后，受保护接口需 `X-API-Key` 头。看门狗会把 `.env` 的 KEY=VALUE 透传给拉起的服务进程（schtasks 极简环境下同样生效）。口径详见 `docs/suite/api-reference.md` 头注与会审台 README。
+## 二、四条能力线
 
-## 三、报告与台账索引（按主题）
+| 线 | 命令 | 说明 |
+|---|---|---|
+| 优化闭环 | `run.py --task`（或 `POST /api/optimize`） | 澄清 → 生成 → 用例 → 执行 → 评估 → 修订，最多 N 轮；带基线对照与成对盲评 |
+| 事实断言 | `--cases-file cases.json --assert-mode rule` | 你给的 `expected` 有一票否决权；`rule` 模式交评委逐条核验，`custom:<名>` 可挂你自己的断言函数 |
+| 资产与记忆 | `run.py library` / `run.py history` | 达标提示词可按任务相似度检索、导出；history 给 Δ 与显著性 |
+| 评委可信度 | `run.py calibrate [--repeat N]` | 锚点人工分 vs 评委分（MAE/偏置/排序一致性）+ 评委自我复现性极差 |
 
-| 主题 | 文件 |
-|---|---|
-| 验收与评分 | `docs/modelhub/acceptance-report.html`（60/60）、`docs/final-test/final-acceptance-report.html`（28/28）、`docs/iteration/scoring-report.html` |
-| 竞品对标 | `docs/iteration/competitor-analysis.md` + 优点落地映射 `optimization-mapping.md` |
-| 缺陷台账 | `docs/release/defect-ledger.md`（D 系列）、套件 T 系列（CHANGELOG-v1.2.0.md §04） |
-| 基线与复测 | `releases/suite/five_dim_baseline.json` / `five_dim_retest2.json` / `five_dim_v13b.json` |
-| 完成度盘点 | `releases/suite/completion-audit.html` + `completion-ledger.md` |
-| 现状评估 | `releases/suite/health-assessment.html`（4.2/5 评分卡） |
-| 缺点分析 | `releases/suite/weakness-report.html`（17 条，含豁免登记） |
-| 安全豁免 | `releases/suite/security-waiver.html`（W7/W8/W9 经用户指令豁免，2026-09-21） |
+MCP 接入（9 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
 
-## 四、快速上手（新成员 10 分钟）
+## 三、这个产品对自己的结论有多硬（先读这节再用它给的分数）
 
-1. 读本文档 §1 §2，确认三服务健康；
-2. 任务台账 http://127.0.0.1:8792 → 读 `/rules` `/handoff` → 建/领任务；
-3. 接 ModelHub → 读 `docs/suite/api-reference.md` §一，POST /v1/chat/completions 试一发；
-4. 需要改 UI → 读 `docs/suite/design-tokens.md`（三服务视觉契约）；
-5. 出问题 → 先看 `releases/suite/watchdog_log.jsonl` 与各服务 `/v1/ledger`、`/api/orders`，再读对应 handoff 的故障排查节。
+- **评委这把尺子尚未收敛**。实测（2026-09-24，n=11 锚点，真实端点）：与人工分 MAE 0.65、
+  Pearson r 0.954，看着漂亮；但**过线判定一致率只有 0.818**，同一输入连打 3 次的极差最大 2.2
+  （阈值 2.0 已越）。所以"8.0 分"这类单点数字请当方向，别当结论；差 0.3 的两次比较无意义。
+  口径与实测记录见 `docs/evaluation.md`，账本在 `logs/judge_calibration_history.json`。
+- **判定式评分协议（`PM_SCORING_MODE=checklist`）默认关闭**。它把五个整数的填数权从评委手里
+  拿走一半（评委只答二值判定+证据，分数由代码算），实测能把自我极差从 2.25 压到 0.38 ——
+  但在同一批锚点上 MAE 从 0.83 涨到 1.85（系统性偏松），**判据未达成，所以不换默认**。
+  两臂样本数还不等（18 vs 15），比较本身尚未成立。
+- **达标 ≠ 有效果**：报告里的 Δ 只在基线有效时才有意义（零有效样本会报"不可采信"）。
+- **注入防御是模型相关的**：同一提示词在 A 端点免疫、在 B 端点可能被一句话劫持；
+  注入门禁会在 `hijacked>0` 时拒发 SKILL.md，这是兜底不是保险。
 
-## 五、责任边界与已知边界
+## 四、仓库地图
 
-- 安全维度经用户指令豁免（2026-09-21），详见 `security-waiver.html`；公网暴露前建议收回豁免；
-- 数据均为单机 JSON 落盘（原子写），上量前迁 SQLite（各 handoff 有指引）；
-- 桌面 `D:\Desktop\新建 Text Document.txt` 含明文密钥，处置权在用户（W9 豁免中）。
+```
+pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ 网关、web/ 控制台、
+                    scoring.py 评分协议、memory.py 资产检索、scheduler.py 任务调度）
+run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
+docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
+                    evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
+tests/              pytest 用例（CI 门禁；728+ 条，无 Key、禁止真实出网）
+tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
+judge_calibration/  评委校准锚点集（samples.json 已确认 / samples.candidates.json 待人工分）
+case_templates/     可直接喂 --cases-file 的 5 份领域用例集
+releases/           三服务套件与历史发布快照（不是本产品）
+logs/               运行产物（run_*.json / report_*.md / 缓存），gitignored，会持续膨胀
+scripts/            一次性探针与 A/B 对照脚本，非产品代码
+```
+
+## 五、已知边界（按会不会骗到你排序）
+
+1. **仪表未收敛**（见 §三）——产品输出的核心数字仍带 ±2 量级的自身抖动。
+2. **没有覆盖率门禁**：`pyproject.toml` 里没有 `--cov` / `fail_under`，任何"覆盖率 94%"的说法
+   都是手抄快照而非被守住的性质。静态门禁（ruff/mypy/pytest）已于 2026-09-25 全部归绿，
+   口径见 `docs/operations.md`。
+3. **多进程是显式前提，不是默认**：任务表默认进程内内存（`--workers > 1` 必须先设 `PM_TASK_DB`）、
+   缓存默认 JSON 每进程一份、限流是进程内滑窗。单进程才成立的东西别横向复制。
+4. **版本号有三处不一致**：`pyproject.toml` = 1.1.0、`pm/server.py` 自报 = 2.1.0、
+   `pm/modelhub/server.py` 自报 = 1.1.0，而 git tag 最新是 `v1.4.6`（套件 CHANGELOG 口径）。
+   没有单一事实源，别拿任一处当"当前版本"。
+5. **安全豁免 W7/W8/W9 未正式收回**（`releases/suite/security-waiver.html`）；公网暴露前必须处理。
