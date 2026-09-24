@@ -45,6 +45,7 @@ from ..scoring import (
     unsourced_numbers,
 )
 from ..scoring import evaluate_with_checklist as scoring_evaluate
+from ..scoring import merge_checklist_results as scoring_merge
 from ..state import State
 from .common import _apply
 from .execute import _case_ground_truth
@@ -224,6 +225,23 @@ def _merge_judge_results(
     # 触发线取"配置值"与"评委自我分歧能量出的分差"之中较大者：抖动大的评委不该被当成信号
     gate = effective_disagreement_threshold()
     if diff <= gate:
+        if checklist is not None:
+            # 判定式合并取**违规并集**：A 漏判、B 判到的那条必须仍然算违规，
+            # 取维度分平均会把它稀释掉（8.0 与 9.5 平均成 8.75 就继续放行了）。
+            merged = scoring_merge(ev_a, ev_b, checklist)
+            merged.judge_scores = judge_scores
+            merged.judge_disagreement = round(diff, 2)
+            merged.should_revise = merged.should_revise or not merged.passed
+            logger.info(
+                "case#%d 判定式合并：违规并集 %d 条 / 未答 %d 条 → %.2f（两位分别 %.2f / %.2f）",
+                idx,
+                len((merged.checklist_detail or {}).get("violations") or []),
+                len((merged.checklist_detail or {}).get("unanswered") or []),
+                merged.weighted_score,
+                ev_a.weighted_score,
+                ev_b.weighted_score,
+            )
+            return merged
         dims = DimensionScores(
             task_completion=(
                 ev_a.dimension_scores.task_completion + ev_b.dimension_scores.task_completion

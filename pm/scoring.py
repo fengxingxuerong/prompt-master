@@ -31,6 +31,7 @@ from .schemas import (
     PASS_THRESHOLD,
     ChecklistEvaluation,
     DimensionScores,
+    EvaluationResult,
     compute_weighted_score,
 )
 
@@ -282,6 +283,75 @@ def evaluate_with_checklist(
         passed=passed,
     )
     return ev, meta
+
+
+def merge_checklist_results(
+    ev_a: EvaluationResult, ev_b: EvaluationResult, checklist: list[dict[str, str]]
+) -> EvaluationResult:
+    """判定式下双评委的合并：**违规取并集**，不是维度分取平均。
+
+    为什么必须换：印象式取平均是"两位各打一个数、折中"；判定式的输出本质是一组布尔判定，
+    取平均会把"A 漏判一条、B 抓到了"稀释成 8.75 继续放行 —— 而防放水这套机制要的就是
+    "任一评委抓到就算抓到"（与 `judge._merge_rule_checks` 同一取向）。
+    质量维度取两位的较低值：它是唯一还留给评委的自由判断，保守方向在这里成立。
+    """
+    da: dict[str, Any] = dict(ev_a.checklist_detail or {})
+    db: dict[str, Any] = dict(ev_b.checklist_detail or {})
+    violated = set(da.get("violations") or []) | set(db.get("violations") or [])
+    unanswered = sorted(set(da.get("unanswered") or []) | set(db.get("unanswered") or []))
+    unsourced = sorted(
+        set(da.get("unsourced_unexplained") or []) | set(db.get("unsourced_unexplained") or [])
+    )
+    buckets: dict[str, list[str]] = {
+        "format": [],
+        "constraint": [],
+        "deliverable": [],
+        "robustness": [],
+    }
+    for row in checklist:
+        buckets[row["bucket"] if row["bucket"] in buckets else "constraint"].append(row["item"])
+    if unsourced:
+        # 与 score_checklist 同一处置：编造同时落进 constraint 与 robustness，并封顶 6.0
+        violated.add(_FABRICATION_ITEM)
+        buckets["constraint"].append(_FABRICATION_ITEM)
+        buckets["robustness"].append(_FABRICATION_ITEM)
+    dims = DimensionScores(
+        task_completion=_points(buckets["deliverable"], violated),
+        format_adherence=_points(buckets["format"], violated),
+        constraint_compliance=_points(buckets["constraint"], violated),
+        robustness=_points(buckets["robustness"], violated),
+        quality=min(ev_a.dimension_scores.quality, ev_b.dimension_scores.quality),
+    )
+    detail: dict[str, Any] = {
+        "violations": sorted(violated),
+        "unanswered": unanswered,
+        "unsourced_unexplained": unsourced,
+        "caps": [_FABRICATION_CAP] if unsourced else [],
+        "n_items": len(checklist),
+        "merged_from": [ev_a.judge, ev_b.judge],
+    }
+    weighted, passed = apply_caps(dims, detail)
+    return EvaluationResult(
+        dimension_scores=dims,
+        model_reported_score=weighted,
+        issues=_dedupe_texts(list(ev_a.issues) + list(ev_b.issues)),
+        suggestions=_dedupe_texts(list(ev_a.suggestions) + list(ev_b.suggestions)),
+        should_revise=not passed,
+        judge="merged",
+        scoring_mode=MODE_CHECKLIST,
+        checklist_detail=detail,
+        weighted_score=weighted,
+        passed=passed,
+    )
+
+
+def _dedupe_texts(texts: list[str]) -> list[str]:
+    seen: dict[str, None] = {}
+    for t in texts:
+        key = _norm(t)
+        if key and key not in seen:
+            seen[key] = None
+    return [t for t in texts if _norm(t) in seen]
 
 
 def _is_placeholder(basis: str) -> bool:

@@ -10,7 +10,13 @@ from __future__ import annotations
 
 import pytest
 from pm import scoring as S
-from pm.schemas import ChecklistEvaluation, CheckVerdict, UnsourcedClaim
+from pm.schemas import (
+    ChecklistEvaluation,
+    CheckVerdict,
+    DimensionScores,
+    EvaluationResult,
+    UnsourcedClaim,
+)
 
 _CHECKLIST = [
     {"item": "[约束] 每个结论必须附具体数值", "bucket": "constraint"},
@@ -157,6 +163,105 @@ def test_checklist_usable_rejects_thin_prompts() -> None:
     否则空桶拿 9.5 会把基线抬高、Δ 就测不出优化有没有变好。"""
     assert S.checklist_usable(S.build_checklist("帮我分析销售数据")) is False
     assert S.checklist_usable(S.build_checklist("[约束]\n1. 不得编造\n[输出格式]\n1. 表格")) is True
+
+
+def test_merge_takes_union_of_violations_not_average() -> None:
+    """A 漏判、B 判到的那条必须仍然算违规。
+
+    取维度分平均会把它稀释成 8.75 继续放行 —— 而双评委交叉验证要的就是
+    "任一评委抓到就算抓到"。
+    """
+    cl = [{"item": "[约束] 不得编造", "bucket": "constraint"}]
+    dims_ok = DimensionScores(
+        task_completion=9.5,
+        format_adherence=9.5,
+        constraint_compliance=9.5,
+        robustness=9.5,
+        quality=8.5,
+    )
+    dims_viol = dims_ok.model_copy(update={"constraint_compliance": 8.0})
+    a = EvaluationResult(
+        dimension_scores=dims_ok,
+        model_reported_score=9.35,
+        judge="evaluator",
+        scoring_mode="checklist",
+        checklist_detail={
+            "violations": [],
+            "unanswered": [],
+            "unsourced_unexplained": [],
+            "caps": [],
+        },
+    ).finalize()
+    b = EvaluationResult(
+        dimension_scores=dims_viol,
+        model_reported_score=8.97,
+        judge="evaluator_b",
+        scoring_mode="checklist",
+        checklist_detail={
+            "violations": ["[约束] 不得编造"],
+            "unanswered": [],
+            "unsourced_unexplained": [],
+            "caps": [],
+        },
+    ).finalize()
+    merged = S.merge_checklist_results(a, b, cl)
+    assert merged.checklist_detail["violations"] == ["[约束] 不得编造"]
+    assert merged.dimension_scores.constraint_compliance == 8.0
+    assert merged.weighted_score == 8.97, "必须等于 B 的分，而不是 (9.35+8.97)/2=9.16"
+    assert merged.judge == "merged"
+
+
+def test_merge_union_of_unsourced_keeps_the_cap() -> None:
+    """只有一侧抓到无来源数字时，封顶也必须保留。"""
+    cl = [{"item": "[约束] 不得编造", "bucket": "constraint"}]
+    base = EvaluationResult(
+        dimension_scores=DimensionScores(
+            task_completion=9.5,
+            format_adherence=9.5,
+            constraint_compliance=9.5,
+            robustness=9.5,
+            quality=9.5,
+        ),
+        model_reported_score=9.5,
+        judge="evaluator",
+        checklist_detail={"violations": [], "caps": []},
+    ).finalize()
+    flagged = base.model_copy(
+        update={
+            "judge": "evaluator_b",
+            "checklist_detail": {
+                "violations": [],
+                "caps": [6.0],
+                "unsourced_unexplained": ["22.4"],
+            },
+        }
+    )
+    merged = S.merge_checklist_results(base, flagged, cl)
+    assert merged.checklist_detail["caps"] == [6.0]
+    assert merged.weighted_score == 6.0 and merged.passed is False
+
+
+def test_merge_quality_takes_the_lower_band() -> None:
+    cl = [{"item": "[约束] a", "bucket": "constraint"}]
+    hi = EvaluationResult(
+        dimension_scores=DimensionScores(
+            task_completion=9.5,
+            format_adherence=9.5,
+            constraint_compliance=9.5,
+            robustness=9.5,
+            quality=9.5,
+        ),
+        model_reported_score=9.5,
+        judge="evaluator",
+        checklist_detail={},
+    ).finalize()
+    lo = hi.model_copy(
+        update={
+            "judge": "evaluator_b",
+            "dimension_scores": hi.dimension_scores.model_copy(update={"quality": 6.5}),
+        }
+    )
+    assert S.merge_checklist_results(hi, lo, cl).dimension_scores.quality == 6.5
 
 
 def test_scoring_mode_defaults_to_impression(monkeypatch: pytest.MonkeyPatch) -> None:
