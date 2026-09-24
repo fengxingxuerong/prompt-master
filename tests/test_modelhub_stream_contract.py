@@ -137,6 +137,39 @@ def test_interrupted_stream_emits_a_bytes_error_frame(monkeypatch: pytest.Monkey
     assert not hub.success
 
 
+def test_http_layer_returns_event_stream_not_null(monkeypatch: pytest.MonkeyPatch) -> None:
+    """真 HTTP 层（进程内 TestClient，零出网）：stream=true 必须拿到 SSE 流，不是 `null`。
+
+    上面几条测的是 `_stream_response` 这个函数；这一条测的是"路由把不把它的返回值交出去"。
+    丢了 return 的那一版，FastAPI 在这里序列化出的是 200 + body=`null`——
+    只有从 HTTP 层断言才看得见，函数级测试全绿也照样骗过去。
+    """
+    from fastapi.testclient import TestClient
+
+    def upstream() -> Iterator[bytes]:
+        yield b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+        yield b"data: [DONE]\n\n"
+
+    monkeypatch.setattr(S, "stream_upstream", lambda *a, **k: ("upstream-model", upstream()))
+    monkeypatch.setattr(S, "_hub_instance", lambda: _FakeHub([_entry()]))
+
+    with TestClient(S.app).stream(
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "stub-model",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as r:
+        assert r.status_code == 200, r.status_code
+        assert r.headers.get("content-type", "").startswith("text/event-stream"), r.headers
+        body = b"".join(r.iter_bytes())
+
+    assert body != b"null", "FastAPI 把 None 序列化成了 null —— 流式通道没接上"
+    assert b"[DONE]" in body and b"hi" in body, body
+
+
 def test_request_id_header_survives(monkeypatch: pytest.MonkeyPatch) -> None:
     """X-Modelhub-Request-Id 是对账用的（台账里同 request_id 能查到这一次）——别丢。"""
 
