@@ -19,7 +19,11 @@ def test_notify_config_roundtrip(tmp_path):
 
     cfg = {"webhook_url": "http://127.0.0.1:9/hook", "enabled": True}
     save_config(tmp_path, cfg)
-    assert load_config(tmp_path) == cfg
+    # M3.6：webhook_type 为缺省合并字段——不写则补默认 generic（向后兼容语义）
+    loaded = load_config(tmp_path)
+    assert loaded["webhook_url"] == cfg["webhook_url"]
+    assert loaded["enabled"] is True
+    assert loaded["webhook_type"] == "generic"
 
 
 def test_notify_config_corrupt_falls_back(tmp_path):

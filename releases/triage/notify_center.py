@@ -3,7 +3,14 @@
 能力：
 - notify(source, message, level="info")：落盘 notifications.jsonl（既有行为保持）+
   可选 webhook 分发（读 data/notify_config.json 的 webhook_url，5s 超时静默失败）
-- 配置格式：{"webhook_url": "https://...", "enabled": true}；无配置/未启用=仅落盘
+- 配置格式：
+    {"webhook_url": "https://...", "enabled": true, "webhook_type": "feishu|wecom|dingtalk|generic"}
+  webhook_type 决定 IM 机器人 payload 格式（M3.6，2026-09-24）：
+    - feishu   飞书自定义机器人（text 消息）
+    - wecom    企业微信群机器人（text 消息）
+    - dingtalk 钉钉自定义机器人（text 消息）
+    - generic  默认：原样发送 {ts, source, level, message} JSON（既有行为，向后兼容）
+  无配置/未启用=仅落盘。
 
 线程安全：文件追加与 webhook 均在调用线程内完成（webhook 失败绝不抛出）。
 """
@@ -17,7 +24,23 @@ from pathlib import Path
 
 _lock = threading.Lock()
 
-DEFAULT_CONFIG = {"webhook_url": "", "enabled": False}
+DEFAULT_CONFIG = {"webhook_url": "", "enabled": False, "webhook_type": "generic"}
+
+# IM 平台 → 消息模板（level/source 并入正文，IM 卡片不单独建模）
+_IM_TEXT_TEMPLATES = {
+    "feishu": lambda text: {"msg_type": "text", "content": {"text": text}},
+    "wecom": lambda text: {"msgtype": "text", "text": {"content": text}},
+    "dingtalk": lambda text: {"msgtype": "text", "text": {"content": text}},
+}
+
+
+def render_payload(rec: dict, webhook_type: str) -> dict:
+    """按 webhook_type 渲染 IM 机器人 payload；未知类型回退 generic（不中断推送）。"""
+    t = (webhook_type or "generic").strip().lower()
+    if t in _IM_TEXT_TEMPLATES:
+        text = f"[{rec.get('level', 'info')}][{rec.get('source', '')}] {rec.get('message', '')}"
+        return _IM_TEXT_TEMPLATES[t](text)
+    return rec  # generic：原样发送
 
 
 def _paths(base_dir: Path):
@@ -66,7 +89,8 @@ def notify(source: str, message: str, level: str = "info", base_dir: Path | None
     url = (cfg.get("webhook_url") or "").strip()
     if cfg.get("enabled") and url:
         try:
-            payload = json.dumps(rec, ensure_ascii=False).encode("utf-8")
+            payload = json.dumps(render_payload(rec, cfg.get("webhook_type") or ""),
+                                 ensure_ascii=False).encode("utf-8")
             req = urllib.request.Request(url, data=payload, method="POST",
                                          headers={"Content-Type": "application/json"})
             urllib.request.urlopen(req, timeout=5)

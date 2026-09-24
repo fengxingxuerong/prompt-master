@@ -44,6 +44,16 @@ $env:TRIAGE_TOKEN = "your-token"; .venv\Scripts\python.exe releases\triage\app.p
 
 设了之后：`/api/health` 与页面（`/`、`/static/*`）GET 豁免；**其余全部端点**（含 `POST /api/reviews` 等写操作与 `/api/sessions*` 等数据读）需请求头 `X-API-Key: <token>`。数据读也凭据化是因为工单正文含客户内容（W8 教训），比 taskboard/lobster 只护写接口更收紧一档。测试覆盖见 `tests/test_auth.py`（7 用例三态）。
 
+### 通知中心 webhook（M3.6 · 2026-09-24）
+
+`data/notify_config.json` 配置：
+
+```json
+{"webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx", "enabled": true, "webhook_type": "feishu"}
+```
+
+`webhook_type` 支持 `feishu`（飞书自定义机器人）/ `wecom`（企业微信群机器人）/ `dingtalk`（钉钉自定义机器人）/ `generic`（默认，原样发送 JSON）。不写该字段 = generic（向后兼容）；webhook 5s 超时静默失败，不阻断业务。测试覆盖见 `tests/test_notify_im.py`（6 用例，mock 端点实收验证）。
+
 ## API 一览
 
 | 方法 | 路径 | 说明 |
