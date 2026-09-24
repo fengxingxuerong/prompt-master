@@ -218,7 +218,7 @@ class TaskManager:
             if report:
                 return cast("str", report)
             if rec.report_path and rec.report_path.exists():
-                return cast("str", rec.report_path.read_text(encoding="utf-8"))
+                return rec.report_path.read_text(encoding="utf-8")
         # 进程重启 / 记录被淘汰后，仍可从 logs/ 找回
         fallback = _log_dir() / f"report_{run_id}.md"
         if fallback.exists():
@@ -352,17 +352,18 @@ class TaskManager:
         self.store.update_task(run_id, status="running")
 
         # 演示模式：把假后端限定在本次任务的作用域内（ContextVar），不改动任何模块属性（C4）
-        scenario = os.getenv("PM_FAKE_BACKEND", "")
+        from . import testing
+
+        scenario = testing.active_scenario()
         hook_cm: Any = contextlib.nullcontext()
         if scenario:
-            from . import testing
-
-            if scenario in testing.SCENARIOS:
-                hook_cm = testing.scope(scenario)
-            else:
+            hook_cm = testing.scope(scenario)
+        else:
+            raw = (os.getenv("PM_FAKE_BACKEND") or "").strip()
+            if raw:
                 logger.warning(
-                    "PM_FAKE_BACKEND=%r 不是可用场景（%s），本次按真实后端执行",
-                    scenario,
+                    "PM_FAKE_BACKEND=%s 不是可用场景（%s），本次按真实后端执行",
+                    raw,
                     "|".join(testing.SCENARIOS),
                 )
 

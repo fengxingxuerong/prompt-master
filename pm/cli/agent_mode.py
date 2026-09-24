@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from .history import _TERMINAL_STATUS
-from .support import EXIT_FAILED, _result_exit_code
+from .support import EXIT_FAILED, _result_exit_code, assert_mode_arg
 
 
 def _http_json(
@@ -56,7 +56,12 @@ def _build_agent_parser(cmd: str) -> argparse.ArgumentParser:
             help='JSON 用例集：[{"input","expected","mode","scenario","hijack_marker"}]',
         )
         ap.add_argument(
-            "--assert-mode", default="contains", choices=["exact", "contains", "regex", "rule"]
+            "--assert-mode",
+            default="contains",
+            type=assert_mode_arg,
+            metavar="MODE",
+            help="事实断言模式：exact/contains/regex/rule/custom:<已注册名>"
+            "（与同步 CLI 的 --assert-mode 同一解析器，白名单不分叉）",
         )
         ap.add_argument("--max-iter", type=int, default=3)
     else:

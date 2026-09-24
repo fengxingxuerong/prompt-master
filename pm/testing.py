@@ -50,6 +50,17 @@ DISPUTE_ARBITER_SCORE = 6.0
 
 SCENARIOS = ("progress", "stall", "dispute", "unclear")
 
+
+def active_scenario() -> str:
+    """PM_FAKE_BACKEND 指向的可用场景名；未设置或名字非法时返回 ""（= 本轮走真实后端）。
+
+    唯一口径：CLI 的 Key 闸门与 pipeline 的钩子装配都问它，避免出现"这里当演示模式跑、
+    那里当真实调用跑"的分叉（非法场景名必须两边都不算演示）。
+    """
+    raw = (os.getenv("PM_FAKE_BACKEND") or "").strip()
+    return raw if raw in SCENARIOS else ""
+
+
 # 兼容旧引用：模块级"全局状态"（不在任何 fake_backend 上下文里时用它）
 _COUNTER: dict[str, int] = {}
 _SCENARIO: str = "progress"

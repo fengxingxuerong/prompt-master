@@ -16,6 +16,7 @@ from .calibrate import _calibrate_command
 from .history import _history_command
 from .library import _library_command
 from .support import (
+    EXIT_CONFIG,
     EXIT_FAILED,
     _resolve_case_mode,
     _result_exit_code,
@@ -25,19 +26,52 @@ from .support import (
     setup_logging,
 )
 
+# 子命令清单：argparse 之前按裸字符串分发（这些参数与 --task 那一套互斥），
+# 所以 --help 必须自己把它们列出来 —— 否则文档写着"学 --help 就会用"，
+# 而 --help 里一个子命令都看不见（2026-09-25 实测：grep 计数 0）。
+_SUBCOMMAND_HELP = """
+子命令（写在最前面；各自完整参数看 `run.py <子命令> --help`）：
+  submit      提交异步任务到常驻 server（python run_server.py），秒回 run_id
+              —— 一轮真实优化要 40~80 次调用 / 10~30 分钟，长任务请走这条别占终端
+  status      查某个 run_id 的进度：status / iteration / aggregate / llm_calls
+  report      取该任务的交付报告全文（--out 落盘，缺省打印 JSON）
+  wait        阻塞轮询到终态，输出与 `--json` 同构的结果 JSON（Agent 只学一种格式）
+  history     运行历史 + 相对基线的 Δ 显著性（--last N / --include-demo / --json）
+  calibrate   评委校准：评委分 vs 锚点人工分，--repeat N 测评委自我复现性
+  library     达标提示词资产库（--recommend --task-text 找参考 / --export 导出）
+
+本地无 Key 路径：
+  python run.py --selftest                        图拓扑与控制流自检（秒级）
+  PM_FAKE_BACKEND=progress python run.py --task "..."   假后端跑完整流程（不证明效果）
+
+退出码协议（--json / 子命令共用）：0=达标交付 1=未达标但已交付 2=参数或配置错误 3=运行失败
+"""
+
+_SUBCOMMANDS = ("submit", "status", "report", "wait", "history", "calibrate", "library")
+
+
+def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
+    """子命令分发（保持原先"argparse 之前裸字符串匹配"的结构，只是收成一个函数）。"""
+    if cmd in {"submit", "status", "report", "wait"}:
+        return agent_subcommand(cmd, argv)
+    if cmd == "history":
+        return _history_command(argv)
+    if cmd == "calibrate":
+        return _calibrate_command(argv)
+    return _library_command(argv)
+
 
 def main() -> int:
-    if len(sys.argv) > 1 and sys.argv[1] in {"submit", "status", "report", "wait"}:
-        return agent_subcommand(sys.argv[1], sys.argv[2:])
-    if len(sys.argv) > 1 and sys.argv[1] == "history":
-        return _history_command(sys.argv[2:])
-    if len(sys.argv) > 1 and sys.argv[1] == "calibrate":
-        return _calibrate_command(sys.argv[2:])
-    if len(sys.argv) > 1 and sys.argv[1] == "library":
-        return _library_command(sys.argv[2:])
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        if sys.argv[1] in _SUBCOMMANDS:
+            return _dispatch_subcommand(sys.argv[1], sys.argv[2:])
+        # 打错子命令时别只丢一句 argparse 的 "unrecognized arguments"：把清单当场列出来
+        print(f"未知子命令：{sys.argv[1]!r}\n{_SUBCOMMAND_HELP}", file=sys.stderr)
+        return EXIT_CONFIG
 
     p = argparse.ArgumentParser(
         description="PromptMaster —— 提示词自动生成 / 测试 / 评估 / 迭代优化",
+        epilog=_SUBCOMMAND_HELP,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--task", help="原始需求描述")
@@ -261,13 +295,27 @@ def main() -> int:
         return 0
 
     if not os.getenv("PM_API_KEY") and not os.getenv("PM_TARGET_API_KEY"):
+        # 假后端场景下整轮不出网，闸门不该拦 —— 这正是 run.py 文档承诺的无 Key 入门路径。
+        # 口径与 pipeline 的钩子装配同源（active_scenario），非法场景名两边都不算演示。
+        from pm.testing import active_scenario  # 延迟导入：--help 轻路径不拉起 schemas
+
+        if not active_scenario():
+            print(
+                "错误：未检测到 PM_API_KEY。\n"
+                "请复制 .env.example 为 .env 并填写，或直接 export PM_API_KEY=...\n"
+                "无 Key 时的两条本地路径：\n"
+                "  python run.py --selftest"
+                "                            只验证图拓扑与控制流（秒级）\n"
+                '  PM_FAKE_BACKEND=progress python run.py --task "..."     假后端跑完整流程'
+                "（只验证链路，不证明优化效果）",
+                file=sys.stderr,
+            )
+            return 2
         print(
-            "错误：未检测到 PM_API_KEY。\n"
-            "请复制 .env.example 为 .env 并填写，或直接 export PM_API_KEY=...\n"
-            "若只想验证代码能否跑通，请用 python run.py --selftest",
+            "演示模式：PM_FAKE_BACKEND 假后端，本次不调用任何真实端点"
+            "（只验证链路，不证明优化效果）",
             file=sys.stderr,
         )
-        return 2
 
     init = initial_state(
         task=task,

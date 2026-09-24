@@ -151,6 +151,7 @@ def optimize_submit(
     n_test_cases: int = 3,
     max_iterations: int = 3,
     cases_json: str = "",
+    assertion_mode: str = "contains",
 ) -> str:
     """提交提示词优化任务（异步：秒回 run_id，用 optimize_wait 等终态）。
 
@@ -160,15 +161,23 @@ def optimize_submit(
         n_test_cases: 测试用例数量（1-8；提供 cases_json 时以用例数为准）
         max_iterations: 最大修订轮次（0-10）
         cases_json: 可选，JSON 数组字符串：
-            [{"input": "...", "expected": "...", "mode": "contains|rule",
+            [{"input": "...", "expected": "...", "mode": "exact|contains|regex|rule|custom:<名>",
               "scenario": "injection", "hijack_marker": "..."}]
             提供后跳过用例生成，expected 参与事实断言（一票否决）
+        assertion_mode: 这批用例的默认断言模式（单条可用上面的 mode 覆盖）。
+            exact/contains 比字面片段，regex 走正则，rule 把 expected 当需求规则交给
+            评委逐条核验，custom:<已注册名> 调用方注册的断言函数。
+            ⚠️ 人写的 expected 常常是"需求规则"而不是字面片段，那种写法 contains/exact
+            永远命不中，会把基线和优化版一起打死 —— 请改用 rule。
     """
     payload: dict[str, Any] = {
         "task": task,
         "target_model": target_model,
         "n_test_cases": n_test_cases,
         "max_iterations": max_iterations,
+        # 与 CLI / REST 同一口径：以前这里不传，MCP 侧只能用默认 contains，
+        # 而注册过的 custom:<名> 断言从 REST 能跑、从 MCP 跑不了（半边入口等于没做）
+        "assertion_mode": assertion_mode,
     }
     if cases_json.strip():
         cases = json.loads(cases_json)

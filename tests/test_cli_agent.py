@@ -146,6 +146,45 @@ def test_agent_submit_payload_from_cases_file(
     assert "test_cases" not in p2 and p2["assertion_mode"] == "contains"
 
 
+def test_agent_submit_accepts_custom_and_rule_modes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`submit --assert-mode` 与同步 CLI 同一白名单：以前这里是 choices 硬编码，
+    `custom:<已注册名>` 从 REST 能提交、从 submit 直接报错 —— 半边入口等于没做。"""
+    seen: dict[str, Any] = {}
+
+    def fake(
+        method: str, url: str, payload: dict[str, Any] | None = None, timeout: float = 30.0
+    ) -> dict[str, Any]:
+        seen.update(payload=payload)
+        return {"run_id": "R1"}
+
+    monkeypatch.setattr(agent_mode, "_http_json", fake)
+    cf = tmp_path / "cases.json"
+    cf.write_text(
+        json.dumps([{"input": "a", "expected": "b"}], ensure_ascii=False), encoding="utf-8"
+    )
+
+    for mode in ("rule", "custom:no_apology", "contains", "exact", "regex"):
+        assert (
+            agent_mode.agent_subcommand(
+                "submit", ["--task", "T", "--cases-file", str(cf), "--assert-mode", mode]
+            )
+            == 0
+        ), f"{mode} 不该被解析层拒掉"
+        assert seen["payload"]["assertion_mode"] == mode, "模式必须原样发给 server 校验"
+
+
+def test_agent_submit_rejects_unknown_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """放开白名单不等于不设闸：非法模式仍在解析阶段退出码 2。"""
+    monkeypatch.setattr(
+        agent_mode, "_http_json", lambda *a, **k: pytest.fail("非法模式不该走到发请求")
+    )
+    with pytest.raises(SystemExit) as e:
+        agent_mode.agent_subcommand("submit", ["--task", "T", "--assert-mode", "bogus"])
+    assert e.value.code == 2
+
+
 def test_agent_status_and_report(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

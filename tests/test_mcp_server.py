@@ -242,6 +242,28 @@ def test_optimize_submit_parses_cases_json(capture_http, monkeypatch):
     assert payloads[0]["n_test_cases"] == 1
 
 
+def test_optimize_submit_forwards_assertion_mode(capture_http, monkeypatch):
+    """断言模式必须能从 MCP 侧传下去：以前 optimize_submit 不带这个字段，
+    注册过的 `custom:<名>` 断言从 REST/CLI 能跑、从 MCP 跑不了（三入口口径分叉）。"""
+    payloads: list[dict] = []
+    real_request = M.urllib.request.Request
+
+    class SpyRequest(real_request):  # type: ignore[misc,valid-type]
+        def __init__(self, url: str, data: Any = None, **kw: Any) -> None:
+            if data:
+                payloads.append(json.loads(data.decode("utf-8")))
+            super().__init__(url, data=data, **kw)
+
+    monkeypatch.setattr(M.urllib.request, "Request", SpyRequest)
+    cases = json.dumps([{"input": "a", "expected": "b"}])
+    M.optimize_submit("t", cases_json=cases)
+    assert payloads[-1]["assertion_mode"] == "contains", "缺省要与 CLI/API 同为 contains"
+    M.optimize_submit("t", cases_json=cases, assertion_mode="custom:no_apology")
+    assert payloads[-1]["assertion_mode"] == "custom:no_apology"
+    M.optimize_submit("t", cases_json=cases, assertion_mode="rule")
+    assert payloads[-1]["assertion_mode"] == "rule"
+
+
 def test_optimize_status_and_report_urls(capture_http):
     M.optimize_status("deadbeef1234")
     assert capture_http[-1][1].endswith("/api/status/deadbeef1234")

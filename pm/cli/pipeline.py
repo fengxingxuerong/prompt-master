@@ -37,16 +37,17 @@ def run_pipeline(args: argparse.Namespace, init: dict[str, Any]) -> dict[str, An
     # 演示模式（与 server/scheduler 同一机制）：PM_FAKE_BACKEND 有效时，
     # 把假后端限定在本次运行的作用域内（ContextVar，不改动任何模块属性，C4）。
     # CLI 之前不支持该变量——无 Key 演示只能走 server；对齐后 CLI 也能跑。
-    scenario = os.getenv("PM_FAKE_BACKEND", "").strip()
+    from pm import testing
+
+    scenario = testing.active_scenario()
     hook_cm: Any = contextlib.nullcontext()
     if scenario:
-        from pm import testing
-
-        if scenario in testing.SCENARIOS:
-            hook_cm = testing.scope(scenario)
-        else:
+        hook_cm = testing.scope(scenario)
+    else:
+        raw = (os.getenv("PM_FAKE_BACKEND") or "").strip()
+        if raw:
             print(
-                f"⚠️ PM_FAKE_BACKEND={scenario!r} 不是可用场景"
+                f"⚠️ PM_FAKE_BACKEND={raw!r} 不是可用场景"
                 f"（{'|'.join(testing.SCENARIOS)}），本次按真实后端执行"
             )
 
