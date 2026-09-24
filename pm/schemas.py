@@ -332,6 +332,55 @@ class RuleCheck(BaseModel):
     )
 
 
+class CheckVerdict(BaseModel):
+    """评委对清单里**一条**的二值判定。
+
+    为什么是二值而不是 1-10：实测评委的复现性问题不是"围绕真值抖"，是**每次调用先选一套
+    口径**（仲裁同一输入稳定落在 5.15 与 7.10 两个模式，`temperature=0` 无效）。
+    五个 1-10 整数给了它 10^5 种"口径组合"，而"这条约束满足没有"是它能稳定回答的题型。
+    """
+
+    item: str = Field(description="清单条目原文（照抄回来，代码按文本回配）")
+    satisfied: bool = Field(description="被测输出是否满足该条")
+    evidence: str = Field(default="", description="从测试输出摘的一句证据；找不到写“未找到”")
+
+
+class UnsourcedClaim(BaseModel):
+    """输出里一个"输入中找不到来源"的断言及其推导依据。
+
+    候选清单由代码给出（数字回查），评委只能**解释**不能**省略**：漏报按违规处理。
+    这条针对的是校准实测里唯一那条漏放——「各月均在均值 ±2 倍标准差内」没有任何 σ 计算
+    支撑，评委给了 8.6~8.85 而人工只给 7.0；它落在判定线之上，是闭环会真金白银放行的那种。
+    """
+
+    claim: str = Field(description="输出里那句无直接来源的断言/数值，原文摘出")
+    basis: str = Field(
+        default="",
+        description="它是怎么从输入算出来的（写得出算式就写算式）；写不出来就是编造，留空",
+    )
+
+
+class ChecklistEvaluation(BaseModel):
+    """判定式评分协议下评委的完整输出：**没有任何 1-10 的自由整数**。
+
+    分数由 `pm.scoring.score_checklist()` 从这些二值判定算出来，所以维度分与总分
+    不可能自相矛盾（印象式下"issues 说编造、鲁棒性给 8"这类形态在结构上消失了）。
+    唯一保留的自由判断是 `quality_band`——内容深度确实无法二值化，但把它从
+    1-10 收成 5 个具名档位，也砍掉了同一维度上 2/3 的可跳空间。
+    """
+
+    verdicts: list[CheckVerdict] = Field(description="对核对清单的逐条二值判定，一条不落")
+    unsourced: list[UnsourcedClaim] = Field(
+        default_factory=list,
+        description="代码点名的每个无来源断言都要在这里解释；未列出的按编造处理",
+    )
+    quality_band: int = Field(ge=1, le=5, description="质量与深度档位（1 最低、5 最高）")
+    issues: list[str] = Field(
+        default_factory=list, description="未满足条目与编造问题的成文说明（给修订环节看）"
+    )
+    suggestions: list[str] = Field(default_factory=list, description="提示词层面的修改动作")
+
+
 class EvaluationResult(BaseModel):
     """评委的结构化输出。**字段声明顺序即生成顺序**，不要随手重排。
 
@@ -454,6 +503,14 @@ class EvaluationResult(BaseModel):
         default=None, description="双评委加权分差；超过阈值时触发仲裁"
     )
     cache_hit: bool = Field(default=False, description="本条评估是否命中本地缓存")
+    scoring_mode: str = Field(
+        default="impression",
+        description="本条分数出自哪套协议：impression（五个 1-10 整数）/ checklist（二值判定+代码算分）",
+    )
+    checklist_detail: dict[str, Any] = Field(
+        default_factory=dict,
+        description="判定式明细（违规条目、未答条目、封顶）；印象式下为空",
+    )
 
     @field_validator(
         "judge", "judge_scores", "cache_hit", "sample_index", "should_revise", mode="before"

@@ -28,7 +28,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,6 +37,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from pm.bootstrap import ensure_utf8_stdio  # noqa: E402
 
 ensure_utf8_stdio()
+
+from pm.scoring import unsourced_numbers  # noqa: E402
 
 ROOT = Path(__file__).parent
 DEFAULT_LOG_DIR = ROOT / "logs"
@@ -60,7 +61,6 @@ BANDS: tuple[tuple[str, float, float], ...] = (
     (">=9.0", 9.0, 10.01),
 )
 
-_NUM_RE = re.compile(r"\d+(?:[.,]\d+)?%?")
 # rubric 点名"看着像质量、其实不是证据"的东西：命中即降权复核优先级。
 _PACKAGING = ("思考过程：", "Thought process:", "分析如下：", "以上完全符合要求", "已达标")
 _TRUNCATED = ("…", "...", "（略）", "[截断]")
@@ -77,19 +77,14 @@ def _band_of(score: float) -> str:
     return "unknown"
 
 
-def _nums(text: str) -> set[str]:
-    """抽取数字 token，去掉千分位；用于"输出里的数在输入里存不存在"的机械回查。"""
-    return {t.replace(",", "").rstrip("%") for t in _NUM_RE.findall(text) if t.strip("%")}
-
-
 def _hints(test_input: str, output: str) -> list[str]:
-    """不依赖 LLM 的客观线索。人工分最难判的是"这算不算编造"，先把可核的部分核掉。"""
+    """不依赖 LLM 的客观线索。人工分最难判的是"这算不算编造"，先把可核的部分核掉。
+
+    数字回查改用 `pm.scoring.unsourced_numbers`：与判定式评分协议同一口径。
+    两处各写一套的话，采集时给人的线索和线上算分判的违规就不是同一批数字。
+    """
     out: list[str] = []
-    src = _nums(test_input)
-    # 只回查带小数或百分比的断言性数字：整数 1/2/3 多是序号与条目计数，命中全是噪音。
-    suspect = sorted(
-        t for t in _nums(output) if t not in src and ("." in t or t.endswith("%")) and len(t) > 1
-    )
+    suspect = unsourced_numbers(test_input, output)
     if suspect:
         out.append(f"输出中 {len(suspect)} 个数字在输入里找不到来源（需人工判断是否推算）：{suspect[:6]}")
     if any(p in output for p in _PACKAGING):

@@ -90,7 +90,6 @@ _CONSTRAINT_SECTION_RE = re.compile(r"约束|边界|规则|要求|限制|禁止|
 # [格式规范] 里列的是"第一部分/第二部分"，数进来就是误杀）。
 _NON_CONSTRAINT_SECTION_RE = re.compile(r"任务|背景|角色|格式|输出|示例|骨架|流程|步骤|结构")
 _NUMBERED_ITEM_RE = re.compile(r"^\s*\d+\s*[.、)）]\s*\S")
-
 # 定界符配平：<输入>…<输入>（重复开标签）这类畸形会在真实调用里放大注入面 ——
 # 目标模型看到两个开标签，分不清哪段才是"数据区"，上一轮评审在 Run A 的最终提示词里就抓到过。
 _OPEN_TAG_RE = re.compile(r"<([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]{0,20})>")
@@ -195,6 +194,35 @@ def count_constraints(prompt: str) -> dict[str, Any]:
     total = sum(n for _, n in parts)
     sections = "、".join(f"[{name}]×{n}" for name, n in parts)
     return {"total": total, "sections": sections}
+
+
+# 破折号/圆点条目：`count_constraints` 刻意不数它们（数错会误杀 ≤8 约束预算闸），
+# 但判定式评分要的是"逐条可核对的清单"，多一条少一条只是多问一个是非题，
+# 代价远低于漏掉 [约束] 段里用 `- ` 写的那半数条目。
+_BULLET_ITEM_RE = re.compile(r"^\s*[-•*]\s*\S")
+
+
+def structure_items(prompt: str) -> list[tuple[str, str]]:
+    """把标签段里的条目摊平成 `(段名, 条目原文)` 列表（编号与破折号都收）。
+
+    给判定式评分当核对清单用。**不做语义判断**：只按标签段与行首标点切，
+    所以同一段里的"1. 趋势结论 2. 异常点"（交付物）和"[约束] 1. 不得编造"（约束）
+    会一起出来——分类是 `pm.scoring` 的事，解析器保持只认字面结构。
+    """
+    out: list[tuple[str, str]] = []
+    current: str | None = None
+    for line in (prompt or "").splitlines():
+        m = _SECTION_HEADER_RE.match(line)
+        if m:
+            current = m.group(1)
+            continue
+        if current is None:
+            continue
+        if _NUMBERED_ITEM_RE.match(line) or _BULLET_ITEM_RE.match(line):
+            text = re.sub(r"^\s*(?:\d+\s*[.、)）]|[-•*])\s*", "", line).strip()
+            if text:
+                out.append((current, text))
+    return out
 
 
 # 除模板外的其它注入包装器（由 nodes.py / scheduler 运行时拼进上下文，不在 prompts.py 模板里）

@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..scoring import scoring_mode
 from .support import EXIT_CONFIG, EXIT_FAILED, LOG_DIR
 
 # --------------------------------------------------------------------------
@@ -23,16 +24,22 @@ _CALIB_DRIFT_ALERT = 0.5
 _CALIB_HISTORY = LOG_DIR / "judge_calibration_history.json"
 
 
-def _calib_fingerprints(role: str, samples: list[dict[str, Any]]) -> tuple[str, str, str]:
+def _calib_fingerprints(
+    role: str, samples: list[dict[str, Any]], mode: str
+) -> tuple[str, str, str]:
     """本次校准的口径指纹：(评委模型, 评分 rubric 指纹, 锚点集指纹)。
 
     读不到时返回占位符而不是抛错——漂移账本不该因为配置读不到就记不进去。
+
+    `mode` 决定照哪份 rubric：判定式与印象式对同一份输入打的不是同一个量，
+    指纹若相同，漂移检测就会把"换了协议"读成"评委漂了"。
     """
     try:
         from .. import llm
-        from ..prompts import rubric_stamp
+        from ..prompts import checklist_rubric_stamp, rubric_stamp
 
-        return (llm.build_config(role).model, rubric_stamp(), _anchors_stamp(samples))
+        stamp = checklist_rubric_stamp() if mode == "checklist" else rubric_stamp()
+        return (llm.build_config(role).model, stamp, _anchors_stamp(samples))
     except Exception:  # noqa: BLE001 - 指纹缺失只影响"能不能比"，不影响本次校准
         return ("(unknown)", "", _anchors_stamp(samples))
 
@@ -73,6 +80,13 @@ def _calibrate_command(argv: list[str]) -> int:
         help="额外做「评委与自己比」的复现性测量：同输入连打 N 次（绕缓存），"
         "代价是 N×锚点 次调用；1=不测",
     )
+    ap.add_argument(
+        "--scoring-mode",
+        choices=("impression", "checklist"),
+        default=None,
+        help="评分协议；不填则读 PM_SCORING_MODE（默认 impression=现行五个 1-10 整数）。"
+        "checklist=二值判定 + 代码算分，用来做两套协议的 A/B",
+    )
     ap.add_argument("--json", action="store_true", help="输出 JSON（智能体消费）")
     ap.add_argument(
         "--no-save", action="store_true", help="本次结果不追加进漂移历史（只看不动账本）"
@@ -104,7 +118,9 @@ def _calibrate_command(argv: list[str]) -> int:
     if pending:
         print(calib.render_provenance(len(samples) + len(pending), len(pending)), file=sys.stderr)
 
-    analysis, errors = calib.calibrate(samples, ns.judge)
+    # 协议：命令行优先，其次 PM_SCORING_MODE，都没有就是现行印象式。
+    mode = ns.scoring_mode or scoring_mode()
+    analysis, errors = calib.calibrate(samples, ns.judge, mode)
     for sid, err in errors:
         print(f"  [SKIP] {sid}：{err}", file=sys.stderr)
     if not analysis:
@@ -115,7 +131,7 @@ def _calibrate_command(argv: list[str]) -> int:
     # 在 bias/MAE/r 上可以看着完全正常（抖动甚至摊平 MAE），但它会让双评委分差、
     # 仲裁触发率与 Δ 的噪声带全部失去含义。绕缓存重复打，否则极差恒为 0。
     if ns.repeat >= 2:
-        rep = calib.repeatability(samples, ns.judge, ns.repeat)
+        rep = calib.repeatability(samples, ns.judge, ns.repeat, mode)
         analysis["repeatability"] = rep
 
     # 漂移对比：只在**同口径**的历史记录之间比。
@@ -129,7 +145,7 @@ def _calibrate_command(argv: list[str]) -> int:
             history = json.loads(_CALIB_HISTORY.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             history = []  # 历史损坏按空账本处理，本次照常记录
-    now_model, now_rubric, now_anchors = _calib_fingerprints(ns.judge, samples)
+    now_model, now_rubric, now_anchors = _calib_fingerprints(ns.judge, samples, mode)
     now_n = int(analysis["n"])
 
     def _comparable(h: dict[str, Any]) -> bool:
@@ -142,7 +158,12 @@ def _calibrate_command(argv: list[str]) -> int:
         锚点条数是那条兜底的例外：老记录虽然没指纹，`n` 一直都在账本里，
         所以"6 条的手写锚点 vs 11 条含真实跑批锚点"这种换考卷能被抓出来，
         而不是被当成评委漂移。
+
+        协议（mode）在两个分支之外单独判：老记录没有这个字段，缺省就是印象式；
+        但判定式跑出来的分与印象式的分不是同一个量，混在一起比"漂移"是自欺。
         """
+        if h.get("mode", "impression") != mode:
+            return False
         hm, hr, ha = h.get("model"), h.get("rubric"), h.get("anchors")
         if not (hm or hr or ha):
             return h.get("n") in (None, now_n)
@@ -181,6 +202,11 @@ def _calibrate_command(argv: list[str]) -> int:
             filter(
                 None,
                 [
+                    (
+                        f"评分协议已更换（{changed.get('mode', 'impression')} → {mode}）"
+                        if changed.get("mode", "impression") != mode
+                        else ""
+                    ),
                     "评委模型已更换" if changed.get("model") not in (None, now_model) else "",
                     "评分提示词已改动" if changed.get("rubric") not in (None, now_rubric) else "",
                     ("锚点集已更换" if changed.get("anchors") not in (None, now_anchors) else ""),
@@ -208,6 +234,7 @@ def _calibrate_command(argv: list[str]) -> int:
         entry: dict[str, Any] = {
             "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
             "judge": ns.judge,
+            "mode": mode,
             "n": analysis["n"],
             "bias": analysis["bias"],
             "mae": analysis["mae"],
@@ -246,6 +273,7 @@ def _calibrate_command(argv: list[str]) -> int:
             json.dumps(
                 {
                     "judge": ns.judge,
+                    "mode": mode,
                     "analysis": analysis,
                     "drift": drift,
                     "n_pending": len(pending),
@@ -260,6 +288,7 @@ def _calibrate_command(argv: list[str]) -> int:
         )
         return 0
 
+    print(f"[评分协议] {mode}")
     print(calib.render_report(ns.judge, analysis))
     if drift and drift.get("comparable") is False:
         print(

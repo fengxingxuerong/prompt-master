@@ -238,7 +238,9 @@ def _patch_calib(
 ) -> None:
     monkeypatch.setattr(calibrate_judge, "load_samples", lambda p: [{"id": "s1"}])
     monkeypatch.setattr(
-        calibrate_judge, "calibrate", lambda samples, judge: (analysis, list(errors or []))
+        calibrate_judge,
+        "calibrate",
+        lambda samples, judge, mode="impression": (analysis, list(errors or [])),
     )
     monkeypatch.setattr(calibrate_judge, "render_report", lambda judge, a: f"REPORT-{judge}")
 
@@ -464,7 +466,7 @@ def test_calibrate_drift_ignores_records_from_another_rubric(
 
     _patch_log_dir(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        cli_calibrate, "_calib_fingerprints", lambda role, samples: ("glm-5.2", "r2", "a1")
+        cli_calibrate, "_calib_fingerprints", lambda role, samples, mode: ("glm-5.2", "r2", "a1")
     )
     _seed_history(
         tmp_path,
@@ -506,7 +508,7 @@ def test_calibrate_reports_no_comparable_baseline_instead_of_fake_drift(
 
     _patch_log_dir(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        cli_calibrate, "_calib_fingerprints", lambda role, samples: ("glm-5.2", "r2", "a1")
+        cli_calibrate, "_calib_fingerprints", lambda role, samples, mode: ("glm-5.2", "r2", "a1")
     )
     _seed_history(
         tmp_path,
@@ -538,7 +540,9 @@ def test_calibrate_ledger_records_cohort_fingerprints(
 
     _patch_log_dir(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        cli_calibrate, "_calib_fingerprints", lambda role, samples: ("glm-5.2", "abc123", "a1")
+        cli_calibrate,
+        "_calib_fingerprints",
+        lambda role, samples, mode: ("glm-5.2", "abc123", "a1"),
     )
     _patch_calib(monkeypatch, {"n": 5, "bias": 0.0, "mae": 0.3, "r": 0.9})
     assert cli_calibrate._calibrate_command(["--json"]) == 0
@@ -562,7 +566,7 @@ def test_calibrate_repeat_lands_in_ledger_and_json(
     monkeypatch.setattr(
         calibrate_judge,
         "repeatability",
-        lambda samples, judge, times: {
+        lambda samples, judge, times, mode="impression": {
             "role": judge,
             "times": times,
             "n_items": 2,
@@ -612,7 +616,9 @@ def test_repeatability_measures_variance_with_real_path(
         def __init__(self, v: float) -> None:
             self.weighted_score = v
 
-    monkeypatch.setattr(calibrate_judge, "evaluate_sample", lambda role, s: _Ev(next(scores)))
+    monkeypatch.setattr(
+        calibrate_judge, "evaluate_sample", lambda role, s, mode="impression": _Ev(next(scores))
+    )
     monkeypatch.setenv("PM_JUDGE_DISAGREEMENT", "2.0")
     rep = calibrate_judge.repeatability([{"id": "s1"}], "evaluator", times=3)
     assert rep["n_items"] == 1
@@ -640,7 +646,7 @@ def test_repeatability_bypasses_cache_but_keeps_the_injected_backend(
         def __init__(self, v: float) -> None:
             self.weighted_score = v
 
-    def fake_eval(role: str, s: dict):
+    def fake_eval(role: str, s: dict, mode: str = "impression"):
         seen["cache_off"] = seen.get("cache_off", False) or backend.cache_disabled()
         seen["hook_still_fake"] = (
             backend.current() is not None and backend.current().structured is not None
@@ -662,7 +668,7 @@ def test_repeatability_survives_a_failing_item(monkeypatch: pytest.MonkeyPatch) 
         def __init__(self, v: float) -> None:
             self.weighted_score = v
 
-    def fake_eval(role: str, s: dict):
+    def fake_eval(role: str, s: dict, mode: str = "impression"):
         if s["id"] == "bad":
             raise RuntimeError("engine is not available temporarily")
         return _Ev(6.0)
@@ -718,7 +724,7 @@ def test_calibrate_anchor_set_change_is_not_judge_drift(
 
     _patch_log_dir(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        cli_calibrate, "_calib_fingerprints", lambda role, samples: ("glm-5.2", "r2", "a2")
+        cli_calibrate, "_calib_fingerprints", lambda role, samples, mode: ("glm-5.2", "r2", "a2")
     )
     _seed_history(
         tmp_path,
@@ -743,8 +749,13 @@ def test_anchors_stamp_tracks_scores_not_just_ids() -> None:
 def test_calibrate_real_fingerprints_are_populated(monkeypatch: pytest.MonkeyPatch) -> None:
     """没被 monkeypatch 时，指纹要真的取到模型名与 rubric 哈希（不是占位符）。"""
     model, rubric, anchors = cli_calibrate._calib_fingerprints(
-        "evaluator", [{"id": "a", "human_score": 5}]
+        "evaluator", [{"id": "a", "human_score": 5}], "impression"
     )
     assert model and model != "(unknown)"
     assert len(rubric) == 10
     assert len(anchors) == 10
+    # 换协议必须换指纹：否则漂移检测会把"换成判定式"读成"评委漂了"
+    _m2, rubric2, _a2 = cli_calibrate._calib_fingerprints(
+        "evaluator", [{"id": "a", "human_score": 5}], "checklist"
+    )
+    assert rubric2 != rubric and len(rubric2) == 10

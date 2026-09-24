@@ -45,6 +45,7 @@ from pm.schemas import (  # noqa: E402
     EvaluationResult,
     judge_disagreement_threshold,
 )
+
 DEFAULT_SAMPLES = Path(__file__).parent / "judge_calibration" / "samples.json"
 EXAMPLE_SAMPLES = Path(__file__).parent / "judge_calibration" / "samples.example.json"
 JUDGE_ROLES = ("evaluator", "evaluator_b", "arbiter")
@@ -152,10 +153,14 @@ def load_samples(path: Path) -> Anchors:
 # --------------------------------------------------------------------------
 # 评估（与主管道同口径）
 # --------------------------------------------------------------------------
-def evaluate_sample(role: str, sample: dict[str, Any]) -> EvaluationResult:
+def evaluate_sample(
+    role: str, sample: dict[str, Any], mode: str = "impression"
+) -> EvaluationResult:
     """用与 pm.nodes._evaluate_one 相同的提示词渲染 + schema 调用真实评委。
 
     校准不另写评分提示词——否则校准的就不再是线上跑的那台评委。
+    `mode="checklist"` 走判定式协议（同一份渲染前缀 + `PM_SCORING_MODE` 那套算分），
+    两种协议共用一条入口正是 A/B 测量要的：同输入、同模型、只换协议。
     """
     user = render(
         EVALUATOR_USER,
@@ -165,8 +170,48 @@ def evaluate_sample(role: str, sample: dict[str, Any]) -> EvaluationResult:
         test_input=sample["test_input"],
         test_output=sample["test_output"],
     )
+    if mode == "checklist":
+        return _evaluate_checklist(role, sample, user)
     ev, _meta = structured_call(role, EvaluationResult, EVALUATOR_SYSTEM, user)
     return ev.finalize()
+
+
+def _evaluate_checklist(role: str, sample: dict[str, Any], base_user: str) -> EvaluationResult:
+    """判定式协议跑一条锚点：评委只出二值判定，分数由 pm.scoring 算。"""
+    from pm.prompts import EVALUATOR_CHECKLIST, EVALUATOR_SYSTEM_CHECKLIST
+    from pm.scoring import (
+        apply_caps,
+        build_checklist,
+        checklist_usable,
+        score_checklist,
+        unsourced_numbers,
+    )
+    from pm.schemas import ChecklistEvaluation
+
+    checklist = build_checklist(sample["prompt"], sample["original_task"])
+    if not checklist_usable(checklist):
+        raise ValueError("被测提示词的标签段摊不出够用的清单，判定式对这条不适用")
+    candidates = unsourced_numbers(sample["test_input"], sample["test_output"])
+    user = base_user + render(
+        EVALUATOR_CHECKLIST,
+        checklist="\n".join(f"- {r['item']}" for r in checklist),
+        numbers="、".join(candidates) or "（无候选）",
+    )
+    ce, _meta = structured_call(role, ChecklistEvaluation, EVALUATOR_SYSTEM_CHECKLIST, user)
+    dims, detail = score_checklist(ce, checklist, unsourced_candidates=candidates)
+    weighted, passed = apply_caps(dims, detail)
+    return EvaluationResult(
+        dimension_scores=dims,
+        model_reported_score=weighted,
+        issues=ce.issues,
+        suggestions=ce.suggestions,
+        should_revise=not passed,
+        judge=role,
+        scoring_mode="checklist",
+        checklist_detail=detail,
+        weighted_score=weighted,
+        passed=passed,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -362,7 +407,8 @@ def render_report(role: str, analysis: dict[str, Any]) -> str:
     hist = analysis.get("human_band_hist") or {}
     if hist:
         lines.append(
-            "- 人工分分布：" + "　".join(f"{b}:{n}" for b, n in hist.items())
+            "- 人工分分布："
+            + "　".join(f"{b}:{n}" for b, n in hist.items())
             + f"（覆盖 {analysis.get('bands_covered', 0)}/{len(BANDS)} 带）"
         )
     if analysis["flags"]:
@@ -420,7 +466,7 @@ def render_repeatability(rep: dict[str, Any]) -> str:
 # 校准主流程（与 CLI 分离，便于测试注入假评委）
 # --------------------------------------------------------------------------
 def calibrate(
-    samples: list[dict[str, Any]], role: str
+    samples: list[dict[str, Any]], role: str, mode: str = "impression"
 ) -> tuple[dict[str, Any], list[tuple[str, str]]]:
     """逐条评估并聚合。返回 (分析结果, 失败锚点列表)。"""
     ok_samples: list[dict[str, Any]] = []
@@ -429,7 +475,7 @@ def calibrate(
     for s in samples:
         sid = str(s.get("id") or "?")
         try:
-            ev = evaluate_sample(role, s)
+            ev = evaluate_sample(role, s, mode)
             ok_samples.append(s)
             ok_scores.append(ev.weighted_score)
         except Exception as e:  # noqa: BLE001 - 单锚点失败不中断校准
@@ -442,7 +488,9 @@ def calibrate(
 # --------------------------------------------------------------------------
 # 复现性：评委跟**自己**比（不与人工比）
 # --------------------------------------------------------------------------
-def repeatability(samples: list[dict[str, Any]], role: str, times: int = 3) -> dict[str, Any]:
+def repeatability(
+    samples: list[dict[str, Any]], role: str, times: int = 3, mode: str = "impression"
+) -> dict[str, Any]:
     """同一份渲染连续打 `times` 次，量极差。绕开评估缓存——否则第二次永远命中，
     测出来的极差恒为 0，那是自欺而不是"很稳定"。
 
@@ -461,7 +509,7 @@ def repeatability(samples: list[dict[str, Any]], role: str, times: int = 3) -> d
             err = ""
             for _ in range(max(1, times)):
                 try:
-                    scores.append(float(evaluate_sample(role, s).weighted_score))
+                    scores.append(float(evaluate_sample(role, s, mode).weighted_score))
                 except Exception as e:  # noqa: BLE001 - 单条失败不影响整体测量
                     err = f"{type(e).__name__}: {e}"
                     break
@@ -513,6 +561,12 @@ def main() -> int:
         "代价是 N 倍调用；1=不测",
     )
     ap.add_argument(
+        "--scoring-mode",
+        choices=("impression", "checklist"),
+        default="impression",
+        help="impression=现行五个 1-10 整数；checklist=二值判定 + 代码算分（两套协议的 A/B 入口）",
+    )
+    ap.add_argument(
         "--write-template",
         action="store_true",
         help=f"从示例 {EXAMPLE_SAMPLES.name} 生成样本文件（已存在则跳过）",
@@ -550,7 +604,7 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    analysis, errors = calibrate(samples, args.judge)
+    analysis, errors = calibrate(samples, args.judge, args.scoring_mode)
     for sid, err in errors:
         print(f"  [SKIP] {sid}：{err}", file=sys.stderr)
     if not analysis:
@@ -558,7 +612,7 @@ def main() -> int:
         return 1
     print(render_report(args.judge, analysis))
     if args.repeat >= 2:
-        rep = repeatability(samples, args.judge, args.repeat)
+        rep = repeatability(samples, args.judge, args.repeat, args.scoring_mode)
         analysis["repeatability"] = rep
         print(render_repeatability(rep))
     return 0

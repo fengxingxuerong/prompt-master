@@ -16,7 +16,15 @@ from pydantic import ValidationError
 from .. import llm
 from ..assertions import RULE_MODE
 from ..cache import eval_cache, key_for_eval
-from ..prompts import EVALUATOR_RULES, EVALUATOR_SYSTEM, EVALUATOR_USER, render, rubric_stamp
+from ..prompts import (
+    EVALUATOR_CHECKLIST,
+    EVALUATOR_RULES,
+    EVALUATOR_SYSTEM,
+    EVALUATOR_USER,
+    checklist_rubric_stamp,
+    render,
+    rubric_stamp,
+)
 from ..quality import evaluator_warning_block
 from ..schemas import (
     PASS_THRESHOLD,
@@ -29,6 +37,14 @@ from ..schemas import (
     judge_disagreement_threshold,
     measurement_noise,
 )
+from ..scoring import (
+    MODE_CHECKLIST,
+    build_checklist,
+    checklist_usable,
+    scoring_mode,
+    unsourced_numbers,
+)
+from ..scoring import evaluate_with_checklist as scoring_evaluate
 from ..state import State
 from .common import _apply
 from .execute import _case_ground_truth
@@ -62,7 +78,18 @@ def _judge_spec(judges: list[str]) -> str:
             parts.append(f"{j}:{llm.build_config(j).model}")
         except Exception:  # noqa: BLE001 - 配置读取失败不影响缓存键构造
             parts.append(j)
-    return "+".join(parts) + f"|rubric={rubric_stamp()}"
+    return "+".join(parts) + f"|rubric={active_rubric_stamp()}"
+
+
+def active_rubric_stamp() -> str:
+    """当前协议的判据指纹。
+
+    判定式与印象式在同一份 (prompt, input, output) 上算的不是同一个量，共用一个缓存键
+    会让"换协议"命中另一套协议的结果 —— 那个 A/B 就成了拿旧结果比旧结果。
+    只换指纹不加 `mode=` 字段：印象式（缺省）的键因此与改动前逐字相同，
+    不会把全部存量评估缓存作废（断点续跑白丢一轮钱）。
+    """
+    return checklist_rubric_stamp() if scoring_mode() == MODE_CHECKLIST else rubric_stamp()
 
 
 def _judge_health(judges: list[str]) -> dict[str, Any]:
@@ -95,8 +122,29 @@ def _judge_health(judges: list[str]) -> dict[str, Any]:
 
 
 def _call_evaluator(
-    judge: str, user_prompt: str, idx: int
+    judge: str,
+    user_prompt: str,
+    idx: int,
+    *,
+    checklist: list[dict[str, Any]] | None = None,
+    numbers: list[str] | None = None,
 ) -> tuple[EvaluationResult, dict[str, Any]]:
+    """打一位评委。`checklist` 非空即走判定式（分数由代码算），否则走现行印象式。"""
+    if checklist is not None:
+        ev, meta = _call_evaluator_checklist(judge, user_prompt, idx, checklist, numbers or [])
+        detail = ev.checklist_detail or {}
+        logger.info(
+            "case#%d [%s] 判定式 加权分=%.2f 清单=%d条 违规=%d 未答=%d 无来源未解释=%d 封顶=%s",
+            idx,
+            judge,
+            ev.weighted_score,
+            detail.get("n_items", 0),
+            len(detail.get("violations") or []),
+            len(detail.get("unanswered") or []),
+            len(detail.get("unsourced_unexplained") or []),
+            detail.get("caps") or [],
+        )
+        return ev, meta
     ev, meta = llm.structured_call(judge, EvaluationResult, EVALUATOR_SYSTEM, user_prompt)
     ev.test_case_index = idx
     ev.finalize()
@@ -110,6 +158,18 @@ def _call_evaluator(
         drift,
         meta["channel"],
     )
+    return ev, meta
+
+
+def _call_evaluator_checklist(
+    judge: str,
+    user_prompt: str,
+    idx: int,
+    checklist: list[dict[str, Any]],
+    numbers: list[str],
+) -> tuple[EvaluationResult, dict[str, Any]]:
+    ev, meta = scoring_evaluate(judge, user_prompt, checklist, numbers)
+    ev.test_case_index = idx
     return ev, meta
 
 
@@ -135,7 +195,11 @@ def _merge_rule_checks(ev_a: EvaluationResult, ev_b: EvaluationResult) -> list[R
 
 
 def _merge_judge_results(
-    results: list[tuple[str, EvaluationResult]], idx: int, user_prompt: str
+    results: list[tuple[str, EvaluationResult]],
+    idx: int,
+    user_prompt: str,
+    checklist: list[dict[str, Any]] | None = None,
+    numbers: list[str] | None = None,
 ) -> EvaluationResult:
     """合并多评委结果；分差过大时触发第三评委仲裁。
 
@@ -213,7 +277,13 @@ def _merge_judge_results(
         "给出你自己的独立评分。\n</JUDGE_DISPUTE>"
     )
     try:
-        arb, _ = _call_evaluator("arbiter", user_prompt + dispute_note, idx)
+        arb, _ = (
+            _call_evaluator("arbiter", user_prompt + dispute_note, idx)
+            if checklist is None
+            else _call_evaluator(
+                "arbiter", user_prompt + dispute_note, idx, checklist=checklist, numbers=numbers
+            )
+        )
         arb.judge = "arbiter"
         arb.judge_scores = judge_scores
         arb.judge_disagreement = round(diff, 2)
@@ -353,6 +423,32 @@ def _evaluate_one(
         # 规则模式：把 expected 当核对清单（不是字面片段）交给评委逐条核验
         user_prompt += render(EVALUATOR_RULES, rules=rules)
 
+    # 判定式协议（PM_SCORING_MODE=checklist）：清单由代码从被测提示词摊出。
+    # 清单太薄（基线臂常常是裸需求）就不走这条路 —— 但**必须留痕**：同一轮里一部分用例
+    # 走判定式、一部分偷偷走印象式，聚合分就成了两种口径的平均，Δ 再也读不出东西。
+    checklist: list[dict[str, Any]] | None = None
+    numbers: list[str] = []
+    key_suffix = ""
+    if scoring_mode() == MODE_CHECKLIST:
+        built = build_checklist(prompt, task)
+        n_prompt_items = sum(1 for r in built if not r["item"].startswith("通用："))
+        if checklist_usable(built):
+            checklist = built
+            numbers = unsourced_numbers(run["test_input"], run["output"])
+            user_prompt += render(
+                EVALUATOR_CHECKLIST,
+                checklist="\n".join(f"- {r['item']}" for r in built),
+                numbers="、".join(numbers) or "（无候选）",
+            )
+            key_suffix = "\n<CHECKLIST>" + "|".join(r["item"] for r in built)
+        else:
+            logger.warning(
+                "case#%d 判定式回退印象式：被测提示词只摊出 %d 条可核对条目（<2）",
+                idx,
+                n_prompt_items,
+            )
+            key_suffix = "\n<CHECKLIST>thin-fallback"
+
     # 1) 命中缓存直接复用（断点续跑 / 相同输出重复评估）
     cache = eval_cache()
     # 键里带上原始需求 / 上下文 / 质量警告：不同 task 不能串用同一份评估结果（H1）
@@ -360,6 +456,7 @@ def _evaluate_one(
     if rules:
         # 规则变了评估结论就会变：不进键就会拿到旧清单的判定
         extra += f"\n<RULES>{rules}"
+    extra += key_suffix
     ck = key_for_eval(
         prompt,
         run["test_input"],
@@ -382,7 +479,14 @@ def _evaluate_one(
     n_calls = 0
     for judge in judges:
         try:
-            ev, _ = _call_evaluator(judge, user_prompt, idx)
+            # 印象式路径一个参数都不多传：这样"没开新协议"时调用签名与改动前逐字相同，
+            # 所有既有调用方/测试替身都不会因为这次改动而改变行为。
+            if checklist is None:
+                ev, _ = _call_evaluator(judge, user_prompt, idx)
+            else:
+                ev, _ = _call_evaluator(
+                    judge, user_prompt, idx, checklist=checklist, numbers=numbers
+                )
             results.append((judge, ev))
             n_calls += 1
         except Exception as e:  # noqa: BLE001
@@ -402,7 +506,7 @@ def _evaluate_one(
         return ev.model_dump(), n_calls, False
 
     # 3) 合并 / 仲裁
-    final_ev = _merge_judge_results(results, idx, user_prompt)
+    final_ev = _merge_judge_results(results, idx, user_prompt, checklist, numbers)
     if final_ev.judge == "arbiter":
         n_calls += 1  # 仲裁也是一次 LLM 调用
     # 仅当**全部**评委都成功时才落盘：否则单评委退化结果会被写进双评委缓存键，
