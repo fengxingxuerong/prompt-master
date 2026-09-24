@@ -55,7 +55,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(line.encode("utf-8"))
             self.wfile.flush()  # 真分块下发：不分块就测不出"逐行解析"
 
-    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler 的命名约定
+    def do_POST(self) -> None:
         script = self.path.strip("/").split("/")[0]
         if script == "401":
             body = b'{"error":{"message":"stream not supported"}}'
