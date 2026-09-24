@@ -71,8 +71,15 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 ```
 
 - `history`：把"看起来高了 3 分"升级为"Δ 均值 ± 95% CI，是否显著"——演示模式的 run 自动排除
-- `calibrate`：锚点样本上对比评委分与人工专家分（MAE / 偏差 / Pearson r），每次结果入账本，
-  与上次对比漂移超 ±0.5 告警。实测示例：evaluator_b bias=+1.24 超告警线（偏松实锤，含幻觉放水）
+- `calibrate`：锚点样本上对比评委分与人工专家分（MAE / 偏差 / Pearson r / **过线判定一致率**），
+  每次结果入账本 `logs/judge_calibration_history.json`，与上次对比漂移超 ±0.5 告警。
+  账本除聚合数外还落**逐条明细**（`items` / `rep_items` / `n_failed` / `failed`）——
+  只有聚合数时"n 从 18 变 15"是个无法追问的信号，两臂 A/B 就没法配对归因（2026-09-25 的教训）。
+  两个不花钱、不调模型的入口：
+  `--make-form <csv>` 把待确认锚点摊成打分表（只填 `human_score` 一列），
+  `--apply-scores <csv>` 回填（**只改填了分的条目**；有任何非法行就一条都不写）。
+  协议 A/B：`--scoring-mode impression|checklist`，配对比较见 `scripts/compare_scoring_ab.py --ledger`。
+  实测示例：evaluator_b bias=+1.24 超告警线（偏松实锤，含幻觉放水）
 - `library`：记忆层的读侧——所有终态运行的最佳提示词都可按关键词检索、`--export` 导出复用；
   写侧（跨任务经验自动沉淀）规划中
 

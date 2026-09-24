@@ -60,6 +60,154 @@ def _anchors_stamp(samples: list[dict[str, Any]]) -> str:
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
 
 
+_FORM_COLUMNS = (
+    "id",
+    "分数带",
+    "评委分参考",
+    "机械线索",
+    "目标模型",
+    "原始需求",
+    "输出摘要",
+    "human_score",
+    "备注",
+)
+
+
+def _clip(text: Any, n: int) -> str:
+    return " ".join(str(text or "").split())[:n]
+
+
+def _make_score_form(samples_path: Path, out: Path) -> int:
+    """把锚点文件摊成一张 CSV 打分表：人只需要填 `human_score` 一列。
+
+    Why：之前让人复核 34 条的做法是"打开 211KB 的 JSON，找到那条，改两个字段"，
+    重复 34 次 —— 拦住的不是判断力而是操作成本（REVIEW.md 已经写清了怎么判）。
+    表里 `human_score` 一律留空：AI 填的"人工分"和被校的评委同源，
+    进集之后测出来的 r 只是在读评委自己的口味（这一条是本项目明确的立场）。
+    编码用 utf-8-sig，Excel/WPS 双击就能看中文，不用先导一次。
+    """
+    import csv
+
+    raw = json.loads(samples_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise ValueError(f"{samples_path}：锚点文件必须是 JSON 数组")
+    rows: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue  # _comment 之类的分隔条目不进表
+        prov = item.get("provenance") or {}
+        rows.append(
+            {
+                "id": str(item["id"]),
+                "分数带": _clip(item.get("band"), 12),
+                "评委分参考": "" if prov.get("judge_score") is None else str(prov["judge_score"]),
+                "机械线索": _clip(item.get("note"), 120),
+                "目标模型": _clip(prov.get("target_model"), 24),
+                "原始需求": _clip(item.get("original_task"), 90),
+                "输出摘要": _clip(item.get("test_output"), 160),
+                # 已确认的条目把现值带出来：表要能重复生成而不丢已填的分
+                "human_score": "" if item.get("human_score") is None else str(item["human_score"]),
+                "备注": "已确认" if item.get("confirmed") else "",
+            }
+        )
+    if not rows:
+        raise ValueError(f"{samples_path}：没有带 id 的锚点条目可摊")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(_FORM_COLUMNS))
+        writer.writeheader()
+        writer.writerows(rows)
+    print(
+        f"已生成打分表：{out}\n"
+        f"  共 {len(rows)} 条，只需填 human_score 一列（1-10，可用小数；不填 = 这条不参与校准）。\n"
+        f"  「评委分参考」那一列是待校评委自己给的分，用途是先去看你和它不一致的那些，不是抄它。\n"
+        f"  填完回填：python run.py calibrate --apply-scores {out} --samples {samples_path}"
+    )
+    return 0
+
+
+def _apply_score_form(samples_path: Path, form_path: Path) -> int:
+    """把填好的打分表写回锚点文件：填了分的那几条置 confirmed=true。
+
+    两件事刻意坚持：
+    1. **有任何一行非法就一条都不写**（失败关闭）。写一半再让人自己找哪行坏了，
+       比让他在报错行号前自己修完更贵；
+    2. **不猜分、不补分、不改没填的条目**。没填 = 还没判 = 不进分母。
+    """
+    import csv
+    import os
+
+    filled: dict[str, float] = {}
+    problems: list[str] = []
+    with form_path.open(encoding="utf-8-sig", newline="") as fh:
+        reader = csv.DictReader(fh)
+        if not reader.fieldnames or "human_score" not in reader.fieldnames:
+            print(f"打分表缺 human_score 列（先跑 --make-form 生成）：{form_path}", file=sys.stderr)
+            return EXIT_CONFIG
+        for no, row in enumerate(reader, 2):  # 第 1 行是表头
+            sid = str(row.get("id") or "").strip()
+            raw_score = str(row.get("human_score") or "").strip()
+            if not sid:
+                continue
+            if not raw_score:
+                continue
+            try:
+                value = float(raw_score)
+            except ValueError:
+                problems.append(f"第 {no} 行 {sid}：human_score={raw_score!r} 不是数字")
+                continue
+            if not 1.0 <= value <= 10.0:
+                problems.append(f"第 {no} 行 {sid}：human_score={value} 超出 1-10")
+                continue
+            if sid in filled:
+                problems.append(f"第 {no} 行：id {sid} 在表里出现两次（先合并再跑）")
+                continue
+            filled[sid] = value
+    if problems:
+        for p in problems:
+            print(f"  [拒绝写入] {p}", file=sys.stderr)
+        print(
+            f"共 {len(problems)} 处问题；**本次一个字都没写回**（写一半比不写更难查）。",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+    if not filled:
+        print(f"{form_path} 里一条 human_score 都没填 —— 什么都没改。", file=sys.stderr)
+        return EXIT_CONFIG
+
+    raw = json.loads(samples_path.read_text(encoding="utf-8"))
+    known = 0
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("id") or "")
+        if sid in filled:
+            item["human_score"] = filled[sid]
+            item["confirmed"] = True
+            known += 1
+    unknown = sorted(set(filled) - {str(i.get("id")) for i in raw if isinstance(i, dict)})
+    if not known:
+        print(
+            f"表里 {len(filled)} 条分数没有一个 id 对得上 {samples_path}（表是旧版？）——未写入。",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+    tmp = samples_path.with_suffix(samples_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, samples_path)
+    print(
+        f"已回填 {known} 条（human_score + confirmed=true）→ {samples_path}\n"
+        f"  表里没填的条目保持原样，继续不参与校准。"
+    )
+    if unknown:
+        print(f"⚠️ 表里有 {len(unknown)} 个 id 不在锚点文件中：{unknown[:5]}", file=sys.stderr)
+    print(
+        "  注：人工分进锚点集指纹（_anchors_stamp），所以下一次校准与历史记录的漂移对比"
+        "会判为「换考卷」而不报评委漂移 —— 这是对的，尺子确实动了。"
+    )
+    return 0
+
+
 def _calibrate_command(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="run.py calibrate")
     ap.add_argument(
@@ -91,7 +239,34 @@ def _calibrate_command(argv: list[str]) -> int:
     ap.add_argument(
         "--no-save", action="store_true", help="本次结果不追加进漂移历史（只看不动账本）"
     )
+    ap.add_argument(
+        "--make-form",
+        default=None,
+        metavar="CSV",
+        help="不跑校准：把 --samples 那个锚点文件摊成一张人工打分表（human_score 列留空待填）",
+    )
+    ap.add_argument(
+        "--apply-scores",
+        default=None,
+        metavar="CSV",
+        help="不跑校准：把填好的打分表写回 --samples（只改填了分的那几条）",
+    )
     ns = ap.parse_args(argv)
+
+    # 两个"只动表、不花钱"的入口先分流：它们不需要 Key、不调模型，
+    # 也不该被后面的样本加载/校准流程牵进去
+    if ns.make_form:
+        try:
+            return _make_score_form(Path(ns.samples), Path(ns.make_form))
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(f"生成打分表失败：{e}", file=sys.stderr)
+            return EXIT_CONFIG
+    if ns.apply_scores:
+        try:
+            return _apply_score_form(Path(ns.samples), Path(ns.apply_scores))
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(f"回填打分表失败：{e}", file=sys.stderr)
+            return EXIT_CONFIG
 
     try:
         import calibrate_judge as calib
@@ -243,6 +418,14 @@ def _calibrate_command(argv: list[str]) -> int:
             # 采集了多少条不参与打分的候选也入账：只看 n 会把"扩了 3 倍锚点集"
             # 和"一条都没人工确认"读成同一件事。
             "n_pending": len(pending),
+            # 逐条明细必须入账。只留聚合数的账本没法归因：2026-09-25 那轮
+            # impression n=18 / checklist n=15 而 n_pending 都是 0，事后完全查不出
+            # 判定式臂丢了哪 3 条、为什么丢，于是"MAE 0.83 → 1.85"这个换不换默认的依据
+            # 至今无法判断是结论还是幸存者偏差。失败原因当场只打到 stderr（[SKIP] 行），
+            # 关掉终端就没了 —— 账本是唯一能活过一轮跑批的地方。
+            "n_failed": len(errors),
+            "failed": [{"id": sid, "error": err} for sid, err in errors],
+            "items": analysis.get("pairs") or [],
             "decision_agree": (analysis.get("decision") or {}).get("agree"),
             "decision_kappa": (analysis.get("decision") or {}).get("kappa"),
             "model": now_model,
@@ -260,6 +443,17 @@ def _calibrate_command(argv: list[str]) -> int:
                     "rep_range_mean": rep["range_mean"],
                     "rep_range_max": rep["range_max"],
                     "rep_threshold": rep["disagreement_threshold"],
+                    # 每锚点的极差也要落盘：均值会把"半数稳、半数疯"抹平成一个好数字，
+                    # 而两臂配对比必须能只看"两边都成功打完 N 次"的那几条
+                    "rep_items": [
+                        {
+                            "id": it.get("id"),
+                            "n": it.get("n"),
+                            "range": it.get("range"),
+                            "error": it.get("error") or "",
+                        }
+                        for it in rep.get("per_item") or []
+                    ],
                 }
             )
         history.append(entry)

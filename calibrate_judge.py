@@ -375,7 +375,18 @@ def render_report(role: str, analysis: dict[str, Any]) -> str:
         mark = "⚠️ 大偏差" if p["flag"] else ""
         lines.append(f"| {p['id']} | {p['human']} | {p['judge']} | {p['delta']:+} | {mark} |")
     lines.append("")
-    lines.append(f"- 样本数：{analysis['n']}（排除评估失败的锚点，也排除未人工确认的条目）")
+    n_failed = int(analysis.get("n_failed") or 0)
+    failed_line = f"- 样本数：{analysis['n']}（排除评估失败的锚点，也排除未人工确认的条目）"
+    if n_failed:
+        who = "、".join(
+            f"{f.get('id')}（{str(f.get('error') or '')[:60]}）" for f in analysis.get("failed") or []
+        )
+        failed_line = (
+            f"- 样本数：{analysis['n']}（另有 **{n_failed} 条锚点评估失败被排除**：{who}）\n"
+            "- ⚠️ 分母变了就不叫同一张考卷：与任何 n 不同的历史记录比 MAE/bias 都不成立"
+            "（漂移对比已按 n 拦，但 A/B 两臂必须配对后再看）"
+        )
+    lines.append(failed_line)
     lines.append(f"- 平均绝对误差 MAE：{analysis['mae']}")
     lines.append(
         f"- 平均偏差（评委 − 人工）：{analysis['bias']:+} → {_bias_verdict(analysis['bias'])}"
@@ -462,7 +473,12 @@ def calibrate(
             errors.append((sid, f"{type(e).__name__}: {e}"))
     if not ok_samples:
         return {}, errors
-    return analyze(ok_samples, ok_scores), errors
+    analysis = analyze(ok_samples, ok_scores)
+    # 失败清单挂进 analysis：报告里要说清"少的那几条是谁、为什么"，而不只报一个变小的 n。
+    # （返回值里本来就有 errors 元组，但报告渲染只拿到 analysis。）
+    analysis["n_failed"] = len(errors)
+    analysis["failed"] = [{"id": sid, "error": err} for sid, err in errors]
+    return analysis, errors
 
 
 # --------------------------------------------------------------------------

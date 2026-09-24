@@ -356,6 +356,217 @@ def test_calibrate_no_save_keeps_ledger(
 # ---------------------------------------------------------------------------
 # pipeline：interrupt 探测与执行
 # ---------------------------------------------------------------------------
+def test_calibrate_ledger_persists_per_anchor_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """账本必须落逐条明细 + 失败清单：只存聚合数的账本，事后连"两臂是不是同一张考卷"都答不出。
+
+    真实事故（2026-09-25 凌晨）：impression n=18 与 checklist n=15 同锚点指纹、n_pending 都是 0，
+    于是"MAE 0.83 → 1.85"到底是结论还是幸存者偏差，今天已经无从查证 —— 失败原因当时只打到
+    stderr 的 [SKIP] 行，终端一关就没了。
+    """
+    from test_cli_units import _patch_log_dir  # tests 无包结构，顶层互导
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    analysis: dict[str, Any] = {
+        "n": 2,
+        "bias": 0.5,
+        "mae": 0.5,
+        "r": 0.9,
+        "rho": 0.9,
+        "pairs": [
+            {"id": "a1", "human": 8.0, "judge": 8.5, "delta": 0.5, "flag": False},
+            {"id": "a2", "human": 7.0, "judge": 7.5, "delta": 0.5, "flag": False},
+        ],
+        "decision": {"agree": 1.0, "kappa": 1.0, "n": 2},
+        "repeatability": {
+            "times": 3,
+            "n_items": 1,
+            "range_mean": 0.5,
+            "range_max": 0.5,
+            "disagreement_threshold": 2.0,
+            "per_item": [
+                {"id": "a1", "n": 3, "range": 0.5},
+                {"id": "a2", "n": 1, "error": "GatewayError: 上游 500"},
+            ],
+        },
+    }
+    _patch_calib(monkeypatch, analysis, errors=[("a3", "ValidationError: 清单解析失败")])
+
+    assert cli_calibrate._calibrate_command([]) == 0
+    entry = json.loads((tmp_path / "judge_calibration_history.json").read_text(encoding="utf-8"))[
+        -1
+    ]
+    assert entry["n_failed"] == 1 and entry["failed"][0]["id"] == "a3"
+    assert "清单解析失败" in entry["failed"][0]["error"]
+    assert [p["id"] for p in entry["items"]] == ["a1", "a2"], "逐条 Δ 要能事后配对"
+    assert entry["items"][0]["human"] == 8.0 and entry["items"][0]["judge"] == 8.5
+    # 每锚点极差也入账：均值会抹平"半数稳、半数疯"，配对只能靠逐条
+    assert {i["id"]: i.get("range") for i in entry["rep_items"]} == {"a1": 0.5, "a2": None}
+
+
+# ---------------------------------------------------------------------------
+# 人工打分表：--make-form / --apply-scores（只动表、不调模型）
+# ---------------------------------------------------------------------------
+def _candidates_file(tmp_path: Path) -> Path:
+    p = tmp_path / "candidates.json"
+    data: list[Any] = [
+        {"_comment": "分隔条目：写回时必须原样保留"},
+        {
+            "id": "h-1",
+            "band": "7.0-7.9",
+            "original_task": "给电商客服对话做分类分诊",
+            "test_output": "分类：退款\n" * 3,
+            "human_score": None,
+            "confirmed": False,
+            "note": "命中线索：输出里出现「大概」",
+            "provenance": {"judge_score": 7.6, "target_model": "glm-5.2"},
+        },
+        {
+            "id": "h-2",
+            "band": "<6.0",
+            "original_task": "生成分区定时简报",
+            "test_output": "今日简报正文",
+            "human_score": None,
+            "confirmed": False,
+            "note": "无线索命中",
+            "provenance": {"judge_score": 4.83, "target_model": "glm-5.2"},
+        },
+        {
+            "id": "h-3",
+            "band": "8.0-8.9",
+            "original_task": "抽取合同关键条款",
+            "test_output": "条款清单",
+            "human_score": 9.0,
+            "confirmed": True,
+            "note": "已确认过",
+            "provenance": {"judge_score": 8.4, "target_model": "deepseek-v4-flash"},
+        },
+    ]
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return p
+
+
+def _form_rows(path: Path) -> list[dict[str, str]]:
+    import csv
+
+    with path.open(encoding="utf-8-sig", newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
+def test_make_form_leaves_human_score_empty(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    samples = _candidates_file(tmp_path)
+    form = tmp_path / "form.csv"
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--make-form", str(form)]) == 0
+    )
+    rows = _form_rows(form)
+    assert [r["id"] for r in rows] == ["h-1", "h-2", "h-3"], "分隔条目不该进表"
+    # 关键性质：表里的 human_score 只能是空的（或已确认条目的现值），
+    # 绝不能预填评委给的分 —— AI 写的"人工分"和被校评委同源
+    assert rows[0]["human_score"] == "" and rows[1]["human_score"] == ""
+    assert rows[2]["human_score"] == "9.0", "已确认的条目重复生成表时不能丢分"
+    assert rows[0]["评委分参考"] == "7.6", "参考分要带上，但只是参考"
+    assert "只需填 human_score" in capsys.readouterr().out
+
+
+def _write_form(path: Path, rows: list[dict[str, str]]) -> Path:
+    import csv
+
+    fields = list(cli_calibrate._FORM_COLUMNS)
+    with path.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
+def test_apply_scores_writes_only_filled_rows(tmp_path: Path) -> None:
+    samples = _candidates_file(tmp_path)
+    form = _write_form(
+        tmp_path / "filled.csv",
+        [
+            {"id": "h-1", "human_score": "6.5"},
+            {"id": "h-2", "human_score": ""},  # 没填 = 还没判 = 不动
+        ],
+    )
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == 0
+    )
+    data = json.loads(samples.read_text(encoding="utf-8"))
+    by_id = {d["id"]: d for d in data if isinstance(d, dict) and d.get("id")}
+    assert by_id["h-1"]["human_score"] == 6.5 and by_id["h-1"]["confirmed"] is True
+    assert by_id["h-2"]["human_score"] is None and by_id["h-2"]["confirmed"] is False
+    assert by_id["h-3"]["human_score"] == 9.0, "表里没有的条目不许被动"
+    assert data[0]["_comment"], "非条目型记录（_comment）必须原样保留"
+
+
+def test_apply_scores_is_all_or_nothing_on_bad_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """一行非法就一个字都不写：写一半再让人自己找哪行坏了，比不写更难查。"""
+    samples = _candidates_file(tmp_path)
+    before = samples.read_text(encoding="utf-8")
+    form = _write_form(
+        tmp_path / "bad.csv",
+        [{"id": "h-1", "human_score": "5"}, {"id": "h-2", "human_score": "11"}],
+    )
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == cli_support.EXIT_CONFIG
+    )
+    assert samples.read_text(encoding="utf-8") == before, "非法行存在时一条都不该写"
+    err = capsys.readouterr().err
+    assert "超出 1-10" in err and "本次一个字都没写回" in err
+
+
+def test_apply_scores_rejects_non_numeric_and_duplicates(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    samples = _candidates_file(tmp_path)
+    form = _write_form(
+        tmp_path / "d.csv",
+        [
+            {"id": "h-1", "human_score": "很好"},
+            {"id": "h-1", "human_score": "7"},
+            {"id": "h-1", "human_score": "8"},
+        ],
+    )
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == cli_support.EXIT_CONFIG
+    )
+    err = capsys.readouterr().err
+    assert "不是数字" in err and "出现两次" in err
+
+
+def test_apply_scores_needs_filled_rows(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    samples = _candidates_file(tmp_path)
+    form = _write_form(tmp_path / "empty.csv", [{"id": "h-1", "human_score": ""}])
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == cli_support.EXIT_CONFIG
+    )
+    assert "都没填" in capsys.readouterr().err
+
+
+def test_apply_scores_unknown_ids_only_writes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    samples = _candidates_file(tmp_path)
+    before = samples.read_text(encoding="utf-8")
+    form = _write_form(tmp_path / "old.csv", [{"id": "别的表的id", "human_score": "7"}])
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == cli_support.EXIT_CONFIG
+    )
+    assert samples.read_text(encoding="utf-8") == before
+    assert "未写入" in capsys.readouterr().err
+
+
 def test_pending_interrupts_collects_values() -> None:
     snap = SimpleNamespace(
         tasks=[

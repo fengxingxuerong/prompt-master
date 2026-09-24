@@ -5,11 +5,20 @@
 ## 怎么复核
 
 1. 每条只需回答一个问题：**换你来看这份输出，值不值 8.0（可上线）**，再给一个 1-10 的分。
-2. 打开 `judge_calibration/samples.candidates.json`，把该条的 `human_score` 从 `null` 改成分数，
-   并把 `confirmed` 改成 `true`。**没改的条目不参与校准**——这是刻意的：
-   未确认的分数一旦进集，测出来的 r 只是在读评委自己的口味。
-3. 复核顺序按下方清单（判定线附近 + 线索命中的优先，它们对结论的信息量最大）。
-4. 跑校准：`python calibrate_judge.py --samples judge_calibration/samples.candidates.json`
+2. 填分有两种做法，任选：
+   - **推荐：填表格** `judge_calibration/score_form.csv`（同目录下，34 行 × 只需填 `human_score` 一列，
+     可用 Excel/WPS 直接打开）。填完回填：
+     `python run.py calibrate --samples judge_calibration/samples.candidates.json --apply-scores judge_calibration/score_form.csv`
+     —— 只改你**填了分**的那几条（并把它们置 `confirmed=true`）；有任何一行非法就一条都不写；
+     表格里没填的条目继续不参与校准。
+     （表重新生成：`python run.py calibrate --samples … --make-form judge_calibration/score_form.csv`，
+     已确认条目的现值会被带出来，不会丢。）
+   - 或者直接改 JSON：打开 `judge_calibration/samples.candidates.json`，把该条的 `human_score`
+     从 `null` 改成分数，并把 `confirmed` 改成 `true`。
+3. **没改的条目不参与校准**——这是刻意的：未确认的分数一旦进集，测出来的 r 只是在读评委自己的口味。
+4. 复核顺序按下方清单（判定线附近 + 线索命中的优先，它们对结论的信息量最大）。
+5. 跑校准：`python run.py calibrate --samples judge_calibration/samples.candidates.json`
+   （注意：人工分进锚点集指纹，回填后第一次校准与历史记录的漂移对比会判为"换考卷"，这是对的。）
 
 评委自己给的分列在每条里，**用途是让你先去看它和直觉不一致的那些**，不是让你抄它。
 

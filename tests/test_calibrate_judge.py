@@ -325,6 +325,28 @@ def test_calibrate_skips_failing_samples_but_reports():
     assert len(errors) == 1
     assert "429" in errors[0][1]
     assert analysis["n"] == 5  # 失败锚点被排除，不污染一致性指标
+    # 失败清单必须同时挂进 analysis：报告与账本只拿得到 analysis，
+    # "n 变少了但不知是谁"就是 2026-09-25 那轮 A/B 无法归因的直接原因
+    assert analysis["n_failed"] == 1
+    assert analysis["failed"][0]["id"] == errors[0][0]
+    assert "429" in analysis["failed"][0]["error"]
+
+
+def test_render_report_names_the_dropped_anchors():
+    """报告里要写清被排除的是谁、为什么，而不是一句"排除评估失败的锚点"。"""
+    a = cj.analyze([{"id": "s1", "human_score": 8}, {"id": "s2", "human_score": 7}], [9.0, 8.0])
+    a["n_failed"] = 2
+    a["failed"] = [
+        {"id": "real-triage-overconservative", "error": "GatewayError: 上游 500"},
+        {"id": "anchor-fab-trend", "error": "ValidationError: 结构化输出解析失败"},
+    ]
+    text = cj.render_report("evaluator", a)
+    assert "real-triage-overconservative" in text and "anchor-fab-trend" in text
+    assert "2 条锚点评估失败" in text
+    assert "同一张考卷" in text, "要同时说清'n 变了就不该与旧记录比'"
+    # 一条都没失败时不许出现这段话：否则读者会以为每轮都在丢锚点
+    clean = cj.render_report("evaluator", cj.analyze([{"id": "s1", "human_score": 8}], [9.0]))
+    assert "评估失败被排除" not in clean
 
 
 # --------------------------------------------------------------------------
