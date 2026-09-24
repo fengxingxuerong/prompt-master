@@ -120,6 +120,73 @@ def test_load_samples_rejects_duplicate_ids(tmp_path: Path):
         assert "重复" in str(e)
 
 
+def _anchor(sid: str, score: object, **kw: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "id": sid,
+        "original_task": "t",
+        "prompt": "p",
+        "test_input": "i",
+        "test_output": "o",
+        "human_score": score,
+    }
+    base.update(kw)
+    return base
+
+
+def test_unconfirmed_anchors_are_gated_out(tmp_path: Path):
+    """候选不进分母。允许它带 null 人工分等人来填，但绝不能参与打分统计。"""
+    p = tmp_path / "s.json"
+    p.write_text(
+        json.dumps(
+            [
+                _anchor("confirmed-one", 7.5),
+                _anchor("candidate-a", None, confirmed=False),
+                _anchor("candidate-b", 8.0, confirmed=False),
+                _anchor("candidate-str", 9.0, confirmed="false"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    samples = cj.load_samples(p)
+    assert [s["id"] for s in samples] == ["confirmed-one"]
+    assert {x["id"] for x in samples.pending} == {"candidate-a", "candidate-b", "candidate-str"}
+
+
+def test_confirmed_with_null_human_score_is_an_error(tmp_path: Path):
+    """写 confirmed=true 却没填人工分 = 想蒙混过关，必须炸而不是静默剔除。"""
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps([_anchor("x", None, confirmed=True)]), encoding="utf-8")
+    try:
+        cj.load_samples(p)
+        raise AssertionError("已确认但无分数必须报错")
+    except ValueError as e:
+        assert "null" in str(e)
+
+
+def test_missing_confirmed_field_keeps_legacy_files(tmp_path: Path):
+    """存量 samples.json 没有 confirmed 字段，缺省必须按"人工已确认"处理，
+    否则这次改动会静默作废全部历史校准。"""
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps([_anchor("legacy", 6.0)]), encoding="utf-8")
+    samples = cj.load_samples(p)
+    assert len(samples) == 1 and not samples.pending
+
+
+def test_pending_duplicate_id_still_detected(tmp_path: Path):
+    """pending 也要进 id 唯一性检查：同一份输出既当候选又当已确认锚点，
+    等于同一条数据在报告里出现两次而分母只算一次。"""
+    p = tmp_path / "s.json"
+    p.write_text(
+        json.dumps([_anchor("dup", 6.0), _anchor("dup", None, confirmed=False)]),
+        encoding="utf-8",
+    )
+    try:
+        cj.load_samples(p)
+        raise AssertionError("与候选重复的 id 必须报错")
+    except ValueError as e:
+        assert "重复" in str(e)
+
+
 # --------------------------------------------------------------------------
 # 一致性分析（纯代码）
 # --------------------------------------------------------------------------
@@ -153,10 +220,62 @@ def test_bias_verdict_thresholds():
 
 
 def test_r_verdict_thresholds():
-    assert "好" in cj._r_verdict(0.9)
-    assert "差" in cj._r_verdict(0.3)
-    assert "中等" in cj._r_verdict(0.65)
-    assert "无法评估" in cj._r_verdict(None)
+    assert "好" in cj._r_verdict(0.9, 0.9, 4)
+    assert "差" in cj._r_verdict(0.3, 0.3, 4)
+    assert "中等" in cj._r_verdict(0.65, 0.65, 4)
+    assert "无法评估" in cj._r_verdict(None, None, 4)
+    # 窄区间上算出来的 r 必须自己说清楚：n 很大但人工分全挤在一带时它毫无含义
+    assert "窄区间" in cj._r_verdict(0.9, 0.9, 1)
+
+
+def test_spearman_tracks_order_that_pearson_penalises():
+    """严格单调但等距性差（分档跳变）的一组数：ρ=1，r<1。
+
+    实测失效形态就是这种台阶——仲裁同一份内容稳定落在 5.15 与 7.10 两个模式，
+    Pearson 会把台阶本身当成"不一致"，而闭环真正依赖的是序关系。
+    """
+    humans = [1.0, 2.0, 3.0, 4.0]
+    judges = [1.0, 2.0, 4.0, 8.0]
+    rho = cj.spearman(humans, judges)
+    r = cj.pearson(humans, judges)
+    assert rho == 1.0
+    assert r is not None and r < 1.0
+
+
+def test_spearman_none_on_zero_variance():
+    assert cj.spearman([5.0, 5.0, 5.0], [1.0, 5.0, 9.0]) is None
+    assert cj.spearman([5.0], [1.0]) is None
+
+
+def test_analyze_counts_lenient_and_strict():
+    """漏放与误杀要分开数：都算进 MAE 的话，一个只会抬分的评委和一个只会压分的评委同分。"""
+    samples = [
+        {"id": "a", "human_score": 6.0},
+        {"id": "b", "human_score": 7.0},
+        {"id": "c", "human_score": 9.0},
+        {"id": "d", "human_score": 9.5},
+    ]
+    a = cj.analyze(samples, [8.5, 8.5, 7.0, 9.5])
+    dec = a["decision"]
+    assert dec["n_lenient"] == 2  # 人工不可用、评委判可用
+    assert dec["n_strict"] == 1  # 人工可用、评委判不可用
+    assert dec["usable"] is True
+    assert dec["kappa"] is not None
+
+
+def test_analyze_decision_unusable_when_line_one_side_empty():
+    """全部锚点都在判定线同一侧时，一致率会是 100% —— 那读的是取样，必须标 unusable。"""
+    samples = [{"id": f"s{i}", "human_score": 9.0} for i in range(6)]
+    a = cj.analyze(samples, [9.0] * 6)
+    assert a["decision"]["agree"] == 1.0
+    assert a["decision"]["usable"] is False
+    assert a["bands_covered"] == 1
+
+
+def test_render_provenance_only_when_pending():
+    assert cj.render_provenance(45, 34).count("34") == 1
+    assert "未经人工确认" in cj.render_provenance(45, 34)
+    assert cj.render_provenance(11, 0) == ""
 
 
 def test_render_report_flags_small_sample():

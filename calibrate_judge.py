@@ -40,8 +40,11 @@ ensure_utf8_stdio()
 from pm import backend  # noqa: E402
 from pm.llm import structured_call  # noqa: E402
 from pm.prompts import EVALUATOR_SYSTEM, EVALUATOR_USER, render  # noqa: E402
-from pm.schemas import EvaluationResult, judge_disagreement_threshold  # noqa: E402
-
+from pm.schemas import (  # noqa: E402
+    PASS_THRESHOLD,
+    EvaluationResult,
+    judge_disagreement_threshold,
+)
 DEFAULT_SAMPLES = Path(__file__).parent / "judge_calibration" / "samples.json"
 EXAMPLE_SAMPLES = Path(__file__).parent / "judge_calibration" / "samples.example.json"
 JUDGE_ROLES = ("evaluator", "evaluator_b", "arbiter")
@@ -54,23 +57,70 @@ CORR_BAD = 0.5  # r < 该值 → 排序一致性差
 MIN_SAMPLES_FOR_R = 3  # 相关系数最少样本数
 MIN_SAMPLES_FOR_VERDICT = 5  # 低于该数只给方向性参考
 
+# 下面两个不是"实测出来的经验阈值"，而是**统计量本身在这些条件下无定义或退化**：
+# 判定线某一侧一个样本都没有时，一致率恒为 100%、κ 无定义——报数比不报更容易骗人。
+MIN_PER_DECISION_SIDE = 1  # 判定线两侧各至少几个样本，判定一致率才有定义
+MIN_BANDS_COVERED = 3  # 人工分覆盖的分数带数低于此 → 排序相关是在窄区间里算的
+
+# 与 harvest_anchors.py 用同一套分带，否则"覆盖"这件事两边各说一套。
+BANDS: tuple[tuple[str, float, float], ...] = (
+    ("<6.0", 0.0, 6.0),
+    ("6.0-6.9", 6.0, 7.0),
+    ("7.0-7.9", 7.0, 8.0),
+    ("8.0-8.9", 8.0, 9.0),
+    (">=9.0", 9.0, 10.01),
+)
+
 _ROLE_LABEL = {"evaluator": "评委A", "evaluator_b": "评委B", "arbiter": "仲裁评委"}
+
+
+class Anchors(list):
+    """`load_samples` 的返回值：只装**可校准**条目，未确认的挂在 `.pending` 上。
+
+    为什么用 list 子类而不是改成返回二元组：调用方（`run.py calibrate` 与本文件 main）
+    以及它们的回归测试都按 list 消费这个返回值，改签名会连带漂移指纹的语义。
+    """
+
+    pending: list[dict[str, Any]]
+
+    def __new__(cls, iterable: Any = (), *, pending: Any = ()) -> "Anchors":
+        obj = super().__new__(cls, iterable)
+        obj.pending = list(pending)
+        return obj
 
 
 # --------------------------------------------------------------------------
 # 样本加载
 # --------------------------------------------------------------------------
-def load_samples(path: Path) -> list[dict[str, Any]]:
+def _confirmed(item: dict[str, Any]) -> bool:
+    """这条锚点算不算"人工确认过"。
+
+    缺省 True 是刻意的向后兼容：存量 `samples.json` 那 11 条本来就是人工分的，
+    这个字段引入之前它们没有 `confirmed`，判成未确认等于把现有校准一次性作废。
+    新采集的候选由 `harvest_anchors.py` 显式写 `confirmed: false`。
+    """
+    flag = item.get("confirmed", True)
+    if isinstance(flag, str):
+        return flag.strip().lower() in {"1", "true", "yes"}
+    return bool(flag)
+
+
+def load_samples(path: Path) -> Anchors:
     """加载并校验锚点样本。纯注释项（只有 _comment 等说明键）跳过；真实条目缺字段直接报错。
 
     注意跳过条件：只跳过「除说明键外什么都没有」的条目。
     像 {"id": "a"} 这种带真实键但缺关键字段的条目是**写错的样本**，
     静默跳过会让用户以为它参与了校准——必须报错。
+
+    `confirmed: false` 的条目进 `.pending` 而不是返回值：人工分没落地之前，候选分数
+    与被校对象同源，让它进统计就是拿被校对象当标准答案。这类条目允许 `human_score: null`
+    （等人来填）；已确认条目填 null 属写错，报错。
     """
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list):
         raise ValueError("样本文件顶层必须是数组")
     samples: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
     required = ("id", "original_task", "prompt", "test_input", "test_output", "human_score")
     skip_keys = {"_comment"}
     for i, item in enumerate(data):
@@ -82,14 +132,21 @@ def load_samples(path: Path) -> list[dict[str, Any]]:
         missing = [k for k in required if k not in item]
         if missing:
             raise ValueError(f"第 {i + 1} 条样本缺字段：{missing}")
+        if not _confirmed(item):
+            pending.append(item)
+            continue
+        if item["human_score"] is None:
+            raise ValueError(
+                f"第 {i + 1} 条样本（{item.get('id')}）confirmed=true 但 human_score 为 null"
+            )
         score = float(item["human_score"])
         if not 1.0 <= score <= 10.0:
             raise ValueError(f"第 {i + 1} 条样本 human_score={score} 超出 1-10")
         samples.append(item)
-    ids = [str(s["id"]) for s in samples]
+    ids = [str(s["id"]) for s in samples] + [str(s["id"]) for s in pending]
     if len(ids) != len(set(ids)):
         raise ValueError("样本 id 重复")
-    return samples
+    return Anchors(samples, pending=pending)
 
 
 # --------------------------------------------------------------------------
@@ -129,6 +186,80 @@ def pearson(xs: list[float], ys: list[float]) -> float | None:
     return sxy / math.sqrt(sxx * syy)
 
 
+def _ranks(xs: list[float]) -> list[float]:
+    """平均秩（并列取均秩）。算 Spearman 时不给均秩就等于把 ties 判成强序。"""
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    ranks = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        avg = (i + j) / 2 + 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg
+        i = j + 1
+    return ranks
+
+
+def spearman(xs: list[float], ys: list[float]) -> float | None:
+    """Spearman 秩相关。与 Pearson 并报的理由是实测的失效形态：评委在**两套口径之间跳档**
+    （仲裁同一输入稳定落在 5.15 与 7.10 两个模式），Pearson 会被这种台阶拉花，
+    而秩相关只问"谁比谁好"——闭环真正依赖的是判定线之上排没排对序。
+
+    口径写清楚免得被读反：并列取均秩，所以"两次同分、第三次跳档"不会算出 ρ=1；
+    ρ 衡量序关系，不衡量档位一致。
+    """
+    if len(xs) < MIN_SAMPLES_FOR_R or len(xs) != len(ys):
+        return None
+    if len(set(xs)) < 2 or len(set(ys)) < 2:
+        return None
+    return pearson(_ranks(xs), _ranks(ys))
+
+
+def _band_hist(values: list[float]) -> dict[str, int]:
+    hist = {name: 0 for name, _, _ in BANDS}
+    for v in values:
+        for name, lo, hi in BANDS:
+            if lo <= v < hi:
+                hist[name] += 1
+                break
+    return hist
+
+
+def _decision_stats(humans: list[float], judges: list[float], line: float) -> dict[str, Any]:
+    """判定一致率 + Cohen κ。r/MAE 回答"差多少分"，没人回答"过没过线"。
+
+    闭环唯一的决策是 `weighted_score >= 8.0`，而 r=0.97 的评委完全可能把 7.4 系统性
+    抬成 8.3：分差 0.9 在 MAE 里不算大，在决策上就是把不可用读成可上线。
+    所以这一项单列，并且分方向报——**漏放**（人工不过、评委过）比误杀危险。
+    """
+    n = len(humans)
+    if n == 0:
+        return {"n": 0, "usable": False}
+    h_pass = [h >= line for h in humans]
+    j_pass = [j >= line for j in judges]
+    agree = sum(1 for a, b in zip(h_pass, j_pass, strict=True) if a == b) / n
+    lenient = sum(1 for a, b in zip(h_pass, j_pass, strict=True) if (not a) and b)
+    strict_miss = sum(1 for a, b in zip(h_pass, j_pass, strict=True) if a and (not b))
+    p_a = sum(h_pass) / n
+    p_b = sum(j_pass) / n
+    pe = p_a * p_b + (1 - p_a) * (1 - p_b)
+    return {
+        "n": n,
+        "line": line,
+        "agree": round(agree, 3),
+        "kappa": None if pe >= 1.0 else round((agree - pe) / (1 - pe), 3),
+        "n_lenient": lenient,
+        "n_strict": strict_miss,
+        "n_human_pass": sum(h_pass),
+        "n_judge_pass": sum(j_pass),
+        # 两侧都无样本时一致率是 100%，κ 无定义——这时报数比不报更容易骗人
+        "usable": min(sum(h_pass), n - sum(h_pass)) >= MIN_PER_DECISION_SIDE
+        and min(sum(j_pass), n - sum(j_pass)) >= MIN_PER_DECISION_SIDE,
+    }
+
+
 def analyze(samples: list[dict[str, Any]], judge_scores: list[float]) -> dict[str, Any]:
     """逐条 Δ + 聚合指标。调用方保证两列表等长且只含成功样本。"""
     pairs: list[dict[str, Any]] = []
@@ -148,14 +279,22 @@ def analyze(samples: list[dict[str, Any]], judge_scores: list[float]) -> dict[st
     n = len(pairs)
     bias = round(sum(p["delta"] for p in pairs) / n, 2)
     mae = round(sum(abs(p["delta"]) for p in pairs) / n, 2)
-    r = pearson([p["human"] for p in pairs], [p["judge"] for p in pairs])
+    humans = [p["human"] for p in pairs]
+    judges = [p["judge"] for p in pairs]
+    r = pearson(humans, judges)
+    rho = spearman(humans, judges)
+    hist = _band_hist(humans)
     return {
         "n": n,
         "pairs": pairs,
         "bias": bias,
         "mae": mae,
         "r": None if r is None else round(r, 3),
+        "rho": None if rho is None else round(rho, 3),
         "flags": [p["id"] for p in pairs if p["flag"]],
+        "human_band_hist": hist,
+        "bands_covered": sum(1 for c in hist.values() if c),
+        "decision": _decision_stats(humans, judges, PASS_THRESHOLD),
     }
 
 
@@ -172,14 +311,34 @@ def _bias_verdict(bias: float) -> str:
     return "✅ 整体偏差在容差内（±1 分）"
 
 
-def _r_verdict(r: float | None) -> str:
+def _r_verdict(r: float | None, rho: float | None, bands: int) -> str:
     if r is None:
         return "⚠️ 排序一致性无法评估（样本不足或方差为零）"
+    tail = ""
+    if bands < MIN_BANDS_COVERED:
+        tail = f"（人工分只覆盖 {bands} 个分数带，**这个 r 是在窄区间里算的**，换个集就不能比）"
+    both = f"（Spearman ρ={rho}）" if rho is not None else ""
     if r >= CORR_GOOD:
-        return f"✅ 排序一致性好（r={r}）：评委分高的人工分也高"
+        return f"✅ 排序一致性好（r={r}{both}）：评委分高的人工分也高{tail}"
     if r < CORR_BAD:
-        return f"⚠️ 排序一致性差（r={r}）：评委的**相对判断**不可信，比分数本身更严重"
-    return f"排序一致性中等（r={r}）"
+        return f"⚠️ 排序一致性差（r={r}{both}）：评委的**相对判断**不可信，比分数本身更严重{tail}"
+    return f"排序一致性中等（r={r}{both}）{tail}"
+
+
+def _decision_verdict(dec: dict[str, Any]) -> str:
+    if not dec.get("usable"):
+        return (
+            f"判定一致率 {dec.get('agree')}（人工过线 {dec.get('n_human_pass')}/{dec.get('n')}、"
+            f"评委过线 {dec.get('n_judge_pass')}/{dec.get('n')}）——"
+            f"⚠️ 线某一侧样本 < {MIN_PER_DECISION_SIDE}，**这个一致率读的是取样，不是评委行为**"
+        )
+    k = dec.get("kappa")
+    ks = "κ 无定义（两侧全一致）" if k is None else f"κ={k}"
+    return (
+        f"以 {dec['line']} 判定线计：一致率 **{dec['agree']:.0%}**、{ks}；"
+        f"漏放（人工判不可用、评委判可用）**{dec['n_lenient']} 条**、"
+        f"误杀 {dec['n_strict']} 条"
+    )
 
 
 def render_report(role: str, analysis: dict[str, Any]) -> str:
@@ -191,12 +350,21 @@ def render_report(role: str, analysis: dict[str, Any]) -> str:
         mark = "⚠️ 大偏差" if p["flag"] else ""
         lines.append(f"| {p['id']} | {p['human']} | {p['judge']} | {p['delta']:+} | {mark} |")
     lines.append("")
-    lines.append(f"- 样本数：{analysis['n']}（排除评估失败的锚点）")
+    lines.append(f"- 样本数：{analysis['n']}（排除评估失败的锚点，也排除未人工确认的条目）")
     lines.append(f"- 平均绝对误差 MAE：{analysis['mae']}")
     lines.append(
         f"- 平均偏差（评委 − 人工）：{analysis['bias']:+} → {_bias_verdict(analysis['bias'])}"
     )
-    lines.append(f"- 排序一致性：{_r_verdict(analysis['r'])}")
+    lines.append(
+        f"- 排序一致性：{_r_verdict(analysis['r'], analysis.get('rho'), int(analysis.get('bands_covered', 0)))}"
+    )
+    lines.append(f"- 过线判定：{_decision_verdict(analysis.get('decision') or {'usable': False})}")
+    hist = analysis.get("human_band_hist") or {}
+    if hist:
+        lines.append(
+            "- 人工分分布：" + "　".join(f"{b}:{n}" for b, n in hist.items())
+            + f"（覆盖 {analysis.get('bands_covered', 0)}/{len(BANDS)} 带）"
+        )
     if analysis["flags"]:
         lines.append(
             f"- ⚠️ 大偏差样本（|Δ| > {LARGE_DEVIATION}）：{', '.join(analysis['flags'])}——优先人工复核这几条"
@@ -207,6 +375,19 @@ def render_report(role: str, analysis: dict[str, Any]) -> str:
             "不足以支撑「评委可信/不可信」的结论，继续积累锚点。"
         )
     return "\n".join(lines)
+
+
+def render_provenance(total: int, pending: int) -> str:
+    """采集来源披露。它挡的是一种很具体的自欺：候选集越大，输出越像"校准很充分"，
+    而未确认的条目既不进分母也不参与打分——不写出来的话，读报告的人会以为 45 条全用了。
+    """
+    if pending <= 0:
+        return ""
+    return (
+        f"\n> ℹ️ 样本文件共 {total} 条，其中 **{pending} 条未经人工确认（confirmed=false），"
+        f"已从本次校准中排除**；实际参与 {total - pending} 条。"
+        "未确认的候选分数与被校评委同源，纳入等于用被校对象当标准答案。"
+    )
 
 
 def render_repeatability(rep: dict[str, Any]) -> str:
@@ -355,8 +536,19 @@ def main() -> int:
         print(f"样本加载失败：{e}", file=sys.stderr)
         return 2
     if not samples:
-        print(f"样本为空：{args.samples}（先用 --write-template 生成模板）", file=sys.stderr)
+        n_pending = len(getattr(samples, "pending", []))
+        hint = (
+            f"（{n_pending} 条候选全部未人工确认——把 confirmed 改成 true 并填 human_score 再跑）"
+            if n_pending
+            else "（先用 --write-template 生成模板）"
+        )
+        print(f"样本为空：{args.samples}{hint}", file=sys.stderr)
         return 2
+    if getattr(samples, "pending", None):
+        print(
+            render_provenance(len(samples) + len(samples.pending), len(samples.pending)),
+            file=sys.stderr,
+        )
 
     analysis, errors = calibrate(samples, args.judge)
     for sid, err in errors:

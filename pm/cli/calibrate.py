@@ -90,13 +90,19 @@ def _calibrate_command(argv: list[str]) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as e:
         print(f"样本加载失败：{e}", file=sys.stderr)
         return EXIT_CONFIG
+    # 未人工确认的候选已被 load_samples 挡在 samples 外面，这里只负责把这件事说出来：
+    # 采了 45 条、实际用 11 条，如果不印这一行，读输出的人会以为 45 条全进了分母。
+    pending = getattr(samples, "pending", []) or []
     if not samples:
-        print(
-            f"样本为空：{ns.samples}（先跑 python calibrate_judge.py --write-template 生成模板，"
-            "并人工核对 human_score）",
-            file=sys.stderr,
+        hint = (
+            f"（{len(pending)} 条候选全部未人工确认——填 human_score 并把 confirmed 改成 true 再跑）"
+            if pending
+            else "（先跑 python calibrate_judge.py --write-template 生成模板，并人工核对 human_score）"
         )
+        print(f"样本为空：{ns.samples}{hint}", file=sys.stderr)
         return EXIT_CONFIG
+    if pending:
+        print(calib.render_provenance(len(samples) + len(pending), len(pending)), file=sys.stderr)
 
     analysis, errors = calib.calibrate(samples, ns.judge)
     for sid, err in errors:
@@ -206,6 +212,12 @@ def _calibrate_command(argv: list[str]) -> int:
             "bias": analysis["bias"],
             "mae": analysis["mae"],
             "r": analysis["r"],
+            "rho": analysis.get("rho"),
+            # 采集了多少条不参与打分的候选也入账：只看 n 会把"扩了 3 倍锚点集"
+            # 和"一条都没人工确认"读成同一件事。
+            "n_pending": len(pending),
+            "decision_agree": (analysis.get("decision") or {}).get("agree"),
+            "decision_kappa": (analysis.get("decision") or {}).get("kappa"),
             "model": now_model,
             "rubric": now_rubric,
             "anchors": now_anchors,
@@ -236,6 +248,7 @@ def _calibrate_command(argv: list[str]) -> int:
                     "judge": ns.judge,
                     "analysis": analysis,
                     "drift": drift,
+                    "n_pending": len(pending),
                     # history 已 append（保存路径），len 即账本当前条数；
                     # 旧写法再 +1 会把本次记录数成两倍，误导"已校准过几轮"的判断
                     "history_len": len(history),
