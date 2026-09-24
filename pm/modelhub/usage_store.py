@@ -12,6 +12,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from typing import Any, cast
 
 from .pool import _project_root
 
@@ -22,14 +23,24 @@ def _notify(msg: str) -> None:
     """G-06 告警落盘：追加 logs/notifications.jsonl（时间戳+来源+消息）。"""
     import json as _json
     from pathlib import Path as _P
+
     try:
         nlog = _P(__file__).resolve().parents[2] / "logs" / "notifications.jsonl"
         nlog.parent.mkdir(parents=True, exist_ok=True)
         with open(nlog, "a", encoding="utf-8") as f:
             import time as _t
-            f.write(_json.dumps({"ts": _t.strftime("%Y-%m-%dT%H:%M:%S"),
-                                 "source": "usage_store", "message": msg},
-                                ensure_ascii=False) + "\n")
+
+            f.write(
+                _json.dumps(
+                    {
+                        "ts": _t.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "source": "usage_store",
+                        "message": msg,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
     except Exception:  # noqa: BLE001 - 通知失败静默
         pass
 
@@ -40,7 +51,7 @@ def _path() -> Path:
     return root / "usage_daily.json"
 
 
-def _load() -> dict:
+def _load() -> dict[str, Any]:
     """加载日聚合；损坏时告警化处理：坏文件改名留存（.corrupt-<ts>），从空重建。
 
     不静默：损失以两个途径可见——① 改名后的 .corrupt 文件本身；② stderr ALERT 输出。
@@ -50,21 +61,34 @@ def _load() -> dict:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        return cast("dict[str, Any]", json.loads(p.read_text(encoding="utf-8")))
     except json.JSONDecodeError as e:
         ts = time.strftime("%Y%m%d-%H%M%S")
         try:
             p.replace(p.with_suffix(".json.corrupt-" + ts))
         except OSError:
             pass
-        msg = ("[usage_store] ALERT: usage_daily.json corrupted (" + str(e) + "), saved as .corrupt-" + ts + "; rebuilt empty; JSONL source-of-truth unaffected")
+        msg = (
+            "[usage_store] ALERT: usage_daily.json corrupted ("
+            + str(e)
+            + "), saved as .corrupt-"
+            + ts
+            + "; rebuilt empty; JSONL source-of-truth unaffected"
+        )
         print(msg)
         _notify(msg)  # G-06：告警落盘，可追溯可接通知渠道
         return {}
 
 
-def _merge(day: dict, *, success: bool, latency_ms: int, failovers: int,
-           content_chars: int, model: str) -> None:
+def _merge(
+    day: dict[str, Any],
+    *,
+    success: bool,
+    latency_ms: int,
+    failovers: int,
+    content_chars: int,
+    model: str,
+) -> None:
     day["calls"] = day.get("calls", 0) + 1
     if success:
         day["success"] = day.get("success", 0) + 1
@@ -78,15 +102,29 @@ def _merge(day: dict, *, success: bool, latency_ms: int, failovers: int,
         ent["success"] += 1
 
 
-def record_call(*, model: str, agent: str, role: str, success: bool,
-                latency_ms: int, failovers: int, content_chars: int) -> None:
+def record_call(
+    *,
+    model: str,
+    agent: str,
+    role: str,
+    success: bool,
+    latency_ms: int,
+    failovers: int,
+    content_chars: int,
+) -> None:
     """追加一笔调用到当日聚合（线程安全，原子写）。"""
     day_key = time.strftime("%Y-%m-%d")
     with _LOCK:
         data = _load()
         day = data.setdefault(day_key, {})
-        _merge(day, success=success, latency_ms=latency_ms, failovers=failovers,
-               content_chars=content_chars, model=model)
+        _merge(
+            day,
+            success=success,
+            latency_ms=latency_ms,
+            failovers=failovers,
+            content_chars=content_chars,
+            model=model,
+        )
         p = _path()
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(".json.tmp")
@@ -94,6 +132,6 @@ def record_call(*, model: str, agent: str, role: str, success: bool,
         os.replace(tmp, p)
 
 
-def load_daily() -> dict:
+def load_daily() -> dict[str, Any]:
     with _LOCK:
         return _load()

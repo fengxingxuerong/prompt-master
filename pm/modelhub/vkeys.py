@@ -35,7 +35,7 @@ def _agents_path() -> Path:
     return _data_dir() / "agents.json"
 
 
-def _load_json_or(path: Path, default: dict, what: str) -> dict:
+def _load_json_or(path: Path, default: dict[str, Any], what: str) -> dict[str, Any]:
     if not path.exists():
         return default
     try:
@@ -53,7 +53,7 @@ def _load_json_or(path: Path, default: dict, what: str) -> dict:
     return data
 
 
-def _atomic_write(path: Path, data: dict) -> None:
+def _atomic_write(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -165,8 +165,15 @@ class AgentStore:
                 self._agents = agents
                 self._mtime = mtime
 
-    def register(self, name: str, *, framework: str = "unknown", default_role: str | None = None,
-                 default_model: str | None = None, description: str = "") -> dict[str, Any]:
+    def register(
+        self,
+        name: str,
+        *,
+        framework: str = "unknown",
+        default_role: str | None = None,
+        default_model: str | None = None,
+        description: str = "",
+    ) -> dict[str, Any]:
         if not name or not name.strip():
             raise ConfigError("智能体名称不能为空")
         name = name.strip()

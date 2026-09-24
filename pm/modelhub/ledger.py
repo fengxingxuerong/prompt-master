@@ -27,9 +27,7 @@ def _project_root() -> Path:
 
 
 def ledger_path() -> Path:
-    p = os.getenv(
-        "PMH_LEDGER_PATH", str(_project_root() / "logs" / "modelhub_ledger.jsonl")
-    )
+    p = os.getenv("PMH_LEDGER_PATH", str(_project_root() / "logs" / "modelhub_ledger.jsonl"))
     return Path(p)
 
 

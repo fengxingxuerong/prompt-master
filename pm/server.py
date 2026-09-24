@@ -422,7 +422,7 @@ async def web_console(request: Request) -> str:
     tests/test_web_console.py 有断言比对两者。
     """
     nonce = getattr(request.state, "csp_nonce", "")
-    return cast("str", WEB_CONSOLE_HTML.replace(CSP_NONCE_PLACEHOLDER, nonce))
+    return WEB_CONSOLE_HTML.replace(CSP_NONCE_PLACEHOLDER, nonce)
 
 
 @app.get("/api/health")

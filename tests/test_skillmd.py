@@ -118,9 +118,9 @@ def test_gate_blocks_passed_in_evaluate_node():
     """
     import test_injection_gate
 
-    assert hasattr(
-        test_injection_gate, "test_hijacked_injection_forces_not_passed"
-    ), "覆盖迁移丢失：evaluate_node 的 gate 阻断用例必须存在于 test_injection_gate.py"
+    assert hasattr(test_injection_gate, "test_hijacked_injection_forces_not_passed"), (
+        "覆盖迁移丢失：evaluate_node 的 gate 阻断用例必须存在于 test_injection_gate.py"
+    )
 
 
 def test_skillmd_uses_best_note_when_not_passed():

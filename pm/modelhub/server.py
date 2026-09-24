@@ -18,6 +18,7 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ from pm.modelhub.ledger import ledger_stats, query_ledger  # noqa: E402
 from pm.modelhub.pool import (  # noqa: E402
     ConfigError,
     GatewayError,
+    ModelEntry,
     ModelHub,
     ModelPoolExhaustedError,
 )
@@ -61,10 +63,14 @@ def _admin_auth(x_api_key: str | None) -> None:
     if not expected:
         return
     if not x_api_key or x_api_key.strip() != expected:
-        raise HTTPException(status_code=401, detail="缺少或错误的 X-API-Key / Authorization（管理操作）")
+        raise HTTPException(
+            status_code=401, detail="缺少或错误的 X-API-Key / Authorization（管理操作）"
+        )
 
 
-def _chat_auth(authorization: str | None, x_api_key: str | None) -> tuple[str | None, str | None]:
+def _chat_auth(
+    authorization: str | None, x_api_key: str | None
+) -> tuple[dict[str, Any] | None, str | None]:
     """对话鉴权：vk- 虚拟密钥（返回归属 agent）或管理员口令直通（返回 None）。
 
     返回 (vk_record, admin_pass)。vk- 无效/停用 → 401。
@@ -132,7 +138,9 @@ class KeyPatchRequest(BaseModel):
     enabled: bool
 
 
-def _resolve_role_and_messages(req: ChatRequest) -> tuple[list[dict], str | None, str | None]:
+def _resolve_role_and_messages(
+    req: ChatRequest,
+) -> tuple[list[dict[str, Any]], str | None, str | None]:
     registry = get_registry()
     agent = (req.agent or "").strip() or None
     role_name = (req.role or "").strip() or None
@@ -200,7 +208,7 @@ def chat_completions(
     req: ChatRequest,
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-):
+) -> Response:
     try:
         vk_rec, _mode = _chat_auth(authorization, x_api_key)
     except HTTPException:
@@ -231,9 +239,15 @@ def chat_completions(
             detail=str(e),
         ) from e
 
-    record_call(model=result["model"], agent=agent_resolved or "(unattributed)",
-                role=role_name or "", success=True, latency_ms=result["latency_ms"],
-                failovers=result["failovers"], content_chars=len(result["content"]))
+    record_call(
+        model=result["model"],
+        agent=agent_resolved or "(unattributed)",
+        role=role_name or "",
+        success=True,
+        latency_ms=result["latency_ms"],
+        failovers=result["failovers"],
+        content_chars=len(result["content"]),
+    )
     cid = "chatcmpl-" + uuid.uuid4().hex[:20]
     return Response(
         content=json.dumps(
@@ -269,9 +283,13 @@ def chat_completions(
 
 
 def _stream_response(
-    hub: ModelHub, req: ChatRequest, messages: list[dict], agent: str | None, role: str | None,
+    hub: ModelHub,
+    req: ChatRequest,
+    messages: list[dict[str, Any]],
+    agent: str | None,
+    role: str | None,
     params: dict[str, Any],
-):
+) -> StreamingResponse:
     """流式 SSE：按主备链逐个模型尝试；首块前失败自动切下一个。
 
     降级兑底（竞品 LiteLLM 同款思路）：上游对 stream=true 返回 401/404 等能力性拒绝时
@@ -281,9 +299,6 @@ def _stream_response(
     """
     request_id = uuid.uuid4().hex[:12]
     t0 = time.time()
-
-    def _headers_for(entry):
-        return entry
 
     candidates = hub._ordered_enabled()
     if req.model is not None:
@@ -296,8 +311,8 @@ def _stream_response(
 
     timeout = float(os.getenv("PMH_TIMEOUT", "60") or 60)
 
-    def attempt_stream():
-        """依次尝试候选模型；成功后返回 (model_name, chunk_gen, entry)。"""
+    def attempt_stream() -> tuple[ModelEntry, bytes, Iterator[bytes]]:
+        """依次尝试候选模型；成功后返回 (entry, 首个 chunk, 剩余 chunk 迭代器)。"""
         last_err: GatewayError | None = None
         for idx, entry in enumerate(candidates):
             if idx > 0:
@@ -306,7 +321,8 @@ def _stream_response(
                 append_switch = False
             try:
                 _upstream_model, gen = stream_upstream(
-                    entry.base_url, entry.api_key,
+                    entry.base_url,
+                    entry.api_key,
                     {"model": entry.upstream_model, "messages": messages, **params},
                     timeout,
                 )
@@ -318,9 +334,12 @@ def _stream_response(
                     from pm.modelhub.ledger import append_switch_event
 
                     append_switch_event(
-                        request_id=request_id, from_model=(prev.name if (prev := candidates[idx - 1]) else "?"),
-                        to_model=entry.name, reason=(last_err.reason if last_err else "unknown"),
-                        detail=f"stream failover #{idx}", failover_index=idx,
+                        request_id=request_id,
+                        from_model=(prev.name if (prev := candidates[idx - 1]) else "?"),
+                        to_model=entry.name,
+                        reason=(last_err.reason if last_err else "unknown"),
+                        detail=f"stream failover #{idx}",
+                        failover_index=idx,
                     )
                 return entry, first, gen
             except GatewayError as e:
@@ -344,11 +363,19 @@ def _stream_response(
             from pm.modelhub.ledger import append_call_event
 
             append_call_event(
-                request_id=request_id, model="(stream)", endpoint="?", success=False,
-                latency_ms=int((time.time() - t0) * 1000), attempts=len(candidates) * 2,
-                failovers=max(0, len(candidates) - 1), http_status=None,
-                error_type="ModelPoolExhaustedError", error_msg=f"stream+fallback both failed: {e}"[:300],
-                agent=agent, role=role, content_chars=None,
+                request_id=request_id,
+                model="(stream)",
+                endpoint="?",
+                success=False,
+                latency_ms=int((time.time() - t0) * 1000),
+                attempts=len(candidates) * 2,
+                failovers=max(0, len(candidates) - 1),
+                http_status=None,
+                error_type="ModelPoolExhaustedError",
+                error_msg=f"stream+fallback both failed: {e}"[:300],
+                agent=agent,
+                role=role,
+                content_chars=None,
             )
             raise HTTPException(status_code=502, detail=str(e)) from None
         except GatewayError as e:
@@ -359,46 +386,67 @@ def _stream_response(
         from pm.modelhub.ledger import append_call_event
 
         append_call_event(
-            request_id=request_id, model=result["model"], endpoint=result["endpoint"],
-            success=True, latency_ms=result["latency_ms"], attempts=result.get("attempts", 1),
-            failovers=result.get("failovers", 0), http_status=200,
-            error_type=None, error_msg=None, agent=agent, role=role,
+            request_id=request_id,
+            model=result["model"],
+            endpoint=result["endpoint"],
+            success=True,
+            latency_ms=result["latency_ms"],
+            attempts=result.get("attempts", 1),
+            failovers=result.get("failovers", 0),
+            http_status=200,
+            error_type=None,
+            error_msg=None,
+            agent=agent,
+            role=role,
             content_chars=len(result["content"]),
         )
-        entry = None
         stream_err_text = str(stream_err)[:200]
 
         cid = "chatcmpl-" + uuid.uuid4().hex[:20]
         chunk = {
-            "id": cid, "object": "chat.completion.chunk", "created": int(time.time()),
+            "id": cid,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
             "model": result["model"],
             "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
         }
         body_chunk = {
-            "id": cid, "object": "chat.completion.chunk", "created": int(time.time()),
+            "id": cid,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
             "model": result["model"],
-            "choices": [{"index": 0, "delta": {"content": result["content"]}, "finish_reason": None}],
+            "choices": [
+                {"index": 0, "delta": {"content": result["content"]}, "finish_reason": None}
+            ],
         }
-        _degraded_info = {"modelhub": {"degraded": True, "note": "upstream rejected stream=true; "
-                          "served non-stream + synthesized SSE", "last_stream_error": stream_err_text,
-                          "request_id": request_id}}
-        done_note = (
-            "data: " + json.dumps(_degraded_info, ensure_ascii=False) + "\n\n"
-        )
+        _degraded_info = {
+            "modelhub": {
+                "degraded": True,
+                "note": "upstream rejected stream=true; served non-stream + synthesized SSE",
+                "last_stream_error": stream_err_text,
+                "request_id": request_id,
+            }
+        }
+        done_note = "data: " + json.dumps(_degraded_info, ensure_ascii=False) + "\n\n"
 
-        def synth_gen():
+        def synth_gen() -> Iterator[bytes]:
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode()
             yield f"data: {json.dumps(body_chunk, ensure_ascii=False)}\n\n".encode()
             yield done_note.encode("utf-8")
             yield b"data: [DONE]\n\n"
 
         return StreamingResponse(
-            synth_gen(), media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
-                     "X-Modelhub-Request-Id": request_id, "X-Modelhub-Degraded": "true"},
+            synth_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-Modelhub-Request-Id": request_id,
+                "X-Modelhub-Degraded": "true",
+            },
         )
 
-    def sse_gen():
+    def sse_gen() -> Iterator[bytes]:
         yield first
         ok = True
         content_chars = 0
@@ -412,7 +460,7 @@ def _stream_response(
         q: queue.Queue[bytes | str | None] = queue.Queue()
         HEARTBEAT = 15.0
 
-        def pump():
+        def pump() -> None:
             try:
                 for chunk in gen:
                     q.put(chunk)
@@ -435,8 +483,15 @@ def _stream_response(
                     continue
                 if chunk is None:
                     break
-                if isinstance(chunk, str) and chunk.startswith("ERR::"):
-                    raise RuntimeError(chunk[5:])
+                if chunk is None:
+                    break
+                if isinstance(chunk, str):
+                    # 泵线程用 str 只承载一种东西：上游异常的 "ERR::" 哨兵。
+                    # 其余 str 不是合法 SSE 帧（上游分帧一律是 bytes），丢掉而不是
+                    # 原样 yield —— 那会把非 bytes 载荷混进 text/event-stream 响应里。
+                    if chunk.startswith("ERR::"):
+                        raise RuntimeError(chunk[5:])
+                    continue
                 try:
                     text = chunk.decode("utf-8", errors="replace")
                     if text.startswith("data:") and "[DONE]" not in text:
@@ -450,10 +505,16 @@ def _stream_response(
         except Exception as e:  # noqa: BLE001
             ok = False
             err_in_stream = f"{type(e).__name__}: {e}"[:200]
+            # 整帧一次性 encode：写成 "data: " + json.dumps(...) + b"\n\n" 是 str 拼 bytes，
+            # 当场 TypeError，客户端看到的与"上游断流"同一种死法（中断原因彻底丢）
             yield (
-                "data: " + json.dumps(
-                    {"error": {"message": f"stream interrupted: {err_in_stream}"}}, ensure_ascii=False)
-                ) + b"\n\n"
+                "data: "
+                + json.dumps(
+                    {"error": {"message": f"stream interrupted: {err_in_stream}"}},
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            ).encode("utf-8")
         finally:
             if ok:
                 hub._mark_success(entry)
@@ -462,14 +523,36 @@ def _stream_response(
             from pm.modelhub.ledger import append_call_event
 
             append_call_event(
-                request_id=request_id, model=entry.name, endpoint=entry.base_url,
-                success=ok, latency_ms=int((time.time() - t0) * 1000), attempts=1,
-                failovers=0, http_status=200 if ok else None,
-                error_type=err_in_stream, error_msg=err_in_stream,
-                agent=agent, role=role, content_chars=content_chars or None,
+                request_id=request_id,
+                model=entry.name,
+                endpoint=entry.base_url,
+                success=ok,
+                latency_ms=int((time.time() - t0) * 1000),
+                attempts=1,
+                failovers=0,
+                http_status=200 if ok else None,
+                error_type=err_in_stream,
+                error_msg=err_in_stream,
+                agent=agent,
+                role=role,
+                content_chars=content_chars or None,
             )
 
+    # ⚠️ 这个 return 曾经丢过一版（sse_gen 定义完函数就结束了 → stream=true 拿到 None，
+    # 而 pytest 全绿：SSE 通道在流水线里零覆盖）。回归见 tests/test_modelhub_stream_contract.py
+    return StreamingResponse(
+        sse_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Modelhub-Request-Id": request_id,
+        },
+    )
+
+
 # ---------------- 虚拟密钥（OPT-2） ----------------
+
 
 @app.get("/v1/keys")
 def list_keys(
@@ -496,7 +579,8 @@ def issue_key(
 
 @app.patch("/v1/keys/{key}")
 def patch_key(
-    key: str, req: KeyPatchRequest,
+    key: str,
+    req: KeyPatchRequest,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
@@ -523,6 +607,7 @@ def delete_key(
 
 # ---------------- 智能体（持久化版） ----------------
 
+
 @app.get("/v1/agents")
 def list_agents(
     authorization: str | None = Header(default=None),
@@ -542,11 +627,15 @@ def register_agent(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> dict[str, Any]:
     _admin_auth(_key_from_header(authorization, x_api_key))
-    if (req.default_role or "").strip():
-        get_registry().get_role(req.default_role.strip())  # 不存在 → 422
+    default_role = (req.default_role or "").strip()
+    if default_role:
+        get_registry().get_role(default_role)  # 不存在 → 422
     agent = get_agent_store().register(
-        req.name, framework=req.framework, default_role=(req.default_role or "").strip() or None,
-        default_model=req.default_model, description=req.description,
+        req.name,
+        framework=req.framework,
+        default_role=default_role or None,
+        default_model=req.default_model,
+        description=req.description,
     )
     return {"ok": True, "agent": agent, "persisted": True}
 
@@ -565,6 +654,7 @@ def unregister_agent(
 
 
 # ---------------- 用量与指标（OPT-3 / OPT-6） ----------------
+
 
 @app.get("/v1/usage")
 def usage(
@@ -587,7 +677,17 @@ def usage(
         a = r.get("agent") or "(unattributed)"
         m = r.get("model") or "?"
         k1 = agg.setdefault(a, {})
-        k2 = k1.setdefault(m, {"calls": 0, "success": 0, "latency_ms_sum": 0, "content_chars_sum": 0, "failovers_sum": 0, "days": {}})
+        k2 = k1.setdefault(
+            m,
+            {
+                "calls": 0,
+                "success": 0,
+                "latency_ms_sum": 0,
+                "content_chars_sum": 0,
+                "failovers_sum": 0,
+                "days": {},
+            },
+        )
         k2["calls"] += 1
         if r.get("success"):
             k2["success"] += 1
@@ -602,8 +702,11 @@ def usage(
     return {
         "window": {"since": since, "until": until, "note": "最近 2000 条 call 事件聚合"},
         "persistent_daily": persistent,
-        "totals": {"calls": total_calls, "success": total_success,
-                   "success_rate": round(total_success / total_calls, 4) if total_calls else None},
+        "totals": {
+            "calls": total_calls,
+            "success": total_success,
+            "success_rate": round(total_success / total_calls, 4) if total_calls else None,
+        },
         "by_agent": agg,
     }
 
@@ -618,7 +721,9 @@ def metrics(
     models = {}
     for m in pool["models"]:
         models[m["name"]] = {
-            "circuit": m["circuit"], "consecutive_failures": m["consecutive_failures"], "enabled": m["enabled"],
+            "circuit": m["circuit"],
+            "consecutive_failures": m["consecutive_failures"],
+            "enabled": m["enabled"],
         }
     calls = stats.get("calls") or 0
     ok = stats.get("success") or 0
@@ -667,8 +772,15 @@ def ledger(
     succ: bool | None = None
     if success is not None:
         succ = success.lower() in ("1", "true", "yes")
-    rows = query_ledger(model=model, success=succ, type=type, since=since, until=until,
-                        request_id=request_id, limit=min(max(1, limit), 2000))
+    rows = query_ledger(
+        model=model,
+        success=succ,
+        type=type,
+        since=since,
+        until=until,
+        request_id=request_id,
+        limit=min(max(1, limit), 2000),
+    )
     return {"count": len(rows), "rows": rows}
 
 
@@ -707,12 +819,18 @@ def root() -> dict[str, Any]:
         "service": "ModelHub Gateway",
         "version": "1.1.0",
         "routes": [
-            "GET /v1/models", "POST /v1/chat/completions（stream 可选）",
-            "GET /v1/pool/status", "GET /v1/ledger", "GET /v1/ledger/stats",
-            "GET /v1/usage", "GET /v1/metrics", "GET /v1/roles",
+            "GET /v1/models",
+            "POST /v1/chat/completions（stream 可选）",
+            "GET /v1/pool/status",
+            "GET /v1/ledger",
+            "GET /v1/ledger/stats",
+            "GET /v1/usage",
+            "GET /v1/metrics",
+            "GET /v1/roles",
             "GET|POST /v1/keys  PATCH|DELETE /v1/keys/{key}",
             "GET|POST /v1/agents  DELETE /v1/agents/{name}",
-            "GET /console", "GET /api/health",
+            "GET /console",
+            "GET /api/health",
         ],
         "agent_quickstart": {
             "base_url": "http://127.0.0.1:8687/v1",

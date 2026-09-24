@@ -28,12 +28,12 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 try:  # python-dotenv 是项目既有依赖；缺失时退化为只读进程环境变量
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover
-    load_dotenv = None  # type: ignore[assignment]
+    load_dotenv = None
 
 from .ledger import append_call_event, append_switch_event
 
@@ -211,7 +211,9 @@ class ModelHub:
                     raise ConfigError(
                         f"配置文件不存在：{self._config_path}（可从 config/*.example 复制后填写）"
                     )
-                self._last_config_error = f"配置文件不存在：{self._config_path}（沿用内存中的旧配置继续服务）"
+                self._last_config_error = (
+                    f"配置文件不存在：{self._config_path}（沿用内存中的旧配置继续服务）"
+                )
                 return
             try:
                 mtime = self._config_path.stat().st_mtime
@@ -233,7 +235,9 @@ class ModelHub:
                             raise ConfigError(f"pool[{i}] 不是对象：{self._config_path}")
                         for req in ("name", "base_url", "api_key"):
                             if not spec.get(req):
-                                raise ConfigError(f"pool[{i}] 缺少必填字段 {req}：{self._config_path}")
+                                raise ConfigError(
+                                    f"pool[{i}] 缺少必填字段 {req}：{self._config_path}"
+                                )
                         entries.append(ModelEntry(spec))
                     if not any(e.enabled for e in entries):
                         raise ConfigError("模型池里没有任何 enabled=true 的模型")
@@ -262,15 +266,20 @@ class ModelHub:
             cooldown = _cooldown_seconds()
             models = []
             for e in self._entries:
-                cooling = e.opened_at is not None and (now - e.opened_at) < cooldown
+                opened_at = e.opened_at
+                cooling = opened_at is not None and (now - opened_at) < cooldown
                 models.append(
                     {
                         **e.to_public_dict(),
                         "circuit": "open(cooling)" if cooling else "closed",
                         "consecutive_failures": e.consecutive_failures,
                         "last_error": e.last_error,
+                        # 局部变量 opened_at 只为让类型可收窄：`cooling` 为真时它必不是 None，
+                        # 但 mypy 看不穿跨表达式的这条蕴含（直接写 e.opened_at 会报 float - None）
                         "cooling_remaining_s": (
-                            int(cooldown - (now - e.opened_at)) if cooling else 0
+                            int(cooldown - (now - opened_at))
+                            if cooling and opened_at is not None
+                            else 0
                         ),
                     }
                 )
@@ -347,7 +356,9 @@ class ModelHub:
             data = json.loads(body)
         except json.JSONDecodeError as e:
             raise GatewayError(f"响应不是 JSON（status={status}）: {body[:120]}") from e
-        return data
+        # json.loads 的返回类型是 Any；上游返回非对象（数组/裸字符串）时这里会照实透出，
+        # 由调用方按"不是合法 chat 响应"处理——本函数不承担形状校验。
+        return cast("dict[str, Any]", data)
 
     @staticmethod
     def _validate_chat_response(data: dict[str, Any]) -> str:
@@ -470,9 +481,9 @@ class ModelHub:
                 self._mark_failure(entry, f"{type(e).__name__}: {e}")
                 # D-009：瞬时错误（偶发 401/429/5xx/连接抖动）先原地重试一次再切换，
                 # 实测这类错误 2s 后重试即成功；持续性故障仍由切换链兑底。
-                transient = (
-                    e.http_status in self.TRANSIENT_RETRY_CODES
-                    or e.reason in ("timeout", "connection_error")
+                transient = e.http_status in self.TRANSIENT_RETRY_CODES or e.reason in (
+                    "timeout",
+                    "connection_error",
                 )
                 if transient:
                     try:
@@ -505,7 +516,9 @@ class ModelHub:
                             "failovers": failovers,
                             "latency_ms": latency_ms,
                             "usage": usage,
-                            "raw_finish_reason": (data.get("choices") or [{}])[0].get("finish_reason"),
+                            "raw_finish_reason": (data.get("choices") or [{}])[0].get(
+                                "finish_reason"
+                            ),
                             "transient_retried": True,
                         }
                     except GatewayError:
