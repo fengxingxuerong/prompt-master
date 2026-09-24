@@ -59,11 +59,13 @@ addopts = "-q"
 source = ["pm"]
 
 [tool.coverage.report]
-# 地板值来自 2026-09-25 实测：全量 84%，拆开看 pm/modelhub/* 只有 33.5%、其余 95.6%。
-# 这条线的含义是"别再往下掉"，不是质量目标（分项那条更紧的闸见 ci.yml）。
+# 地板值来自实测（2026-09-25 两次）：接入门禁前全量 84%，补 modelhub 测试后 88.5%。
+# 拆开看才是重点：`pm/` 去掉网关原本 95.6%，而 pm/modelhub/* 从 33.5% 补到 58.6%
+# （streaming 7→89、pool 23→61、vkeys 21→85）。这条线的含义是"别再往下掉"，不是质量目标
+# —— 分项那条更紧的闸见 ci.yml。
 # 为什么现在才加：以前仓库里根本没有覆盖率门禁，文档写的"94%"是手抄快照
 # —— 2026-09-25 实测 84%，虚高 10 个点。
-fail_under = 82
+fail_under = 87
 show_missing = true
 
 [tool.coverage.json_report]

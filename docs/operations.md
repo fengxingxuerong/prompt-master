@@ -31,21 +31,23 @@ python -m pytest releases/triage/tests/ -q
 python run.py --selftest          # CI 里额外清 PM_API_KEY 再跑一次（干净检出无 .env 也必须过）
 bash examples/run_e2e_stub.sh     # 真实 HTTP 链路 + 三条结构化输出通道（桩端点，不出网）
 ```
-覆盖率的两条线怎么读（2026-09-25 实测后定的地板值，不是目标值）：
+覆盖率的两条线怎么读（地板值取实测下方留余量，不是质量目标）：
 
-| 范围 | 实测 | 门禁地板 |
-|---|---|---|
-| `pm/` 全量 | 84% | 82 |
-| `pm/` 去掉 modelhub | 95.6% | —（被全量线覆盖） |
-| `pm/modelhub/*` | 34% | 32 |
+| 范围 | 接入门禁前 | 补 modelhub 测试后 | 门禁地板 |
+|---|---|---|---|
+| `pm/` 全量 | 84% | **88.5%** | 87 |
+| `pm/` 去掉 modelhub | 95.6% | ~96% | —（被全量线覆盖） |
+| `pm/modelhub/*` | 33.5% | **58.6%** | 56 |
 
-- 为什么给 modelhub 单独立一条：全量 84% 会把结构问题抹平，而恰恰是这条网关出现过
+- 为什么给 modelhub 单独立一条：全量线会把结构问题抹平，而恰恰是这条网关出现过
   "流式通道没有 return、`stream=true` 返回 None、全套测试全绿"的事故（见
   `tests/test_modelhub_stream_contract.py`）。全局线守不住的地方要分项钉。
+- ⚠️ 只量子集时会踩到全局地板（`--cov=pm.modelhub` 量出 58% 会被 87 判红）。
+  量局部请补 `--cov-fail-under=0`，那不是门禁坏了。
 - 这个数字只统计主进程：`test_cli_guards.py` 那批 subprocess 打真实入口的用例不计入分子，
   所以 `pm/cli/main.py` 的读数偏保守。
 - 旧文档里"覆盖率 94%"是手抄快照、且从来没被任何门禁守过（实测 84%）；现在地板值进 CI 了，
-  改数字要连着改 `pyproject.toml` 的 `fail_under`，别只改文档。
+  改数字要连着改 `pyproject.toml` 的 `fail_under` 与 ci.yml 的分项线，别只改文档。
 Windows 本机注意：pytest 的临时目录根落在 `%TEMP%\pytest-of-<用户>\`，若其中的
 `pytest-current` 软链坏掉（本机实测 stat 都抛 WinError 5），pytest 退出期的清理函数会
 自己崩 ⇒ **用例全过也返回 rc=1**。仓根 `conftest.py` 与 `releases/*/pytest.ini` 已把临时根

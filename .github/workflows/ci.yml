@@ -45,12 +45,13 @@ jobs:
           PM_API_KEY: sk-ci-has-no-real-key
         run: python -m pytest tests/ -q --cov=pm --cov-report=term-missing
       - name: Coverage ratchet —— pm/modelhub/* 单独一条更紧的线
-        # 全量 84% 会把结构问题抹平：拆开看 pm 其余部分 95.6%，而 modelhub 只有 34%
-        # —— 恰恰是这条网关在 2026-09-25 出现"流式通道没有 return、stream=true 返回 None"
-        # 而全套测试全绿的事故。全局线守不住的地方，就用分项线钉住不许再掉。
+        # 全量 88.5% 会把结构问题抹平：这块网关补测前只有 33.5%、补测后 58.6%
+        # （streaming 7→89、pool 23→61、vkeys 21→85），而恰恰是它出过
+        # "流式通道没有 return、stream=true 返回 None、全套测试全绿"的事故。
+        # 全局线守不住的地方，就用分项线钉住不许再掉。地板取实测 58.6% 下方留 2.5 点余量。
         env:
           PM_API_KEY: sk-ci-has-no-real-key
-        run: python -m coverage report --include="*/modelhub/*" --fail-under=32
+        run: python -m coverage report --include="*/modelhub/*" --fail-under=56
       - name: Releases suite tests (lobster + triage) —— TestClient 进程内，零真实出网
         run: |
           python -m pytest releases/lobster/tests/ -q

@@ -68,7 +68,10 @@ PY = D:\projects\prompt-master\.venv\Scripts\python.exe
   JSON 落盘（原子写）"已过期，别照它去回滚（回滚走 git tag，见
   `releases/suite/CHANGELOG-v1.4.6.md`）；
 - 桌面 `D:\Desktop\新建 Text Document.txt` 含明文密钥，处置权在用户（W9 豁免中）；
-- ModelHub 的流式通道（`stream=true`）在 2026-09-25 前处于**静默失效**状态
-  （`_stream_response()` 丢了 `return`），且当时无任何自动测试覆盖 —— 回归与修复见
-  `tests/test_modelhub_stream_contract.py` 与提交历史。对外承诺过能力的模块，
-  优先补的是测试而不是文档。
+- ModelHub 网关的流式通道（`stream=true`）在 2026-09-25 之前**从未通过**：
+  `pm/modelhub/server.py` 这个文件是 54d6f51（v1.4.0）建立的，当时就把
+  `_stream_response()` 尾部的 `return StreamingResponse(sse_gen(), ...)` 丢了
+  （旧版代码在 `releases/v1.1.0/` 快照里是完整的）—— 不是"后来某次重构改坏"，
+  是搬代码时漏了尾巴。当时无任何自动测试覆盖 SSE，所以跨三个版本没人发现。
+  回归与修复见 `tests/test_modelhub_stream_contract.py`；同轮把 modelhub 覆盖率
+  从 33.5% 补到 58.6% 并加了 CI 分项线。**对外承诺过的能力，优先补的是测试而不是文档。**

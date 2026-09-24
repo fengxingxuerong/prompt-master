@@ -5,7 +5,13 @@
 不带 test_ 前缀），pytest 实测收集 0 条 ⇒ 这条通道在流水线里根本没有覆盖。
 结果是一次真实的回归没人能拦住：`_stream_response()` 里 `sse_gen()` 定义完之后
 **没有 return**，于是 stream=true 时 FastAPI 拿到 None、客户端收到 `null`，
-而 `python -m pytest tests/` 全绿。（发布快照 releases/v1.1.0 里那个 return 还在。）
+而 `python -m pytest tests/` 全绿。
+
+归因（2026-09-25 复核后更正过一版）：`pm/modelhub/server.py` 这个文件是 54d6f51（v1.4.0，
+心跳保活那一版）**首次建立**的，建出来当时就没有这个 return —— 不是"先有、后来重构丢了"。
+发布快照 `releases/v1.1.0/pm/modelhub/server.py:440` 里 return 还在，说明是**把旧版代码搬进
+`pm/` 时丢了函数尾部**：走这条路径的流式从 v1.4.0 起就没通过过。唯一会当场抓住它的
+`tests_modelhub/v111_test.py::V1_stream_sse` 是脚本（pytest 收集 0 条），所以跨三个版本没人重跑。
 
 同一个函数尾部还有第二处：中断时给客户端的错误帧写成 `str + bytes` 拼接，
 必抛 TypeError（见 test_interrupted_stream_emits_a_bytes_error_frame）。
