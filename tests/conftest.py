@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os as _os
+from pathlib import Path
 
 import pytest
 
@@ -46,6 +47,27 @@ def no_shared_disk_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setenv("PM_EVAL_CACHE", "0")
     monkeypatch.setenv("PM_TARGET_CACHE", "0")
+
+
+@pytest.fixture(autouse=True)
+def isolate_modelhub_write_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """ModelHub 的两个**写入**目标一律封进 tmp_path：测试不可能碰到运营文件。
+
+    真实事故（2026-09-25，我自己造成的）：新写的台账用例把隔离变量记成了 `PMH_DATA_DIR`，
+    而 `ledger.ledger_path()` 读的是 `PMH_LEDGER_PATH`（默认 `<repo>/logs/modelhub_ledger.jsonl`）
+    —— 于是夹具"看起来设了"，实际一次 `write_text` 把线上台账（411 条调用事件，
+    覆盖 09-21 21:20 轮换之后到今天）截断成 5 行测试数据。轮换件 `.1` 之前的历史还在，
+    **那 411 条找不回来了**。
+
+    为什么修在 conftest 而不是那个测试文件里：这类失败的形式是"某个用例忘了设一个变量"，
+    code review 防不住，下一个写 modelhub 测试的人一样会踩。封在这里，忘了设也只是写进 tmp。
+    只封写路径（台账 JSONL + 日聚合目录），不封 PMH_CONFIG：那是只读的，
+    且把它指向不存在的路径会让"起网关就 ConfigError"的正常断言变成假红。
+    """
+    store = tmp_path / "modelhub-store"
+    store.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("PMH_LEDGER_PATH", str(store / "modelhub_ledger.jsonl"))
+    monkeypatch.setenv("PMH_DATA_DIR", str(store))
 
 
 @pytest.fixture(autouse=True)
