@@ -53,7 +53,12 @@ def test_pyproject_dependencies_match_requirements():
         declared[name] = (extras, ver)
 
     reqs = _requirements()
-    runtime = {k: v for k, v in reqs.items() if k not in {"pytest", "ruff", "mypy"}}
+    # 排除"开发/门禁工具"：口径是 dev extras 里列了什么，而不是另抄一份名单。
+    # 原来写死 {"pytest","ruff","mypy"}，于是往 requirements.txt 加一个 pytest-cov
+    # 就会让这条测试红在"requirements 里有、pyproject 没声明"上 —— 一个必须两处同改的
+    # 清单迟早会漏改，让它自己从 dev extras 推。
+    dev = {name for name, _, _ in map(_split, proj["optional-dependencies"]["dev"])}
+    runtime = {k: v for k, v in reqs.items() if k not in dev}
 
     missing = sorted(set(runtime) - set(declared))
     assert not missing, f"requirements.txt 里有、pyproject 里没声明：{missing}"

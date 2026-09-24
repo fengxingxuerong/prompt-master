@@ -33,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from . import __version__ as PKG_VERSION
 from .ratelimit import SlidingWindowLimiter, parse_rate_limit_env
 from .scheduler import TaskManager
 from .store import store_from_env
@@ -144,7 +145,8 @@ _maybe_start_calibration_patrol()
 app = FastAPI(
     title="PromptMaster API",
     description="提示词自动生成 / 测试 / 评估 / 迭代优化 — REST API",
-    version="2.1.0",
+    # 版本只有一个事实源（pm.__version__）；这里再写一个字面量就会和 pyproject 各说各话
+    version=PKG_VERSION,
 )
 
 

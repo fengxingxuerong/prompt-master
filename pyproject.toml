@@ -4,7 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prompt-master"
-version = "1.1.0"
+# 版本号不写死在这里：唯一事实源是 pm/__init__.py 的 __version__。
+# 原先这里 1.1.0、pm/__init__ 2.0.0、pm/server 自报 2.1.0 三处互不相认，
+# 谁都不敢说"当前版本是多少"（2026-09-25 收口，tests/test_version_single_source.py 守住）。
+dynamic = ["version"]
 description = "提示词自动生成 / 测试 / 评估 / 迭代优化闭环（LangGraph）"
 requires-python = ">=3.11"
 # 与 requirements.txt 保持同一组实测通过的版本号（tests/test_packaging.py 会比对两边，防漂移）。
@@ -30,16 +33,41 @@ anthropic = ["langchain-anthropic>=0.3.0"]
 # 开发与门禁（pytest/ruff/mypy 已在 requirements.txt 里钉住）
 # pytest-cov/coverage：覆盖率统计（2026-09-13 测试时发现原本没装，补进 dev 组，
 # 避免下次还得临时 pip install 才能出覆盖率数字）
-dev = ["pytest==9.1.1", "ruff==0.16.6", "mypy==2.3.1", "pytest-cov>=6.0", "coverage>=7.6"]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.6",
+    "mypy==2.3.1",
+    "pytest-cov==7.1.0",
+    "coverage==7.16.0",
+]
 
 [tool.setuptools]
 # 平铺布局下 setuptools 自动发现会把 run.py / run_server.py 当成顶层模块，
 # 这里只安装 pm 包（含 pm.nodes / pm.cli / pm.web 子包）；两个入口脚本依旧用 `python run.py ...` 从仓根跑。
 packages = ["pm", "pm.nodes", "pm.cli", "pm.web", "pm.modelhub"]
 
+[tool.setuptools.dynamic]
+# 见 [project] 的 dynamic：版本号取自 pm/__init__.py:__version__（setuptools 按 AST 静态读，不 import）
+version = {attr = "pm.__version__"}
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+# 只量 pm/：两个入口薄壳的行为由 subprocess 打真实入口的用例覆盖（不在分母里说事）
+source = ["pm"]
+
+[tool.coverage.report]
+# 地板值来自 2026-09-25 实测：全量 84%，拆开看 pm/modelhub/* 只有 33.5%、其余 95.6%。
+# 这条线的含义是"别再往下掉"，不是质量目标（分项那条更紧的闸见 ci.yml）。
+# 为什么现在才加：以前仓库里根本没有覆盖率门禁，文档写的"94%"是手抄快照
+# —— 2026-09-25 实测 84%，虚高 10 个点。
+fail_under = 82
+show_missing = true
+
+[tool.coverage.json_report]
+output_file = "coverage.json"
 
 [tool.ruff]
 # 目标语法：项目 README 推荐 python3.11

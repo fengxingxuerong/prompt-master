@@ -26,6 +26,8 @@ logs/
 # 覆盖率产物
 .coverage
 coverage.xml
+coverage.json
+cov.json
 htmlcov/
 
 # 验收 / e2e 脚本跑出来的临时报告（不属于源码，但 .sh/.ps1 脚本本身要入库）

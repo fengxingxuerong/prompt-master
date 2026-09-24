@@ -19,10 +19,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install dependencies
+        # 门禁工具一律用 requirements.txt 里的钉版本。以前这里额外 `pip install ruff mypy`
+        # 不钉版本 ⇒ CI 用的 ruff/mypy 会随上游发版漂移（本地实测 0.16.6 / 2.3.1），
+        # "本地绿、CI 红"或反向都解释不了。
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff mypy
       - name: Lint (ruff check)
         run: ruff check pm/ tests/ run.py run_server.py examples/
       - name: Format check (ruff format)
@@ -33,12 +35,22 @@ jobs:
       - name: Tests (pytest) —— 无 Key、且禁止任何真实出网
         # 死端点 + 假 Key 是有意的：只要有一条调用漏到真端点（C5 那类缺陷），
         # 这里就会 Connection error 立刻变红，而不是在开发机上静默烧额度。
+        # --cov：覆盖率地板值见 pyproject [tool.coverage.report].fail_under。
+        # 注意这个数只算主进程——subprocess 打真实入口的那批用例（test_cli_guards 等）
+        # 不计入分子，所以 pm/cli/main.py 的 79% 是偏保守的下界。
         env:
           PM_BASE_URL: http://127.0.0.1:9/v1
           PM_EVALUATOR_B_BASE_URL: http://127.0.0.1:9/v1
           PM_ARBITER_BASE_URL: http://127.0.0.1:9/v1
           PM_API_KEY: sk-ci-has-no-real-key
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q --cov=pm --cov-report=term-missing
+      - name: Coverage ratchet —— pm/modelhub/* 单独一条更紧的线
+        # 全量 84% 会把结构问题抹平：拆开看 pm 其余部分 95.6%，而 modelhub 只有 34%
+        # —— 恰恰是这条网关在 2026-09-25 出现"流式通道没有 return、stream=true 返回 None"
+        # 而全套测试全绿的事故。全局线守不住的地方，就用分项线钉住不许再掉。
+        env:
+          PM_API_KEY: sk-ci-has-no-real-key
+        run: python -m coverage report --include="*/modelhub/*" --fail-under=32
       - name: Releases suite tests (lobster + triage) —— TestClient 进程内，零真实出网
         run: |
           python -m pytest releases/lobster/tests/ -q

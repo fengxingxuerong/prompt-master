@@ -45,7 +45,12 @@ from pm.modelhub.streaming import stream_upstream  # noqa: E402
 from pm.modelhub.usage_store import load_daily, record_call  # noqa: E402
 from pm.modelhub.vkeys import get_agent_store, get_vkey_store  # noqa: E402
 
-app = FastAPI(title="ModelHub Gateway", version="1.1.0")
+# ModelHub 网关是**独立的一条发布线**，与产品包版本（pm.__version__）不同源：
+# 它跟着 releases/ 的网关验收走（v1.1.x）。以前 1.1.0 这个数在本文件里抄了三遍
+# （app / /api/health / 控制台），改一处漏两处的概率比版本号本身对不对更高。
+GATEWAY_VERSION = "1.1.0"
+
+app = FastAPI(title="ModelHub Gateway", version=GATEWAY_VERSION)
 
 _hub: ModelHub | None = None
 
@@ -170,7 +175,7 @@ def _params_of(req: ChatRequest) -> dict[str, Any]:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "service": "modelhub", "version": "1.1.0", "time": time.time()}
+    return {"status": "ok", "service": "modelhub", "version": GATEWAY_VERSION, "time": time.time()}
 
 
 @app.get("/v1/models")
@@ -817,7 +822,7 @@ def list_roles(
 def root() -> dict[str, Any]:
     return {
         "service": "ModelHub Gateway",
-        "version": "1.1.0",
+        "version": GATEWAY_VERSION,
         "routes": [
             "GET /v1/models",
             "POST /v1/chat/completions（stream 可选）",

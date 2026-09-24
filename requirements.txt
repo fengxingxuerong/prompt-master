@@ -23,3 +23,7 @@ uvicorn[standard]==0.34.2
 pytest==9.1.1
 ruff==0.16.6
 mypy==2.3.1
+# 覆盖率门禁（CI 里那条 --cov 步骤要用；以前 requirements.txt 里没有它们，
+# 于是"覆盖率"只能靠本地手跑 + 手抄一个数字进文档）
+pytest-cov==7.1.0
+coverage==7.16.0
