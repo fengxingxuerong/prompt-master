@@ -37,7 +37,12 @@ def _checklist_ev(explain: bool) -> ChecklistEvaluation:
     unsourced = (
         [UnsourcedClaim(claim="环比 22.4%", basis="(120-98)/98 由输入两值相除")] if explain else []
     )
-    return ChecklistEvaluation(verdicts=[v(i) for i in items], unsourced=unsourced, quality_band=4)
+    return ChecklistEvaluation(
+        n_items_checked=len(items),
+        verdicts=[v(i) for i in items],
+        unsourced=unsourced,
+        quality_band=4,
+    )
 
 
 @pytest.fixture()

@@ -228,6 +228,9 @@ def score_checklist(
         "unsourced_unexplained": fab,
         "caps": caps,
         "n_items": len(checklist),
+        "n_items_declared": int(ev.n_items_checked),
+        # 声明条数与清单条数不符只留痕不罚分：罚分会把"数错数"和"没做到"混成同一件事
+        "items_mismatch": int(ev.n_items_checked) != len(checklist),
         "quality_band": int(ev.quality_band),
         "bucket_sizes": {k: len(v) for k, v in buckets.items()},
     }

@@ -200,21 +200,48 @@ def count_constraints(prompt: str) -> dict[str, Any]:
 # 但判定式评分要的是"逐条可核对的清单"，多一条少一条只是多问一个是非题，
 # 代价远低于漏掉 [约束] 段里用 `- ` 写的那半数条目。
 _BULLET_ITEM_RE = re.compile(r"^\s*[-•*]\s*\S")
+# 标签与条目同行的写法：`[约束] 每条结论必须引用数值；缺失必须标注`，
+# 以及标题同行式 `## 输出格式：Markdown 表格；结论不超过 3 条`。
+# 组 1 = 方括号段名，组 2 = 标题段名（两者互斥），组 3 = 同行正文。
+_INLINE_SECTION_RE = re.compile(
+    r"^\s*(?:\[([^\[\]]{1,8})\]|#{1,3}\s*([^\[\]#]{1,12})[：:])\s*(\S.*)$"
+)
+# Markdown 标题式段落（`# 角色` / `## 约束`）：真实交付物里比方括号标签更常见。
+# 只认 1-3 级标题，4 级以下通常是正文层次而不是段落名。
+_HEADING_SECTION_RE = re.compile(r"^\s*#{1,3}\s*([^\[\]#]{1,12})\s*$")
+# 同行条目的分隔符：只用分号与句号 —— 顿号/逗号会把"缺失 A、B 字段"这类
+# 一个作用域并列多项的条目切成半截，切错比不切更坏（判据要对，不要多）。
+_ITEM_SPLIT_RE = re.compile(r"[；;。]")
 
 
 def structure_items(prompt: str) -> list[tuple[str, str]]:
-    """把标签段里的条目摊平成 `(段名, 条目原文)` 列表（编号与破折号都收）。
+    """把标签段里的条目摊平成 `(段名, 条目原文)` 列表。
 
-    给判定式评分当核对清单用。**不做语义判断**：只按标签段与行首标点切，
-    所以同一段里的"1. 趋势结论 2. 异常点"（交付物）和"[约束] 1. 不得编造"（约束）
-    会一起出来——分类是 `pm.scoring` 的事，解析器保持只认字面结构。
+    四种写法都收（各对应实测到的一类提示词）：
+    1. `[约束]` 独占一行，下面跟 `1.` / `- ` 条目；
+    2. `[约束] 条目一；条目二` —— 标签与条目同行、用分号/句号分隔。
+       早期只认写法 1 与 3，结果评委校准里 7/11 条锚点"摊不出清单"被门禁挡掉，
+       A/B 两边的样本数都不一样，测了等于没测；
+    3. `# 约束` / `## 处理流程` 这类 Markdown 标题段落（真实交付物里比方括号更常见）；
+    4. 上述任一段落下以 `1.` / `- ` 开头的条目行。
+
+    **不做语义判断**：只按标签段与行首标点切，所以同一段里"1. 趋势结论 2. 异常点"
+    （交付物）和"[约束] 1. 不得编造"（约束）会一起出来——分类是 `pm.scoring` 的事。
     """
     out: list[tuple[str, str]] = []
     current: str | None = None
     for line in (prompt or "").splitlines():
-        m = _SECTION_HEADER_RE.match(line)
-        if m:
-            current = m.group(1)
+        bare = _SECTION_HEADER_RE.match(line) or _HEADING_SECTION_RE.match(line)
+        if bare:
+            current = bare.group(1)
+            continue
+        head = _INLINE_SECTION_RE.match(line)
+        if head:
+            current = head.group(1) or head.group(2) or ""
+            for part in _ITEM_SPLIT_RE.split(head.group(3)):
+                text = part.strip(" \t-•*、")
+                if len(text) >= 4:
+                    out.append((current, text))
             continue
         if current is None:
             continue

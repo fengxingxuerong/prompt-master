@@ -367,8 +367,17 @@ class ChecklistEvaluation(BaseModel):
     不可能自相矛盾（印象式下"issues 说编造、鲁棒性给 8"这类形态在结构上消失了）。
     唯一保留的自由判断是 `quality_band`——内容深度确实无法二值化，但把它从
     1-10 收成 5 个具名档位，也砍掉了同一维度上 2/3 的可跳空间。
+
+    `n_items_checked` 排在最前不是凑数：文本降级通道上实测到模型直接吐**裸数组**
+    `[{...verdict...}, ...]`，于是解析器把数组第一项当成顶层对象校验，报
+    "verdicts / quality_band 缺失"。一个开头的标量把响应钉回对象形状，
+    顺带当漏答交叉核对（声明条数 ≠ 清单条数即留痕）。
     """
 
+    n_items_checked: int = Field(
+        ge=1,
+        description="本次核对的清单条目数（照抄清单条数）。先写它，再逐条判定",
+    )
     verdicts: list[CheckVerdict] = Field(description="对核对清单的逐条二值判定，一条不落")
     unsourced: list[UnsourcedClaim] = Field(
         default_factory=list,

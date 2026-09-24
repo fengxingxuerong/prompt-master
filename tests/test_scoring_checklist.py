@@ -32,7 +32,12 @@ def _ev(
 ) -> ChecklistEvaluation:
     """按 `items` 里的映射出判定；没出现在 `items` 里的清单条目视为"评委没答"。"""
     verdicts = [CheckVerdict(item=k, satisfied=v, evidence="x") for k, v in items.items()]
-    return ChecklistEvaluation(verdicts=verdicts, unsourced=unsourced or [], quality_band=band)
+    return ChecklistEvaluation(
+        n_items_checked=len(verdicts),
+        verdicts=verdicts,
+        unsourced=unsourced or [],
+        quality_band=band,
+    )
 
 
 def _all_ok(*, unsourced: list[UnsourcedClaim] | None = None, band: int = 4) -> ChecklistEvaluation:
@@ -69,6 +74,28 @@ def test_build_checklist_keeps_same_text_from_different_sections() -> None:
 # --------------------------------------------------------------------------
 # 分数映射
 # --------------------------------------------------------------------------
+def test_checklist_covers_real_prompt_writing_styles() -> None:
+    """清单摊不出来的写法 = 判定式对这类提示词直接不可用，实测挡过 7/11 条锚点。
+
+    每种写法都问"什么输入会让它红"：这里四写法各一条，缺一种就有整批锚点走不到协议。
+    """
+    styles = {
+        "括号独占行": ("[约束]\n1. 不得编造数值", 1),
+        "括号同行分号": ("[约束] 每个结论必须附具体数值；缺失必须标注「数据缺失」", 2),
+        "标题式段落": ("# 约束\n- 不得编造数值\n- 缺失必须标注", 2),
+        "标题同行": ("## 输出格式：Markdown 表格；结论不超过 3 条", 2),
+    }
+    for name, (prompt, expect) in styles.items():
+        cl = S.build_checklist(prompt)
+        n_prompt_items = sum(1 for r in cl if not r["item"].startswith("通用："))
+        assert n_prompt_items == expect, f"{name} 写法摊出 {n_prompt_items} 条，应为 {expect} 条"
+
+
+def test_deliberately_vague_prompt_stays_thin() -> None:
+    """ "帮我分析一下销售数据" 这种裸需求**必须**继续判 THIN：门禁一松就白送 9.5。"""
+    assert S.checklist_usable(S.build_checklist("帮我分析一下销售数据")) is False
+
+
 def test_all_satisfied_scores_in_the_top_band() -> None:
     dims, detail = S.score_checklist(_all_ok(), _CHECKLIST)
     assert dims.constraint_compliance == 9.5 and dims.format_adherence == 9.5
@@ -96,7 +123,7 @@ def test_unanswered_item_counts_as_violation() -> None:
         for k, v in items.items()
         if k != "[约束] 缺失必须标注「数据缺失」"
     ]
-    ev = ChecklistEvaluation(verdicts=verdicts, unsourced=[], quality_band=4)
+    ev = ChecklistEvaluation(n_items_checked=len(verdicts), verdicts=verdicts, unsourced=[], quality_band=4)
     dims, detail = S.score_checklist(ev, _CHECKLIST)
     assert detail["unanswered"] == ["[约束] 缺失必须标注「数据缺失」"]
     assert dims.constraint_compliance == 8.0
@@ -108,7 +135,7 @@ def test_text_paraphrase_still_matches() -> None:
     verdicts = [
         CheckVerdict(item=r["item"] + " 。", satisfied=True, evidence="x") for r in _CHECKLIST
     ]
-    ev = ChecklistEvaluation(verdicts=verdicts, unsourced=[], quality_band=4)
+    ev = ChecklistEvaluation(n_items_checked=len(verdicts), verdicts=verdicts, unsourced=[], quality_band=4)
     dims, detail = S.score_checklist(ev, _CHECKLIST)
     assert detail["unanswered"] == [] and detail["violations"] == []
     assert dims.constraint_compliance == 9.5
