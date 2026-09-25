@@ -47,6 +47,28 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args: object) -> None:  # 静默，别把测试输出淹掉
         return
 
+    def _drain_request_body(self) -> None:
+        """回响应之前先把请求体读干净（stub 正确性；**不是**已证实的抖动解药，见下）。
+
+        不读的后果：`BaseHTTPRequestHandler` 默认 HTTP/1.0，写完响应就关连接，
+        而客户端的请求体可能还在路上 ⇒ Windows 直接 RST ⇒ 客户端读到
+        `OSError: [WinError 10053]`，用例报成"拿到的不是预期的 GatewayError"。
+
+        实测这个抖动有多稀疏（同一台机器、同一个文件）：
+        - 加这条之前：一次全量套件 3/11 红、一次单跑 1/11 红（三条红**同一签名** 10053）；
+        - 只摘掉这一行、其余不动：12 连跑红 1 次，再 25 连跑红 0 次；
+        - 带着这一行：12 + 25 连跑全绿，全量套件全绿。
+        样本太小，**不足以证明它就是把抖动修好的那一样东西**。所以这条按"stub 本该读请求体"
+        留着，同时把话说在前头：本文件将来再红，先查签名是不是 10053（连接层），
+        别把它当成 `pm/modelhub/streaming.py` 坏了。
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length > 0:
+            self.rfile.read(length)
+
     def _sse(self, body: str) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -56,6 +78,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.flush()  # 真分块下发：不分块就测不出"逐行解析"
 
     def do_POST(self) -> None:
+        self._drain_request_body()
         script = self.path.strip("/").split("/")[0]
         if script == "401":
             body = b'{"error":{"message":"stream not supported"}}'
@@ -115,10 +138,24 @@ class _Handler(BaseHTTPRequestHandler):
         self._sse(scripts[script])
 
 
+class _StubServer(ThreadingHTTPServer):
+    """`slow` 剧本会让客户端提前挂断 —— 那是**被测行为**，不是服务器的错误。
+
+    默认实现在服务端打整段 traceback（`Exception occurred during processing of request
+    from (...)`），混在 pytest 输出里就像真出了事。只吞掉"对端先走了"这一类，
+    其余异常仍然交给基类（否则这条静默会把真故障一起藏掉）。
+    """
+
+    def handle_error(self, request: object, exception: Exception) -> None:
+        if isinstance(exception, ConnectionError):
+            return
+        super().handle_error(request, exception)
+
+
 @pytest.fixture(scope="module")
 def origin() -> Iterator[str]:
     """本机 stub 的源地址（`/剧本名` 由 stream_upstream 自己补成 .../chat/completions）。"""
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    server = _StubServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="sse-stub")
     thread.start()
     try:
