@@ -1,6 +1,7 @@
 # PromptMaster 智能体接入指南（Skill 描述）
 
-> 本文件是给**智能体（Agent）**看的接入契约。你的标准学习入口：本节 + `run.py --help`。
+> 本文件是给**智能体（Agent）**看的接入契约。你的标准学习入口：本节 + `run.py --help`
+> （装包后是 `prompt-master --help`，同一套实现）。
 > 人类用户看 docs/agent-cli-guide.md（原 README「三之二」）。
 
 ## 这个工具是什么
@@ -30,9 +31,14 @@
 
 ```bash
 python run.py --json --task "..." --cases-file cases.json --max-iter 2
+# 或（`pip install .` 之后，无需知道仓库在哪）：
+prompt-master --json --task "..." --cases-file cases.json --max-iter 2
 # 退出码：0=达标交付（取 best_prompt） 1=未达标但已交付（读报告遗留问题）
 #         2=参数/配置错误（不要原样重试） 3=运行失败（看 errors；重试安全）
 ```
+
+⚠️ 用 `prompt-master` 时**必须自己注入环境变量**（`PM_API_KEY` 等）：`.env` 是按当前
+工作目录向上查找的，不在仓库根就读不到宿主机那份。用 `python run.py` 从仓库根跑则能读到。
 
 ## 典型工作流
 
