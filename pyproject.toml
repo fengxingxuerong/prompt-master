@@ -45,6 +45,10 @@ dev = [
     "mypy==2.3.1",
     "pytest-cov==7.1.0",
     "coverage==7.16.0",
+    # 本地门禁（.pre-commit-config.yaml 全是 repo:local，只调上面这几个已钉版本的工具，
+    # 不联网拉远程钩子仓）。装完必须 `pre-commit install` 才生效：钩子文件不在 .git/hooks 里
+    # 就等于没有门禁 —— 2026-09-25 之前这份配置一直是"存在但从未跑过"的状态。
+    "pre-commit==4.5.1",
 ]
 
 [tool.setuptools]

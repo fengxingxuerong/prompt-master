@@ -72,10 +72,14 @@ Windows 本机注意：pytest 的临时目录根落在 `%TEMP%\pytest-of-<用户
 "门禁只认退出码"在这台机器上依赖这条前提，别忽略 rc。
 
 CI（GitHub Actions）在 push / PR 时对 Python 3.11/3.12/3.13 跑以上全部检查；
-本地可选 `pip install pre-commit && pre-commit install` 接入提交钩子。
-（⚠️ 仓库里 `.pre-commit-config.yaml` 存在但**默认没装** —— 装上之前，别把
-"pre-commit 没报错"当成门禁过了。钩子的三条命令路径与 CI 逐条相等，由
-`test_precommit_hooks_cover_the_same_scope_as_ci` 守着；但**它没装就等于没跑**。）
+提交钩子（pre-commit）**本机已装并验过**（2026-09-25：`pip install pre-commit` +
+`pre-commit install`，四条钩子对全仓库 rc=0；再故意 stage 一个未使用的 `import os` 提交，
+被 ruff-check 当场拦下、commit rc=1、HEAD 未动）。换机器 clone 后要重装一次——
+钩子在 `.git/hooks/` 里，不随仓库走。
+（代价实测：`pre-commit run --all-files` **109 秒**，大头是全量 pytest。
+赶时间可以 `SKIP=pytest-quick git commit ...` 只跑静态三条，但**那一趟不算门禁过了**；
+`--no-verify` 是关掉门禁，不是"门禁慢"的解药。钩子的三条命令路径与 CI 逐条相等，
+由 `test_precommit_hooks_cover_the_same_scope_as_ci` 守着。）
 
 部署与浏览器运行时验证（2026-09-13 新增，报告见 `docs/deploy_verification_2026-09-13.md`）：
 ```bash

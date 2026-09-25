@@ -1,8 +1,17 @@
 # pre-commit 质量门禁 —— 与 .github/workflows/ci.yml 同口径的本地版
 #
 # 安装：pip install pre-commit && pre-commit install
+# 2026-09-25 已在本机装上并验过两条：①四条钩子对全仓库 rc=0；②故意 stage 一个
+# `import os`（未使用）再提交 → ruff-check 当场 Failed、commit rc=1、HEAD 没动。
 # ⚠️ 装完之前它一条都不跑：`.git/hooks/` 里没有 pre-commit 就等于没有门禁，
 #    而"我本地 pre-commit 没报错"会被当成"门禁过了"（这正是它最危险的时刻）。
+#    换一台机器 clone 要重装一次：钩子不在仓库里，在 `.git/hooks/` 里。
+#
+# 代价实测（本机，2026-09-25）：`pre-commit run --all-files` 全程 **109 秒**，
+# 其中 pytest 一条就占大头（844+ 条用例）。要快：
+#     SKIP=pytest-quick git commit ...        # 只跑静态三条（约 20 秒）
+# 但那一趟**不算门禁过了** —— 跳过的那部分必须在别处补跑，别把它记成绿。
+# 同理 `--no-verify`：它是关掉门禁的开关，不是"门禁慢"的解药。
 #
 # 2026-09-25 重写：
 # ① 原来的三条 args 是 `pm/ tests/ run.py examples/` 与 `pm/ run.py`——**都比 CI 少
