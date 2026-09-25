@@ -293,13 +293,25 @@ def test_vkeys_are_visible_across_instances(isolated_data: Path) -> None:
 
 
 def test_concurrent_issues_do_not_lose_keys(isolated_data: Path) -> None:
-    """4 个线程各发一把：一把都不能丢。原子写 + 锁失守的表现是"发出去了但查不到"。"""
+    """4 个线程各发一把：一把都不能丢。原子写 + 锁失守的表现是"发出去了但查不到"。
+
+    线程里的异常必须带回主线程：2026-09-25 深夜全量跑红过一次，现场只有
+    `assert 2 == 4` —— 两个 worker 根本没走到 append，而它们抛了什么**无处可查**
+    （stderr 里没有线程栈）。那种红既不能归因也不能复现（同一条用例单跑 20 次、
+    整文件 10 次、全量再 1 次都是绿），所以先把现场留住。
+    """
     store = V.VirtualKeyStore()
     keys: list[str] = []
+    errors: list[BaseException] = []
     lock = threading.Lock()
 
     def worker() -> None:
-        rec = store.issue("agent-c")
+        try:
+            rec = store.issue("agent-c")
+        except BaseException as e:  # noqa: BLE001 - 线程内异常必须显式回收，否则红得没有成因
+            with lock:
+                errors.append(e)
+            return
         with lock:
             keys.append(rec["key"])
 
@@ -308,6 +320,7 @@ def test_concurrent_issues_do_not_lose_keys(isolated_data: Path) -> None:
         t.start()
     for t in threads:
         t.join()
+    assert not errors, f"并发签发有 worker 抛异常：{[repr(e) for e in errors]}"
     assert len(set(keys)) == 4
     assert all(store.verify(k) is not None for k in keys), "并发写丢键"
 

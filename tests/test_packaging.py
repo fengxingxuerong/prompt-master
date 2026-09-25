@@ -340,3 +340,52 @@ def test_test_count_copies_match_the_live_collection() -> None:
         f"活体收集是 {live} 条，但这些文件里的抄件不是：{stale}。"
         "加了用例就顺手把这三处一起改（它们是同一句话的三份复印件）。"
     )
+
+
+def test_ci_and_docs_run_every_release_suite() -> None:
+    """`releases/*/tests/` 有几套，CI 与文档门禁块就必须跑几套 —— 磁盘是事实源。
+
+    真实漂移（2026-09-25 盘点）：CI 那一步的名字写着"lobster + triage"，也只跑这两套，
+    而 `releases/taskboard/tests/` 早就存在且有存储与鉴权用例 —— 它的回归只有"有人记得"
+    才跑，且没有任何东西会因为"少跑了一套"而红。同一条断言也管住"运营数据没被写脏"
+    那步的 pathspec：目录级 glob `releases/*/data` 在 git pathspec 下匹配不到任何东西
+    （实测 rc 恒 0），写成那样就等于没这条闸。
+    """
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    docs = (ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+
+    on_disk = sorted(p.parent.name for p in (ROOT / "releases").glob("*/tests") if p.is_dir())
+    assert on_disk, "releases/*/tests 一个都没找到：目录结构变了要同步改这条断言"
+
+    groups: list[set[str]] = []
+    cur: set[str] = set()
+    for line in ci.splitlines():
+        m = re.search(r"python -m pytest releases/([A-Za-z0-9_.-]+)/tests/", line)
+        if m:
+            cur.add(m.group(1))
+        elif cur:
+            groups.append(cur)
+            cur = set()
+    if cur:
+        groups.append(cur)
+
+    assert len(groups) >= 2, (
+        f"CI 里应有 linux 与 windows 两个 releases 测试步骤，只读到 {len(groups)} 个"
+    )
+    for i, g in enumerate(groups, 1):
+        assert g == set(on_disk), (
+            f"CI 第 {i} 个 releases 步骤跑了 {sorted(g)}，磁盘上的套件是 {on_disk}"
+            "（新增一套就要两个 job 都补上，文档门禁块也一样）"
+        )
+
+    doc_suites = set(re.findall(r"python -m pytest releases/([A-Za-z0-9_.-]+)/tests/", docs))
+    assert doc_suites == set(on_disk), (
+        f"docs/operations.md 的门禁块跑了 {sorted(doc_suites)}，与磁盘上的 {on_disk} 不一致"
+    )
+
+    guard = 'git diff --exit-code -- "releases/*/data/*"'
+    assert guard in docs, "文档门禁块缺'运营数据没被写脏'那条（或写法漂了）"
+    assert ci.count(guard) == len(groups), (
+        f"'运营数据没被写脏'守卫应在每个跑完 releases 套件的 job 里各出现一次："
+        f"CI 读到 {ci.count(guard)} 次 / job {len(groups)} 个"
+    )

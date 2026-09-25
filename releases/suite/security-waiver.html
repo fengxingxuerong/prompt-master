@@ -53,10 +53,23 @@
 <section>
   <h2>豁免清单（正式登记）</h2>
   <ul class="list">
-    <li><span class="n">W7</span><p><b>三服务无鉴权</b>——写接口对局域网内所有调用者开放。豁免依据：用户 2026-09-21 指令。将来想启用：设 TASKBOARD_TOKEN / LOBSTER_TOKEN / PMH_GATEWAY_TOKEN 即可，机制已实测就位。</p></li>
-    <li><span class="n">W8</span><p><b>PII 明文（手机号）</b>——orders.json 保留原文，接口已脱敏返回。豁免依据同上。将来启用：改回原文返回一行代码。</p></li>
+    <li><span class="n">W7</span><p><b>三服务无鉴权</b>——写接口对局域网内所有调用者开放。豁免依据：用户 2026-09-21 指令。将来想启用：设 TASKBOARD_TOKEN / LOBSTER_TOKEN / PMH_GATEWAY_TOKEN 即可，机制已实测就位。<span class="mono">（2026-09-25 复核：这句当时只有会审台测过，现在四套都有用例——见下方"复核"。）</span></p></li>
+    <li><span class="n">W8</span><p><b>PII 明文（手机号）</b>——orders.json 保留原文，接口已脱敏返回。豁免依据同上。将来启用：改回原文返回一行代码。<span class="mono">（2026-09-25 复核：<b>"保留原文"这句已过期</b>——M3.2 起入岸即掩码，实测 orders.json 44 条里 11 位明文为 0；剩下的口子是 note 自由文本，迁移脚本明确不管它。）</span></p></li>
     <li><span class="n">W9</span><p><b>桌面明文密钥文件</b>——我不再提醒、不再列为待办。文件保留原样，未做任何删除（无授权不动你的文件）。</p></li>
   </ul>
+</section>
+
+<section>
+  <h2>复核 · 2026-09-25（豁免本身不变）</h2>
+  <p>这一节只回答一个问题：<b>上面每句话今天还站得住吗</b>。豁免是你 2026-09-21 的决定，这里没有收回、没有改口径、也没有替你重新决定；改的只是"哪句已经过期、哪句有了出处"。</p>
+  <table>
+    <tr><th>条目</th><th>文档原话</th><th>2026-09-25 实测</th></tr>
+    <tr><td class="mono">W7</td><td>机制已实测就位</td><td>机制确实在四套里都有（gateway / lobster / taskboard / triage 各读 PMH_GATEWAY_TOKEN / LOBSTER_TOKEN / TASKBOARD_TOKEN / TRIAGE_TOKEN——<b>原文漏列 TRIAGE_TOKEN</b>）。但"实测"当时只覆盖会审台与网关管理口；lobster 与 taskboard 的鉴权<b>零用例</b>。现补 <span class="mono">releases/lobster/tests/test_auth.py</span>（7 条）与 <span class="mono">releases/taskboard/tests/test_auth.py</span>（8 条），并把中间件掏空做变异：各 3 条当场红。</td></tr>
+    <tr><td class="mono">W7′</td><td>—</td><td>顺手记一个形状差异：lobster / triage 是"白名单精确路径豁免，其余一律要令牌"；taskboard 是"GET 且路径不以 /api/tasks、/api/board 开头就放行"——<b>按前缀排除</b>。于是 <span class="mono">GET /api/roster</span> 这类新只读接口默认敞开。现在不算漏洞（花名册、且服务只在局域网内、token 缺省关闭），但它是"以后加一个读接口就顺手漏鉴权"的形状，所以用一条特征化断言把当前行为记下来了。</td></tr>
+    <tr><td class="mono">W8</td><td>orders.json 保留原文，接口已脱敏返回</td><td><b>前半句过期</b>：M3.2（2026-09-23）起 create_order 入岸掩码 + 存量迁移脚本，实测 orders.json 44 条中 11 位明文手机号 <b>0</b> 条，note 自由文本里也是 0 条。<b>仍然敞着的是 note 字段本身</b>（客户自填号码属脱敏范围外，mask_storage_phones.py 的口径注释写明了），所以这条豁免继续成立、理由换了一条。</td></tr>
+    <tr><td class="mono">W9</td><td>桌面明文密钥文件保留原样</td><td>未动、未复制、未改。另记一句与它同族的新事实：本仓库另有 <span class="mono">.env</span>（gitignored）与 <span class="mono">.env.example</span>；<b>push 或发布前须先轮换 Key</b>（用户 2026-09-19 决定暂不轮换）。当前仓库无 git remote，因此没有"已经推出去"的暴露面。</td></tr>
+  </table>
+  <p>还有一条与 W8 同源、但当时不在这份文档里的：<b>跑测试会写脏被跟踪的运营数据</b>。已于 2026-09-25 修掉并加了 CI 守卫（<span class="mono">git diff --exit-code -- "releases/*/data/*"</span>），详见 <span class="mono">docs/fix-log.md</span> 的 P25/P26/P27。</p>
 </section>
 
 <section>
@@ -70,7 +83,7 @@
 </div>
 
 <footer>
-  SECURITY WAIVER · REGISTERED 2026-09-21 · 三服务 3/3 OK · 交付物 14/14
+  SECURITY WAIVER · REGISTERED 2026-09-21 · 复核 2026-09-25（豁免不变，两处过期表述已就地标注）· 三服务 3/3 OK · 交付物 14/14
 </footer>
 
 </div>
