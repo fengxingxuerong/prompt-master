@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from pm.modelhub import ledger as LG
@@ -41,3 +42,33 @@ def test_appending_an_event_leaves_the_repo_ledger_byte_identical() -> None:
     LG.append_event({"type": "call", "request_id": "seal-canary", "model": "m", "success": True})
     after = real.read_bytes() if real.exists() else None
     assert after == before, "测试写入落到了运营台账上"
+
+
+def test_calibration_history_path_is_sealed_by_conftest_only() -> None:
+    """校准账本也不能指向仓库那份 —— 它是 A/B 协议判定的唯一事实源。
+
+    这条比前两条更值得守：假记录长得和真记录一模一样，`compare_scoring_ab.py`
+    又是"取该模式最近一条有明细的记录"，所以污染方式是**静默**的。
+    """
+    from pm.cli import calibrate as cli_calibrate
+
+    real = (ROOT / "logs" / "judge_calibration_history.json").resolve()
+    got = Path(cli_calibrate._CALIB_HISTORY).resolve()
+    assert got != real, f"conftest 的 seal_calibration_ledger 失效，用例可直接写 A/B 账本：{got}"
+
+
+def test_a_forgotten_patch_still_cannot_reach_the_real_ab_ledger() -> None:
+    """模拟"某个用例忘了 `_patch_log_dir()`"：按模块属性写一次，仓库账本必须一字不变。
+
+    只断言属性值不够（属性可能对、写盘路径可能被别处重新拼出来），所以走一次真写入。
+    """
+    from pm.cli import calibrate as cli_calibrate
+
+    real = ROOT / "logs" / "judge_calibration_history.json"
+    before = real.read_bytes() if real.exists() else None
+    target = Path(cli_calibrate._CALIB_HISTORY)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps([{"id": "seal-canary"}]), encoding="utf-8")
+    assert target.exists(), "密封把路径指到了写不出去的地方（那也算失效）"
+    after = real.read_bytes() if real.exists() else None
+    assert after == before, "测试写入落到了 A/B 判定用的校准账本上"
