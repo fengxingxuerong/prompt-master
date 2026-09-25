@@ -58,6 +58,12 @@ jobs:
         run: |
           python -m pytest releases/lobster/tests/ -q
           python -m pytest releases/triage/tests/ -q
+      - name: 运营数据没被测试写脏（必须紧跟上面那两步）
+        # 真实事故（2026-09-25 深夜）：跑完 `pytest releases/triage/tests/`，被跟踪的
+        # releases/triage/data/{ledger.jsonl,notifications.jsonl,reviewer_health.json} 全被追加了记录。
+        # 成因是路由把目录写成现写的 `APP_DIR / "data"`，夹具只封得住 `DATA` 常量。
+        # 这条是那一类"路径早晚绑定不一致"的通用闸：谁把常量改回现写表达式，这里就红。
+        run: git diff --exit-code -- releases/triage/data releases/lobster/data
       - name: Topology selftest —— 干净检出无 .env 也必须通过
         env:
           PM_API_KEY: ""

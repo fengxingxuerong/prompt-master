@@ -18,6 +18,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from _panel_drain import wait_panel_done
+
 # 与 test_triage.py 同款：按文件路径加载，避开与 lobster app.py 的同名模块冲突（D-011）
 _app_dir = Path(__file__).resolve().parents[1]
 _app_path = _app_dir / "app.py"
@@ -36,11 +38,20 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(triage, "SESSIONS", tmp_path / "sessions.json")  # 不存在 → 不导入真实快照
     monkeypatch.setattr(triage, "DB", tmp_path / "sessions.db")  # M3.4c：sessions 真值源
     monkeypatch.setattr(triage, "HEALTH_FILE", tmp_path / "health.json")
+    # 成本看板那份是**产品侧**账本（只读，但读的是真实内容）：一起指到临时目录，
+    # 免得"/api/usage-board 返回什么"取决于这台机器今天跑过多少任务。
+    monkeypatch.setattr(triage, "USAGE_FILE", tmp_path / "usage_daily.json")
     monkeypatch.setattr(triage, "_model_cache", {"ts": 0.0, "names": set()})
     monkeypatch.setattr(
         triage,
         "call_llm",
         lambda *a, **k: {"ok": True, "latency_ms": 1, "content": "{}", "usage": {}},
+    )
+    # 白名单必须也钉住：test_triage 钉了、这里原来没钉 ⇒ 本机若正好跑着 ModelHub 网关
+    # （8687 活着），后台会审线程会去连真网关取模型列表。表现为"面板什么时候收口"
+    # 取决于宿主上有没有服务 —— 2026-09-25 深夜就是它让越期写几乎必然发生。
+    monkeypatch.setattr(
+        triage, "get_hub_models", lambda ttl=60: {rv["model"] for rv in triage.REVIEWERS}
     )
     monkeypatch.delenv("TRIAGE_TOKEN", raising=False)
     return TestClient(triage.app)
@@ -56,6 +67,10 @@ def test_no_token_open_access(client):
     assert client.get("/api/sessions").status_code == 200
     assert client.get("/api/health").status_code == 200
     assert client.get("/api/ledger").status_code == 200
+    # 成本看板必须读夹具那份（本机真实账本今天有内容）：读到真值时 days 不会为空
+    assert client.get("/api/usage-board").json()["days"] == []
+    # 收口再退出：否则后台线程会在夹具还原后把记录写进被跟踪的 data/ledger.jsonl
+    assert wait_panel_done(client, r.json()["session_id"])["status"] == "done"
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +127,7 @@ def test_token_set_valid_key_passes(client, monkeypatch):
     assert client.get(f"/api/sessions/{sid}", headers=h).status_code == 200
     fb = client.post(f"/api/sessions/{sid}/feedback", json={"rating": 5}, headers=h)
     assert fb.status_code == 200 and fb.json()["ok"] is True
+    assert wait_panel_done(client, sid, headers=h)["status"] == "done"
 
 
 def test_token_whitespace_tolerant(client, monkeypatch):
@@ -126,4 +142,6 @@ def test_token_whitespace_tolerant(client, monkeypatch):
 def test_empty_token_env_treated_as_unset(client, monkeypatch):
     """设了但为空白 = 未设（与 taskboard `or \"\"` 口径一致）。"""
     monkeypatch.setenv("TRIAGE_TOKEN", "   ")
-    assert client.post("/api/reviews", json={"subject": "s", "body": "b"}).status_code == 200
+    r = client.post("/api/reviews", json={"subject": "s", "body": "b"})
+    assert r.status_code == 200
+    assert wait_panel_done(client, r.json()["session_id"])["status"] == "done"

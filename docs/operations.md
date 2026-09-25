@@ -28,6 +28,8 @@ python -m pytest tests/ -q --cov=pm --cov-report=term-missing     # 覆盖率地
 python -m coverage report --include="*/modelhub/*" --fail-under=82  # 网关那条分项线
 python -m pytest releases/lobster/tests/ -q
 python -m pytest releases/triage/tests/ -q
+# 上面两套跑完，被跟踪的运营数据必须还是干净的（ci.yml 里同名字步骤逐条等价）：
+git diff --exit-code -- releases/triage/data releases/lobster/data
 python run.py --selftest          # CI 里额外清 PM_API_KEY 再跑一次（干净检出无 .env 也必须过）
 bash examples/run_e2e_stub.sh     # 真实 HTTP 链路 + 三条结构化输出通道（桩端点，不出网）
 ```

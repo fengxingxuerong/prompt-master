@@ -11,6 +11,7 @@ v1.0 实战暴露的问题 → v1.1 修复对照：
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -36,6 +37,9 @@ LEDGER = DATA / "ledger.jsonl"
 SESSIONS = DATA / "sessions.json"  # JSON 快照：仅作 SQLite 首次启动的种子数据（M3.4 后不再更新）
 DB = DATA / "sessions.db"  # SQLite 真值源（WAL；*.db* 已 gitignore）
 HEALTH_FILE = DATA / "reviewer_health.json"
+# 成本看板只读那份产品侧用量台账（G-14）。提到模块常量是为了测试能封掉它：
+# 原来是端点函数体内现写的表达式，夹具 monkeypatch 不到 ⇒ 测试读的是真实账本。
+USAGE_FILE = APP_DIR.parents[1] / "data" / "usage_daily.json"
 
 HUB = "http://127.0.0.1:8687/v1/chat/completions"
 
@@ -112,6 +116,24 @@ def _db_connect() -> sqlite3.Connection:
     return conn
 
 
+@contextlib.contextmanager
+def _write_txn(conn: sqlite3.Connection):
+    """`BEGIN IMMEDIATE` 的读改写事务：先拿到写锁，再去读那一行。
+
+    为什么必须 IMMEDIATE：sqlite3 默认的 deferred 事务只在**写**时取锁，
+    "SELECT 整行 → 改一个字段 → UPDATE 整行"中间那次读是不受保护的 —— 另一个写者
+    恰好在这中间提交，我这笔 UPDATE 就会把它的内容整行盖掉（lost update）。
+    会话行上正好有两个这样的写者：会审面板收口写 status/verdicts，反馈端点写 feedback。
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield conn
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
 def _init_db(conn: sqlite3.Connection) -> None:
     """建表 + 一次性导入 JSON 快照（seeded 旗标保证只导一次；坏快照不阻塞建库，D-013）。"""
     conn.execute("CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, data TEXT NOT NULL)")
@@ -175,6 +197,35 @@ def save_session(session: dict) -> None:
                 _init_db(conn)
                 conn.execute("INSERT OR REPLACE INTO sessions (session_id, data) VALUES (?, ?)",
                              (session["session_id"], json.dumps(session, ensure_ascii=False)))
+        finally:
+            conn.close()
+
+
+def finish_session(session: dict) -> None:
+    """面板终态写回：先把这一行的当前内容读回来，带上期间落库的 feedback 再写。
+
+    为什么不能像 save_session 那样直接 INSERT OR REPLACE：反馈端点是"读整行 → 只改
+    feedback → 写整行"。用户在会审还没收口时提交反馈，两份整行写就会互相覆盖，
+    谁后写谁赢 —— 表现是会话永远停在 `running`（轮询与 SSE 再也等不到 done）。
+    2026-09-25 是测试里"排空后台线程再退出夹具"那条断言把它撞出来的（10 次里 1~2 次）。
+
+    事务用 BEGIN IMMEDIATE：先拿写锁再读，否则"读到 running → 别人提交 feedback →
+    我们覆盖"这个窗口还在（deferred 事务只在写时才要锁，那时读到的快照已经过期）。
+    """
+    with _lock:
+        conn = _db_connect()
+        conn.isolation_level = None  # 事务交给 _write_txn 显式管，别让 sqlite3 隐式开一个
+        try:
+            _init_db(conn)
+            with _write_txn(conn):
+                row = conn.execute("SELECT data FROM sessions WHERE session_id=?",
+                                   (session["session_id"],)).fetchone()
+                persisted = json.loads(row["data"]) if row else {}
+                merged = dict(session)
+                if persisted.get("feedback") and not merged.get("feedback"):
+                    merged["feedback"] = persisted["feedback"]
+                conn.execute("INSERT OR REPLACE INTO sessions (session_id, data) VALUES (?, ?)",
+                             (session["session_id"], json.dumps(merged, ensure_ascii=False)))
         finally:
             conn.close()
 
@@ -365,7 +416,7 @@ def _run_panel_core(session: dict, notify: bool = False) -> None:
                    "consensus": session["consensus"].get("category"),
                    "n_ok": sum(1 for v in verdicts if v.get("verdict")),
                    "n_total": len(verdicts)})
-    save_session(session)
+    finish_session(session)  # 终态写回要走合并，见 finish_session 的注释
     if notify:
         _push_event(session["session_id"], "done", {
             "session_id": session["session_id"], "status": "done",
@@ -450,17 +501,23 @@ class FeedbackIn(BaseModel):
 
 @app.post("/api/sessions/{sid}/feedback")
 def give_feedback(sid: str, fb: FeedbackIn):
-    """M3.4c：单行读改写——反馈只动目标会话一行，不再全量 load+save（写放大清零）。"""
+    """M3.4c：单行读改写——反馈只动目标会话一行，不再全量 load+save（写放大清零）。
+
+    读与写必须在同一个 IMMEDIATE 事务里：原来 SELECT 在事务外，面板若在这中间提交了
+    `status=done`，这笔 UPDATE 就会把整行倒回 `running`，前端永远等不到终态
+    （2026-09-25 深夜由测试里"排空后台线程"那条断言撞出来，约 1/30 次）。
+    """
     conn = _db_connect()
+    conn.isolation_level = None  # 事务交给 _write_txn 显式管
     try:
         _init_db(conn)
-        row = conn.execute("SELECT data FROM sessions WHERE session_id=?", (sid,)).fetchone()
-        if not row:
-            raise HTTPException(404, f"会话不存在：{sid}")
-        s = json.loads(row["data"])
-        s["feedback"] = {"rating": fb.rating, "comment": fb.comment,
-                         "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
-        with conn:
+        with _write_txn(conn):
+            row = conn.execute("SELECT data FROM sessions WHERE session_id=?", (sid,)).fetchone()
+            if not row:
+                raise HTTPException(404, f"会话不存在：{sid}")
+            s = json.loads(row["data"])
+            s["feedback"] = {"rating": fb.rating, "comment": fb.comment,
+                             "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
             conn.execute("UPDATE sessions SET data=? WHERE session_id=?",
                          (json.dumps(s, ensure_ascii=False), sid))
     finally:
@@ -514,12 +571,12 @@ async def session_events(sid: str):
 
 @app.get("/api/notifications")
 def api_notifications(limit: int = 50):
-    return {"count": 0, "items": list_notifications(APP_DIR / "data", limit=limit)}
+    return {"count": 0, "items": list_notifications(DATA, limit=limit)}
 
 
 @app.get("/api/notify-config")
 def api_notify_config():
-    cfg = load_config(APP_DIR / "data")
+    cfg = load_config(DATA)
     return {"enabled": cfg.get("enabled", False),
             "webhook_url": ("已配置" if cfg.get("webhook_url") else "未配置")}
 
@@ -531,7 +588,7 @@ class NotifyTestIn(BaseModel):
 @app.post("/api/notify-test")
 def api_notify_test(req: NotifyTestIn):
     """M2.1 验证入口：发一条测试通知（落盘+webhook 按配置）。"""
-    r = notify("triage", req.message, level="test", base_dir=APP_DIR / "data")
+    r = notify("triage", req.message, level="test", base_dir=DATA)
     return r
 
 
@@ -548,7 +605,7 @@ def api_gateway_metrics():
 @app.get("/api/usage-board")
 def usage_board():
     """G-14 成本看板数据端点：只读 usage_daily.json，按日+按模型聚合。"""
-    usage_file = APP_DIR.parents[1] / "data" / "usage_daily.json"
+    usage_file = USAGE_FILE
     days = []
     if usage_file.exists():
         try:

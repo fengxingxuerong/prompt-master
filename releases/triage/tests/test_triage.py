@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from _panel_drain import wait_panel_done
+
 # D-011 修复：lobster 与 triage 都有 app.py，合并跑时 sys.modules 的 'app' 会撞名。
 # 用 importlib 按文件路径加载 triage 的 app，并从缓存里摘除同名模块避免串包。
 _app_dir = Path(__file__).resolve().parents[1]
@@ -112,6 +114,7 @@ def test_feedback_loop_and_404(client):
     fb = client.post(f"/api/sessions/{sid}/feedback", json={"rating": 5, "comment": "很准"})
     assert fb.status_code == 200 and fb.json()["feedback"]["rating"] == 5
     assert client.post("/api/sessions/SES-NOPE/feedback", json={"rating": 3}).status_code == 404
+    wait_panel_done(client, sid)  # 夹具退出前排空后台线程，否则真实台账会被越期追加
 
 
 def test_validation_errors(client):
@@ -125,6 +128,7 @@ def test_ledger_traceability(client):
     """台账留痕：review/consensus/feedback 三类都有记录且字段齐。"""
     r = client.post("/api/reviews", json={"subject": "发票错误", "body": "抬头开错"})
     sid = r.json()["session_id"]
+    wait_panel_done(client, sid)  # 不等就是拿"后台可能还没写完"的台账去断言三类齐全
     client.post(f"/api/sessions/{sid}/feedback", json={"rating": 4})
     led = client.get(f"/api/ledger?limit=100&session={sid}").json()
     kinds = {e["kind"] for e in led["entries"]}
@@ -176,12 +180,28 @@ def test_api_notifications_endpoint(client, tmp_path, monkeypatch):
     """通知列表端点：notify 落盘后可经 API 回读。"""
     from notify_center import notify
 
-    monkeypatch.setattr(triage, "APP_DIR", tmp_path)
-    monkeypatch.setattr(triage, "DATA", tmp_path)
+    # 只封 DATA：路由现在读的是这个常量（原来读现写的 APP_DIR/"data"，夹具够不到）
+    monkeypatch.setattr(triage, "DATA", tmp_path / "data")
     notify("triage", "端点通知演练", base_dir=tmp_path / "data")
     r = client.get("/api/notifications?limit=10")
     assert r.status_code == 200
     assert any(i["message"] == "端点通知演练" for i in r.json()["items"])
+
+
+def test_notify_endpoints_cannot_touch_the_tracked_data_dir(client):
+    """跑测试不许往被跟踪的运营数据里写 —— 这条是被真实事故逼出来的。
+
+    2026-09-25 深夜跑 CI 等价门禁，`releases/triage/data/notifications.jsonl` 被
+    `POST /api/notify-test` 追加了一行：三个通知端点把目录写成 `APP_DIR / "data"`，
+    夹具只封得住 `DATA`。所以断言要盯两边 —— 只断"临时目录里有"抓不到"两边都写"。
+    """
+    real = triage.APP_DIR / "data" / "notifications.jsonl"
+    before = real.read_bytes() if real.exists() else b""
+    r = client.post("/api/notify-test", json={"message": "密封目录演练"})
+    assert r.status_code == 200 and r.json()["file"] is True
+    assert (triage.DATA / "notifications.jsonl").exists(), "通知没落进夹具目录"
+    after = real.read_bytes() if real.exists() else b""
+    assert after == before, "通知写进了被跟踪的真实 data 目录（夹具没封住路由）"
 
 
 def test_api_notify_test_and_config(client):
@@ -189,6 +209,30 @@ def test_api_notify_test_and_config(client):
     assert r.status_code == 200 and r.json()["file"] is True
     cfg = client.get("/api/notify-config")
     assert cfg.status_code == 200 and cfg.json()["enabled"] is False
+
+
+def test_feedback_during_a_running_panel_does_not_lose_the_update(client, monkeypatch):
+    """会审还没收口时提交反馈，终态与反馈都必须留住（lost update 回归）。
+
+    原来面板收口是"整行 INSERT OR REPLACE"，反馈端点也是"读整行 → 只改 feedback → 写整行"
+    ⇒ 两份整行写互相覆盖，谁后写谁赢：反馈后落就看不见 done（轮询/SSE 永远等不到终态），
+    面板后落就丢掉反馈。2026-09-25 深夜由"排空后台线程"那条测试断言撞出来（10 次里 1~2 次）。
+    这里故意把评委打慢，保证反馈一定插在会审中间。
+    """
+    import time as _t
+
+    def slow_llm(*a, **k):
+        _t.sleep(0.25)
+        return {"ok": True, "latency_ms": 250, "content": "{}", "usage": {}}
+
+    monkeypatch.setattr(triage, "call_llm", slow_llm)
+    sid = client.post("/api/reviews",
+                      json={"subject": "抢在收口前反馈", "body": "b"}).json()["session_id"]
+    assert client.post(f"/api/sessions/{sid}/feedback", json={"rating": 4}).status_code == 200
+    d = wait_panel_done(client, sid)
+    assert d["status"] == "done" and (d.get("feedback") or {}).get("rating") == 4, (
+        f"反馈与会审终态互相覆盖：{d.get('status')}/{d.get('feedback')}"
+    )
 
 
 def test_api_gateway_metrics_proxy(client):
