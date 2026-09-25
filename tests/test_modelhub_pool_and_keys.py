@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -323,6 +325,105 @@ def test_concurrent_issues_do_not_lose_keys(isolated_data: Path) -> None:
     assert not errors, f"并发签发有 worker 抛异常：{[repr(e) for e in errors]}"
     assert len(set(keys)) == 4
     assert all(store.verify(k) is not None for k in keys), "并发写丢键"
+
+
+def test_two_store_instances_in_one_process_do_not_lose_keys(isolated_data: Path) -> None:
+    """同进程两个 store 实例并发签发：一把都不能丢，也不许抛。
+
+    修前实测（两实例各发 200 把）：`issued=396 / 盘上 169`，还有一路 worker 直接抛
+    `PermissionError(13, 另一个程序正在使用此文件)`。四个成因见 `docs/fix-log.md` P30。
+    这条**主要**盯的是"写前强制重读"：把它摘掉，3/3 红。
+    共享路径锁与唯一 tmp 名是补完 —— 单独把它们换回旧写法，本机 3 轮都没复现丢失
+    （强制重读已把窗口压到约 200µs），所以那两处不在这条的证据链里，别照着这个用例声称。
+    """
+    issued: list[str] = []
+    errors: list[BaseException] = []
+    lock = threading.Lock()
+
+    def worker(tag: str) -> None:
+        store = V.VirtualKeyStore()  # 各建各的实例：就是要不复用同一把实例锁
+        for _ in range(100):
+            try:
+                rec = store.issue(f"agent-{tag}")
+            except BaseException as e:  # noqa: BLE001 - 线程内异常必须带回主线程
+                with lock:
+                    errors.append(e)
+                return
+            with lock:
+                issued.append(rec["key"])
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in ("x", "y")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, f"两个实例并发签发抛了：{[repr(e) for e in errors]}"
+    on_disk = {r["key"] for r in V.VirtualKeyStore().list()}
+    assert len(issued) == 200
+    missing = [k for k in issued if k not in on_disk]
+    assert not missing, f"并发签发丢了 {len(missing)} 把（发出但盘上没有）"
+
+
+def test_verify_sees_a_key_written_in_the_same_filesystem_tick(isolated_data: Path) -> None:
+    """`st_mtime` 没跨格时，热载门会"看不见"别人刚写的密钥 —— 鉴权路径不许因此判 None。
+
+    本机实测粒度约 0.3~0.5ms，连续两次写有 78~84% 落在同一格里；两个实例紧挨着跑
+    "A 签发 → B 校验"，修前 B 有 **17/300** 次说"这把不存在"（网关表现就是把合法 Key 401 掉）。
+    这里用 `os.utime` 把时间戳按回去，把那个窗口做成**确定性**的：不靠运气复现。
+    """
+    a = V.VirtualKeyStore()
+    b = V.VirtualKeyStore()
+    a.issue("agent-early")  # 让 B 先建立基线快照与 mtime
+    b.list()
+    path = isolated_data / "vkeys.json"
+    frozen = path.stat().st_mtime
+    rec = a.issue("agent-late")
+    os.utime(path, (path.stat().st_atime, frozen))  # 模拟"写了，但 mtime 没动"
+    assert b.verify(rec["key"]) is not None, "mtime 未跨格时 verify 应强制重读一次再判不存在"
+
+
+def test_two_processes_do_not_lose_issued_keys(isolated_data: Path) -> None:
+    """跨进程（`--workers > 1`）两个解释器各发 60 把：盘上必须 120 把，且两路都不许崩。
+
+    修前实测 3 轮：盘上 126 / 151 / 150 把（丢一半上下），其中 2 轮有一路子进程直接
+    死在 `ConfigError：虚拟密钥库不可读 [Errno 13] Permission denied`。
+    同进程的 RLock 跨不了进程，Windows 上不同文件句柄的字节锁在同进程内也互相不冲突 ——
+    所以这条要真的起两个解释器才量得到。
+    """
+    child = isolated_data / "issue_child.py"
+    root = Path(__file__).resolve().parents[1]
+    child.write_text(
+        "import sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "from pm.modelhub import vkeys as V\n"
+        "s = V.VirtualKeyStore()\n"
+        "print(sum(1 for _ in range(int(sys.argv[2])) if s.issue('agent-proc')))\n",
+        encoding="utf-8",
+    )
+    # 真并发：两个子进程必须同时在跑（用 subprocess.run 串起来 = 一个跑完才起下一个，
+    # 那样锁被摘掉也照样绿，什么都测不到）。
+    procs = [
+        subprocess.Popen(
+            [sys.executable, str(child), str(root), "60"],
+            cwd=str(root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PMH_DATA_DIR": str(isolated_data)},
+        )
+        for _ in range(2)
+    ]
+    outs = []
+    for p in procs:  # 先起完再收：communicate 会等退出，顺序收不会漏管道缓冲
+        out, err = p.communicate()
+        outs.append((p.returncode, out, err))
+    for rc, out, err in outs:
+        assert rc == 0, f"子进程签发崩了：rc={rc} {out[-300:]} {err[-300:]}"
+        assert out.strip() == "60"
+    keys = {r["key"] for r in V.VirtualKeyStore().list()}
+    assert len(keys) == 120, f"两个进程各发 60 把，盘上只有 {len(keys)} 把（跨进程互相覆盖）"
 
 
 def test_corrupt_vkey_store_file_raises_with_path(isolated_data: Path) -> None:

@@ -20,6 +20,8 @@ logs/
 *.log
 # watchdog 的"这条我已经提醒过"标记：纯运行态，入库会让 git status 长期脏
 releases/suite/.stale_notified.json
+# 跨进程写锁句柄（pm/modelhub 的 JSON 台账用）：运行态，不属于配置
+*.lock
 
 # 一次性终端输出别再落回仓库根（历史证据已归档到 releases/archive/coverage-notes-20260925/）
 /.cov*.txt

@@ -77,7 +77,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；887 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；890 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（samples.json 已确认 / samples.candidates.json 待人工分）
 case_templates/     可直接喂 --cases-file 的 5 份领域用例集
@@ -101,6 +101,9 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
    `tests/test_packaging.py::test_coverage_floors_agree_across_all_copies` 钉住** —— 改地板要四处一起改。
 3. **多进程是显式前提，不是默认**：任务表默认进程内内存（`--workers > 1` 必须先设 `PM_TASK_DB`）、
    缓存默认 JSON 每进程一份、限流是进程内滑窗。单进程才成立的东西别横向复制。
+   文件型的两份台账（`data/vkeys.json`、`data/agents.json`）自 2026-09-25 起有跨进程写锁
+   （`pm/modelhub/vkeys.py` 的 `.lock` 句柄）—— 修前实测两个进程各发 150 把密钥，盘上只剩
+   126~151 把，3 轮里 2 轮有一路直接崩在"文件不可读"上；现在跨进程各发 60 把是 120/120（3/3 轮）。
 4. **版本号只有一个事实源**（2026-09-25 收口）：`pm/__init__.py:__version__` = 2.1.0，
    `pyproject.toml` 走 `dynamic` 读它，REST API 的自报版本也从它取；
    ModelHub 网关是**另一条发布线**（`GATEWAY_VERSION = "1.1.0"`，三处引用同一常量）。
