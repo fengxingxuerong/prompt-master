@@ -48,6 +48,8 @@ def load_run(path: Path) -> dict[str, Any]:
     obj, _end = json.JSONDecoder().raw_decode("\n".join(lines[start:]))
     if not isinstance(obj, dict) or "analysis" not in obj:
         raise ValueError(f"{path}：解出来的对象没有 analysis 字段")
+    rep = obj["analysis"].get("repeatability") or {}
+    obj["_rep_times"] = rep.get("times")
     return obj
 
 
@@ -81,6 +83,7 @@ def from_ledger(path: Path, mode: str) -> dict[str, Any]:
         "_ts": r.get("ts"),
         "_n_failed": r.get("n_failed"),
         "_anchors": r.get("anchors"),
+        "_rep_times": r.get("rep_times"),
     }
 
 
@@ -166,21 +169,27 @@ def main() -> int:
 
     paired = sorted(set(ra) & set(rb))
     if not paired:
-        print("\n无配对锚点（两臂没有一条同时成功）——这轮 A/B 作废，得重跑")
-        return 1
+        # 有一臂只打了单发（--repeat 1）时这是预期结果，不是输入坏了：稳定性判据无从算起，
+        # 但准确性配对靠的是单发分、仍然有效。在这里 return 1 会把唯一有用的那半也砍掉。
+        print(
+            f"\n## 无配对极差 ⇒ 本轮没有稳定性读数（{args.a_mode} 重复="
+            f"{a.get('_rep_times')} / {args.b_mode} 重复={b.get('_rep_times')}；"
+            "判据要两臂都 --repeat ≥2）"
+        )
     pa = summarize({k: ra[k] for k in paired}, args.threshold)
     pb = summarize({k: rb[k] for k in paired}, args.threshold)
     diffs = [ra[k] - rb[k] for k in paired]
     better = sum(1 for d in diffs if d > 0)
     worse = sum(1 for d in diffs if d < 0)
 
-    print(f"\n## 配对比较（两臂都成功的 {len(paired)} 条）")
-    print(f"- impression 均值={pa['mean']} 越线={pa['exceed']}")
-    print(f"- checklist  均值={pb['mean']} 越线={pb['exceed']}")
-    print(f"- 均值差（impression − checklist）= {round(pa['mean'] - pb['mean'], 3)}")
-    print(
-        f"- 逐条：判定式更稳 {better} 条 / 更抖 {worse} 条 / 持平 {len(paired) - better - worse} 条"
-    )
+    if paired:
+        print(f"\n## 配对比较（两臂都成功的 {len(paired)} 条）")
+        print(f"- impression 均值={pa['mean']} 越线={pa['exceed']}")
+        print(f"- checklist  均值={pb['mean']} 越线={pb['exceed']}")
+        print(f"- 均值差（impression − checklist）= {round(pa['mean'] - pb['mean'], 3)}")
+        print(
+            f"- 逐条：判定式更稳 {better} 条 / 更抖 {worse} 条 / 持平 {len(paired) - better - worse} 条"
+        )
 
     # 准确性：配对集上的 |评委−人工|。稳定性赢了但把分打歪，等于换了把稳的尺去量错的东西。
     # ⚠️ 配对集**不能沿用上面那个"两臂都跑满 N 次重复"的交集**：重复测量比单发更容易被
@@ -196,15 +205,27 @@ def main() -> int:
         bias_a = statistics.fmean(s_a[k]["judge"] - s_a[k]["human"] for k in acc_pair)
         bias_b = statistics.fmean(s_b[k]["judge"] - s_b[k]["human"] for k in acc_pair)
         print(
-            f"\n## 准确性配对（两臂都有单发分的 {len(acc_pair)} 条；其中跑满重复的 {len(both)} 条）"
+            f"\n## 准确性配对（两臂都有单发分的 {len(acc_pair)} 条"
+            + (f"；其中跑满重复的 {len(both)} 条）" if paired else "）")
         )
         print(f"- MAE：impression {mae_a:.2f} → checklist {mae_b:.2f}")
         print(f"- bias：impression {bias_a:+.2f} → checklist {bias_b:+.2f}（正=偏松）")
         flip_a = sum(1 for k in acc_pair if (s_a[k]["judge"] >= 8.0) != (s_a[k]["human"] >= 8.0))
         flip_b = sum(1 for k in acc_pair if (s_b[k]["judge"] >= 8.0) != (s_b[k]["human"] >= 8.0))
         print(f"- 过线判断与人工相反：impression {flip_a} 条 → checklist {flip_b} 条")
-        if len(acc_pair) > len(both):
+        if paired and len(acc_pair) > len(both):
             print("- ⚠️ 两个配对集大小不同是刻意的：稳定性只用跑满重复的，准确性用单发都成功的。")
+
+    if not paired:
+        if not acc_pair:
+            print("\n两臂既无配对极差、也无配对单发分 —— 这轮 A/B 作废，得重跑")
+            return 1
+        print("\n## 判据（跑前预写：均值降幅 > 噪声地板，且越线条数不升）")
+        print("- 本轮未测重复 ⇒ 稳定性无从评估，判据**未被评估**（不是「不满足」）。")
+        print(
+            "- 结论：**默认保持 impression**；判定式要胜出改默认，得补一臂 --repeat ≥2 的稳定性测量。"
+        )
+        return 0
 
     gain = (pa["mean"] or 0) - (pb["mean"] or 0)
     ok_mean = gain > args.noise_floor

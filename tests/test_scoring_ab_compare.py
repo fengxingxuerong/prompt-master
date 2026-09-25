@@ -133,6 +133,54 @@ def test_different_anchor_sets_are_not_comparable(
     assert "不是同一批考卷" in capsys.readouterr().err
 
 
+def test_repeat_1_arm_still_reports_accuracy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """判定式臂只打了单发（`--repeat 1`）：稳定性确实无从算起，但准确性配对照样有效。
+
+    这条断言补的是我自己踩到的坑：脚本原来在"无配对极差"时直接 `return 1`，
+    于是 24000-token 那一轮（唯一真正想知道的 MAE）被一起砍掉，只剩一句"A/B 作废"。
+    更要紧的是不能让它把空集演算成 `降幅 0.000 → 未测出改进`：那是把"没测"写成"测了没赢"。
+    """
+    b = _rec(
+        "checklist",
+        "same-set",
+        items=[
+            {"id": "a1", "human": 8.0, "judge": 9.0, "delta": 1.0},
+            {"id": "a2", "human": 7.0, "judge": 9.0, "delta": 2.0},
+        ],
+        rep_items=[],
+        rep_times=1,
+    )
+    a = _rec("impression", "same-set", rep_times=3)
+    p = _ledger(tmp_path, [a, b])
+    monkeypatch.setattr(sys, "argv", ["x", "--ledger", str(p)])
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "没有稳定性读数" in out, out
+    assert "MAE：impression 0.50 → checklist 1.50" in out, out  # 单发分配对，照算
+    assert "未被评估" in out and "未测出改进" not in out, out
+    assert "默认保持 impression" in out, out
+
+
+def test_nothing_at_all_paired_is_still_void(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """连单发分都没有交集时仍然是"作废"，不许走上面那条"只有准确性读数"的温和出口。"""
+    a = _rec("impression", "same-set", items=[{"id": "a1", "human": 8.0, "judge": 8.6}])
+    b = _rec(
+        "checklist",
+        "same-set",
+        items=[{"id": "b1", "human": 7.0, "judge": 7.5}],
+        rep_items=[],
+        rep_times=1,
+    )
+    p = _ledger(tmp_path, [a, b])
+    monkeypatch.setattr(sys, "argv", ["x", "--ledger", str(p)])
+    assert mod.main() == 1
+    assert "作废" in capsys.readouterr().out
+
+
 def test_positions_and_ledger_are_mutually_exclusive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
