@@ -178,21 +178,33 @@ def main() -> int:
     print(f"- impression 均值={pa['mean']} 越线={pa['exceed']}")
     print(f"- checklist  均值={pb['mean']} 越线={pb['exceed']}")
     print(f"- 均值差（impression − checklist）= {round(pa['mean'] - pb['mean'], 3)}")
-    print(f"- 逐条：判定式更稳 {better} 条 / 更抖 {worse} 条 / 持平 {len(paired) - better - worse} 条")
+    print(
+        f"- 逐条：判定式更稳 {better} 条 / 更抖 {worse} 条 / 持平 {len(paired) - better - worse} 条"
+    )
 
-    # 准确性：配对集上的 |评委−人工|。稳定性赢了但把分打歪，等于换了把准的尺去量错的东西
+    # 准确性：配对集上的 |评委−人工|。稳定性赢了但把分打歪，等于换了把稳的尺去量错的东西。
+    # ⚠️ 配对集**不能沿用上面那个"两臂都跑满 N 次重复"的交集**：重复测量比单发更容易被
+    # 上游 500/空内容打掉（实测单发两臂各有 18/16 条成功，而跑满 3 次重复的交集只剩 8 条）。
+    # 拿 8 条算 MAE 会把样本量悄悄砍掉一半 —— 稳定性按"都跑满重复"配对，
+    # 准确性按"都打出过单发分"配对，两个集合各自如实报出条数。
     s_a, s_b = scores_of(a), scores_of(b)
-    both = [k for k in paired if k in s_a and k in s_b]
-    if both:
-        mae_a = statistics.fmean(abs(s_a[k]["judge"] - s_a[k]["human"]) for k in both)
-        mae_b = statistics.fmean(abs(s_b[k]["judge"] - s_b[k]["human"]) for k in both)
-        bias_a = statistics.fmean(s_a[k]["judge"] - s_a[k]["human"] for k in both)
-        bias_b = statistics.fmean(s_b[k]["judge"] - s_b[k]["human"] for k in both)
-        print(f"- MAE（{len(both)} 条配对）：impression {mae_a:.2f} → checklist {mae_b:.2f}")
+    both = [k for k in paired if k in s_a and k in s_b]  # 稳定性配对集（两臂都跑满重复）
+    acc_pair = sorted(set(s_a) & set(s_b))  # 准确性配对集（两臂都有单发分，通常更大）
+    if acc_pair:
+        mae_a = statistics.fmean(abs(s_a[k]["judge"] - s_a[k]["human"]) for k in acc_pair)
+        mae_b = statistics.fmean(abs(s_b[k]["judge"] - s_b[k]["human"]) for k in acc_pair)
+        bias_a = statistics.fmean(s_a[k]["judge"] - s_a[k]["human"] for k in acc_pair)
+        bias_b = statistics.fmean(s_b[k]["judge"] - s_b[k]["human"] for k in acc_pair)
+        print(
+            f"\n## 准确性配对（两臂都有单发分的 {len(acc_pair)} 条；其中跑满重复的 {len(both)} 条）"
+        )
+        print(f"- MAE：impression {mae_a:.2f} → checklist {mae_b:.2f}")
         print(f"- bias：impression {bias_a:+.2f} → checklist {bias_b:+.2f}（正=偏松）")
-        flip_a = sum(1 for k in both if (s_a[k]["judge"] >= 8.0) != (s_a[k]["human"] >= 8.0))
-        flip_b = sum(1 for k in both if (s_b[k]["judge"] >= 8.0) != (s_b[k]["human"] >= 8.0))
+        flip_a = sum(1 for k in acc_pair if (s_a[k]["judge"] >= 8.0) != (s_a[k]["human"] >= 8.0))
+        flip_b = sum(1 for k in acc_pair if (s_b[k]["judge"] >= 8.0) != (s_b[k]["human"] >= 8.0))
         print(f"- 过线判断与人工相反：impression {flip_a} 条 → checklist {flip_b} 条")
+        if len(acc_pair) > len(both):
+            print("- ⚠️ 两个配对集大小不同是刻意的：稳定性只用跑满重复的，准确性用单发都成功的。")
 
     gain = (pa["mean"] or 0) - (pb["mean"] or 0)
     ok_mean = gain > args.noise_floor
@@ -200,7 +212,9 @@ def main() -> int:
     print("\n## 判据（跑前预写：均值降幅 > 噪声地板，且越线条数不升）")
     print(f"- 降幅 {gain:.3f} vs 噪声地板 {args.noise_floor} → {'满足' if ok_mean else '不满足'}")
     print(f"- 越线 {pa['exceed']} → {pb['exceed']} → {'满足' if ok_exceed else '不满足'}")
-    verdict = "判定式胜出，可议改默认" if ok_mean and ok_exceed else "未测出改进：默认保持 impression"
+    verdict = (
+        "判定式胜出，可议改默认" if ok_mean and ok_exceed else "未测出改进：默认保持 impression"
+    )
     print(f"- 结论：**{verdict}**")
     if not (ok_mean and ok_exceed) and gain > 0:
         print(
