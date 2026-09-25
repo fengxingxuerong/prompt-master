@@ -8,6 +8,17 @@
 本 CLI 是为「被其他智能体调用」设计的：stdout 只给机器可读结果，日志全部走 stderr，
 退出码是分支决策的唯一依据。智能体的标准学习入口就是本节 + `--help`。
 
+调用形式两种，行为同一套（`prompt-master` 只是 `run.py` 的装包版，共用同一个启动引导与 `main()`）：
+
+```bash
+python /绝对路径/prompt-master/run.py --json --task "..."   # 从检出目录跑
+prompt-master --json --task "..."                          # `pip install .` 之后
+```
+
+⚠️ 装包态唯一的差异：`.env` 由 python-dotenv 按**当前工作目录**向上查找，
+不在仓库根时读不到那份 `.env` —— Agent 侧应当显式注入 `PM_API_KEY` 等环境变量，
+不要依赖宿主机上那份文件。
+
 ### 退出码协议
 
 | 退出码 | 含义 | Agent 应对 |

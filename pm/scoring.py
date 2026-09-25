@@ -278,7 +278,7 @@ def evaluate_with_checklist(
     user_prompt: str,
     checklist: list[dict[str, str]],
     numbers: list[str],
-) -> tuple[Any, dict[str, Any]]:
+) -> tuple[EvaluationResult, dict[str, Any]]:
     """走判定式协议打一次评委调用，把二值判定折算成 `EvaluationResult`。
 
     返回 (结果, meta)，meta 里带结构化输出走的通道 —— 主管道要按它记 trace。

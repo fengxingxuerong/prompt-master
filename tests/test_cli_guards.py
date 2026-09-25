@@ -18,7 +18,16 @@ RUN = [sys.executable, str(ROOT / "run.py")]
 
 def _run(args: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
     return subprocess.run(
-        RUN + args, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout, encoding="utf-8"
+        RUN + args,
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        # errors="replace"：子进程偶尔按宿主码页吐字节（本机 cp936），默认严格解码会让
+        # CompletedProcess.stdout 变成 **None**（不是空串），于是断言里 `r.stdout + r.stderr`
+        # 自己先 TypeError，把真实失败原因整个遮住。宁可看到替换符，也不要 None。
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -89,6 +98,7 @@ def _run_nokey(
         text=True,
         timeout=180,
         encoding="utf-8",
+        errors="replace",
         env={**os.environ, **_NO_KEY, "PM_LOG_DIR": str(tmp_path), **(extra_env or {})},
     )
 
@@ -146,7 +156,7 @@ def test_each_subcommand_has_its_own_help():
 def test_unknown_subcommand_points_at_the_list():
     r = _run(["subbmit", "--task", "让 AI 分析销售数据"])
     assert r.returncode == 2
-    out = r.stdout + r.stderr
+    out = (r.stdout or "") + (r.stderr or "")
     assert "未知子命令" in out and "submit" in out, "打错子命令时要当场把清单列出来"
 
 
@@ -181,9 +191,10 @@ def _probe(extra: list[str], tmp_path: Path, tag: str, env: dict | None = None) 
         text=True,
         timeout=60,
         encoding="utf-8",
+        errors="replace",
         env={**os.environ, **(env or {})},
     )
-    assert "EXIT 0" in r.stdout, r.stdout + r.stderr
+    assert "EXIT 0" in (r.stdout or ""), (r.stdout or "") + (r.stderr or "")
     return r.stdout
 
 
@@ -238,5 +249,6 @@ def test_cases_file_with_expected_is_accepted(tmp_path: Path):
         text=True,
         timeout=60,
         encoding="utf-8",
+        errors="replace",
     )
-    assert "EXIT 0" in r.stdout, r.stdout + r.stderr
+    assert "EXIT 0" in (r.stdout or ""), (r.stdout or "") + (r.stderr or "")

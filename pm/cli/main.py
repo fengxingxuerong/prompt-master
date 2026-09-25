@@ -29,9 +29,11 @@ from .support import (
 # 子命令清单：argparse 之前按裸字符串分发（这些参数与 --task 那一套互斥），
 # 所以 --help 必须自己把它们列出来 —— 否则文档写着"学 --help 就会用"，
 # 而 --help 里一个子命令都看不见（2026-09-25 实测：grep 计数 0）。
+# 命令名用 {prog} 而不是写死 `run.py`：装包后的入口叫 `prompt-master`，
+# 提示语指向一个不存在的命令，正是本仓库一直在修的"文档与实际分叉"那一类。
 _SUBCOMMAND_HELP = """
-子命令（写在最前面；各自完整参数看 `run.py <子命令> --help`）：
-  submit      提交异步任务到常驻 server（python run_server.py），秒回 run_id
+子命令（写在最前面；各自完整参数看 `{prog} <子命令> --help`）：
+  submit      提交异步任务到常驻 server（{prog_server}），秒回 run_id
               —— 一轮真实优化要 40~80 次调用 / 10~30 分钟，长任务请走这条别占终端
   status      查某个 run_id 的进度：status / iteration / aggregate / llm_calls
   report      取该任务的交付报告全文（--out 落盘，缺省打印 JSON）
@@ -41,13 +43,27 @@ _SUBCOMMAND_HELP = """
   library     达标提示词资产库（--recommend --task-text 找参考 / --export 导出）
 
 本地无 Key 路径：
-  python run.py --selftest                        图拓扑与控制流自检（秒级）
-  PM_FAKE_BACKEND=progress python run.py --task "..."   假后端跑完整流程（不证明效果）
+  {prog} --selftest                               图拓扑与控制流自检（秒级）
+  PM_FAKE_BACKEND=progress {prog} --task "..."   假后端跑完整流程（不证明效果）
 
 退出码协议（--json / 子命令共用）：0=达标交付 1=未达标但已交付 2=参数或配置错误 3=运行失败
 """
 
 _SUBCOMMANDS = ("submit", "status", "report", "wait", "history", "calibrate", "library")
+
+
+def _self_prog() -> str:
+    """当前入口的名字（仓库里是 `run.py`，装包后是 `prompt-master`）。"""
+    return Path(sys.argv[0]).name or "run.py"
+
+
+def _subcommand_help(prog: str) -> str:
+    # `run_server.py` 不是 console 脚本（包里只有 prompt-master 这一个入口），
+    # 所以起服务的提示按入口分别给，别让人去敲一个不存在的命令。
+    return _SUBCOMMAND_HELP.format(
+        prog=prog,
+        prog_server="python run_server.py" if prog == "run.py" else "python -m pm.server",
+    )
 
 
 def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
@@ -62,16 +78,17 @@ def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
 
 
 def main() -> int:
+    prog = _self_prog()
     if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         if sys.argv[1] in _SUBCOMMANDS:
             return _dispatch_subcommand(sys.argv[1], sys.argv[2:])
         # 打错子命令时别只丢一句 argparse 的 "unrecognized arguments"：把清单当场列出来
-        print(f"未知子命令：{sys.argv[1]!r}\n{_SUBCOMMAND_HELP}", file=sys.stderr)
+        print(f"未知子命令：{sys.argv[1]!r}\n{_subcommand_help(prog)}", file=sys.stderr)
         return EXIT_CONFIG
 
     p = argparse.ArgumentParser(
         description="PromptMaster —— 提示词自动生成 / 测试 / 评估 / 迭代优化",
-        epilog=_SUBCOMMAND_HELP,
+        epilog=_subcommand_help(prog),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--task", help="原始需求描述")
@@ -304,9 +321,9 @@ def main() -> int:
                 "错误：未检测到 PM_API_KEY。\n"
                 "请复制 .env.example 为 .env 并填写，或直接 export PM_API_KEY=...\n"
                 "无 Key 时的两条本地路径：\n"
-                "  python run.py --selftest"
+                f"  {p.prog} --selftest"
                 "                            只验证图拓扑与控制流（秒级）\n"
-                '  PM_FAKE_BACKEND=progress python run.py --task "..."     假后端跑完整流程'
+                f'  PM_FAKE_BACKEND=progress {p.prog} --task "..."     假后端跑完整流程'
                 "（只验证链路，不证明优化效果）",
                 file=sys.stderr,
             )

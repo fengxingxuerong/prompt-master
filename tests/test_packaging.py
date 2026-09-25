@@ -152,6 +152,66 @@ def test_precommit_hooks_cover_the_same_scope_as_ci():
         )
 
 
+def test_console_scripts_resolve_and_share_the_bootstrap():
+    """`[project.scripts]` 必须解析得到可调用对象，且与 run.py 共用同一套启动引导。
+
+    两件事各自都真出过问题：① 这一段以前根本不存在，装完包"有包没入口"，
+    Agent 只能写 `python /绝对路径/run.py`；② 一旦入口各自再写一遍 dotenv/sys.path/utf8，
+    就会出现"`--help` 在一个入口能跑、另一个乱码"这种永远查不到根的分叉。
+    """
+    import ast
+    import importlib
+
+    scripts = _pyproject()["project"].get("scripts") or {}
+    assert scripts, "装了包却没有命令 = 有包没入口"
+    for name, spec in scripts.items():
+        assert re.fullmatch(r"[\w.]+:[\w.]+", spec), f"{name} 的 {spec!r} 不是 module:attr 形式"
+        module_name, attr = spec.split(":")
+        target = getattr(importlib.import_module(module_name), attr)
+        assert callable(target), f"{spec} 解析到的不是可调用对象"
+
+    def called(src: str) -> set[str]:
+        """真实调用到的函数名（按 AST，不按文本）。
+
+        用文本 grep 会被注释骗：第一版断言 `"load_dotenv(" not in src` 正是因为 run.py 的
+        注释里写了这几个字而假红 —— 判据要能跑，不能靠扫关键字。
+        """
+        out: set[str] = set()
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.Call):
+                fn = node.func
+                if isinstance(fn, ast.Name):
+                    out.add(fn.id)
+                elif isinstance(fn, ast.Attribute):
+                    out.add(fn.attr)
+        return out
+
+    def imported(src: str) -> set[str]:
+        mods: set[str] = set()
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.ImportFrom):
+                mods.add(node.module or "")
+            elif isinstance(node, ast.Import):
+                mods.update(a.name for a in node.names)
+        return mods
+
+    for label, path in (("run.py", "run.py"), ("pm/cli/console.py", "pm/cli/console.py")):
+        src = (ROOT / path).read_text(encoding="utf-8")
+        assert "prepare_console" in called(src), f"{label} 没走统一的启动引导"
+        assert "dotenv" not in imported(src), f"{label} 自己 import 了 dotenv（引导该只有一份）"
+
+
+def test_calibration_engine_is_inside_the_package():
+    """校准引擎必须在包里：它原来是仓库根的 `calibrate_judge.py`，`pip install .` 装不走，
+    于是装包后的 `calibrate` 子命令只能靠"往 sys.path 塞仓库根"兜底 —— 那只在这份检出里成立。
+    """
+    assert (ROOT / "pm" / "calibration.py").exists()
+    assert not (ROOT / "calibrate_judge.py").exists(), "根目录旧脚本没删净：会出现两份引擎"
+    cli_src = (ROOT / "pm" / "cli" / "calibrate.py").read_text(encoding="utf-8")
+    assert "import calibrate_judge" not in cli_src, "CLI 还在按顶层脚本名导入"
+    assert "sys.path.insert" not in cli_src, "装包态的 sys.path 兜底还留着"
+
+
 def test_requires_python_covers_ci_matrix():
     """CI 矩阵里最老的 Python 版本必须 >= requires-python，否则装完就跑不起来。"""
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

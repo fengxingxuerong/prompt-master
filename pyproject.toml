@@ -27,6 +27,12 @@ dependencies = [
     "mcp==1.30.0",
 ]
 
+[project.scripts]
+# 装完包就有命令可用（以前没有这一段：`pip install .` 装出来是"有包没入口"，
+# Agent 配置只能写 `python /绝对路径/run.py`，换机器即断）。
+# 入口与 run.py 共用同一套启动引导与 main()，见 pm/cli/console.py。
+prompt-master = "pm.cli.console:main"
+
 [project.optional-dependencies]
 # 使用 Anthropic 作为 Provider 时才需要
 anthropic = ["langchain-anthropic>=0.3.0"]

@@ -1,9 +1,9 @@
-"""评委校准工具（根目录 calibrate_judge.py）回归。
+"""评委校准引擎（`pm/calibration.py`）回归。
 
 评估路径用 CallHook 注入固定分数的假评委（校准的数值逻辑必须确定性可测）；
 一致性分析（Δ/MAE/偏差/Pearson）是纯代码，直接断言。
-根目录工具按 test_prompt_eval 的惯例直接 import 模块名（pytest 以 `python -m`
-运行时 cwd=仓库根在 sys.path 上）。
+（2026-09-25：这引擎原来叫根目录 `calibrate_judge.py`，装包时装不走、`run.py calibrate`
+在 site-packages 里就 import 不到，所以搬进了 `pm/`。）
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ import json
 import sys
 from pathlib import Path
 
-import calibrate_judge as cj
 from pm import backend
+from pm import calibration as cj
 from pm.schemas import DimensionScores, EvaluationResult
 
 
@@ -355,7 +355,7 @@ def test_render_report_names_the_dropped_anchors():
 def test_cli_write_template_and_idempotent(tmp_path: Path):
     target = tmp_path / "samples.json"
     for _expected in (0, 0):
-        sys.argv = ["calibrate_judge.py", "--samples", str(target), "--write-template"]
+        sys.argv = ["-m pm.calibration", "--samples", str(target), "--write-template"]
         assert cj.main() == 0
     assert target.exists()
     assert len(cj.load_samples(target)) == 6

@@ -16,6 +16,10 @@
 # 0) 装依赖（Python ≥3.11）
 pip install -r requirements.txt
 
+# 0b) 可选：装成命令（Agent 配置里就不用写 `python /绝对路径/run.py`，也不会换机器就断）
+pip install . && prompt-master --help
+#   ⚠️ 装包态下 `.env` 是按**当前工作目录**向上找的；在别的目录跑请直接用环境变量传 PM_API_KEY
+
 # 1) 无 Key，先看代码能不能跑（不证明效果）
 python run.py --selftest
 PM_FAKE_BACKEND=progress python run.py --task "让 AI 分析销售数据" --fast   # 假后端跑完整流程

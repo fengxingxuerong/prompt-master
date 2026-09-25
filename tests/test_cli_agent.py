@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import calibrate_judge  # noqa: E402  # 仓库根顶层脚本，_calibrate_command 运行时按名导入
+# 校准引擎；_calibrate_command 运行时按模块属性打桩
+from pm import calibration as calibrate_judge  # noqa: E402
 from pm.cli import agent_mode  # noqa: E402
 from pm.cli import calibrate as cli_calibrate  # noqa: E402
 from pm.cli import support as cli_support  # noqa: E402

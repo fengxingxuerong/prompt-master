@@ -14,7 +14,7 @@ from ..scoring import scoring_mode
 from .support import EXIT_CONFIG, EXIT_FAILED, LOG_DIR
 
 # --------------------------------------------------------------------------
-# calibrate 子命令：评委漂移监测（把 calibrate_judge 的校准能力接进主流程）
+# calibrate 子命令：评委漂移监测（把 pm/calibration.py 的校准能力接进主流程）
 #
 # 校准回答"评委与人类专家差多远"；漂移对比回答"同一个评委今天和上次比变了没有"。
 # 每次校准的结果追加进 logs/judge_calibration_history.json，与上次同角色记录对比：
@@ -268,11 +268,7 @@ def _calibrate_command(argv: list[str]) -> int:
             print(f"回填打分表失败：{e}", file=sys.stderr)
             return EXIT_CONFIG
 
-    try:
-        import calibrate_judge as calib
-    except ImportError:  # pm 包装进 site-packages 后从任意 cwd 调用时，补仓库根找顶层脚本
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-        import calibrate_judge as calib
+    from .. import calibration as calib
 
     try:
         samples = calib.load_samples(Path(ns.samples))
@@ -286,7 +282,7 @@ def _calibrate_command(argv: list[str]) -> int:
         hint = (
             f"（{len(pending)} 条候选全部未人工确认——填 human_score 并把 confirmed 改成 true 再跑）"
             if pending
-            else "（先跑 python calibrate_judge.py --write-template 生成模板，并人工核对 human_score）"
+            else "（先跑 python -m pm.calibration --write-template 生成模板，并人工核对 human_score）"
         )
         print(f"样本为空：{ns.samples}{hint}", file=sys.stderr)
         return EXIT_CONFIG

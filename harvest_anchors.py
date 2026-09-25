@@ -12,7 +12,7 @@
 1. **只挖真端点**：trace 通道含 fake、或 target_model 是 stub 的一律剔除。
    假输出的分数是噪声的函数，拿它当锚点等于给仪表校准一面镜子。
 2. **本工具不填 human_score**（写 null + `confirmed: false`）。人工分只能由人给；
-   `calibrate_judge.py` 会跳过未确认条目。评委自己给的分记在 `judge_score` 里，
+   `pm/calibration.py`（run.py calibrate 的引擎）会跳过未确认条目。评委自己给的分记在 `judge_score` 里，
    仅用于排序复核优先级 —— 让评委的分进人工分等于用被校对象当标准答案。
 3. **附带机械线索** `hints`：数字回查、截断尾巴、伪装的"看起来认真"标记。
    它们不依赖任何 LLM，是人工复核时可以一眼验的客观事实。
@@ -201,7 +201,7 @@ def select(rows: list[dict[str, Any]], per_band: int, skip_shas: set[str]) -> li
 
 
 def to_samples(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """转成 calibrate_judge 可读的样本结构。human_score=null + confirmed=false。"""
+    """转成 pm.calibration 可读的样本结构。human_score=null + confirmed=false。"""
     out: list[dict[str, Any]] = []
     for r in rows:
         out.append(
@@ -243,7 +243,7 @@ def render_review(samples: list[dict[str, Any]], skipped: int) -> str:
         "   并把 `confirmed` 改成 `true`。**没改的条目不参与校准**——这是刻意的：",
         "   未确认的分数一旦进集，测出来的 r 只是在读评委自己的口味。",
         "3. 复核顺序按下方清单（判定线附近 + 线索命中的优先，它们对结论的信息量最大）。",
-        "4. 跑校准：`python calibrate_judge.py --samples judge_calibration/samples.candidates.json`",
+        "4. 跑校准：`python run.py calibrate --samples judge_calibration/samples.candidates.json`",
         "",
         "评委自己给的分列在每条里，**用途是让你先去看它和直觉不一致的那些**，不是让你抄它。",
         "",

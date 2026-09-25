@@ -7,10 +7,10 @@
 同一 finalize 加权）跑一遍真实评委，计算偏差与排序一致性——换评委模型、调评分
 提示词之后跑一次，"分数可信"就从设计主张变成实测数据。
 
-用法：
-    python calibrate_judge.py --write-template   # 从示例生成 samples.json（已存在则跳过）
-    python calibrate_judge.py                    # 校准默认评委（evaluator）
-    python calibrate_judge.py --judge evaluator_b
+用法（两种入口，同一个引擎）：
+    python run.py calibrate --repeat 3          # 主管道入口（推荐；结果进漂移账本）
+    python -m pm.calibration --write-template   # 从示例生成 samples.json（已存在则跳过）
+    python -m pm.calibration --judge evaluator_b
 
 流程：
 1. 人工给 `judge_calibration/samples.json` 里的每条锚点打 human_score（1-10）；
@@ -19,6 +19,10 @@
    并给对症结论。退出码：0=完成分析（结论好坏都算完成），1=全部评估失败，2=样本问题。
 
 诚实边界：校准告诉你偏差**多大**，不替你提升评委能力；样本 <5 条时数字只有方向性。
+
+2026-09-25 从仓库根 `calibrate_judge.py` 搬进包里：它是 `run.py calibrate` 的引擎，
+但作为根目录脚本不会随 `pip install .` 装走 —— 于是装包之后 `calibrate` 子命令是坏的
+（当时的兜底是"往 sys.path 塞仓库根再按名 import"，那只在这份检出里有效）。
 """
 
 from __future__ import annotations
@@ -31,23 +35,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).parent))
+from . import backend
+from .bootstrap import ensure_utf8_stdio
+from .llm import structured_call
+from .prompts import EVALUATOR_SYSTEM, EVALUATOR_USER, render
+from .schemas import PASS_THRESHOLD, EvaluationResult, judge_disagreement_threshold
 
-from pm.bootstrap import ensure_utf8_stdio
+# 仓库根（本文件在 pm/ 下，parents[1] 才是检出根）：锚点目录 judge_calibration/ 在这里
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
-ensure_utf8_stdio()
-
-from pm import backend  # noqa: E402
-from pm.llm import structured_call  # noqa: E402
-from pm.prompts import EVALUATOR_SYSTEM, EVALUATOR_USER, render  # noqa: E402
-from pm.schemas import (  # noqa: E402
-    PASS_THRESHOLD,
-    EvaluationResult,
-    judge_disagreement_threshold,
-)
-
-DEFAULT_SAMPLES = Path(__file__).parent / "judge_calibration" / "samples.json"
-EXAMPLE_SAMPLES = Path(__file__).parent / "judge_calibration" / "samples.example.json"
+DEFAULT_SAMPLES = _REPO_ROOT / "judge_calibration" / "samples.json"
+EXAMPLE_SAMPLES = _REPO_ROOT / "judge_calibration" / "samples.example.json"
 JUDGE_ROLES = ("evaluator", "evaluator_b", "arbiter")
 
 # 一致性判定阈值（与 schemas.JUDGE_BIAS_ALERT 的默认告警线对齐）
@@ -75,7 +73,7 @@ BANDS: tuple[tuple[str, float, float], ...] = (
 _ROLE_LABEL = {"evaluator": "评委A", "evaluator_b": "评委B", "arbiter": "仲裁评委"}
 
 
-class Anchors(list):
+class Anchors(list[dict[str, Any]]):
     """`load_samples` 的返回值：只装**可校准**条目，未确认的挂在 `.pending` 上。
 
     为什么用 list 子类而不是改成返回二元组：调用方（`run.py calibrate` 与本文件 main）
@@ -85,7 +83,11 @@ class Anchors(list):
     pending: list[dict[str, Any]]
 
     def __new__(cls, iterable: Any = (), *, pending: Any = ()) -> Anchors:
-        obj = super().__new__(cls, iterable)
+        # 注意：`super().__new__(cls, iterable)` 里那个 iterable 是被 object.__new__ 丢掉的
+        # （实测：只调 __new__ 得到的实例是空 list）。真正填充发生在随后自动执行的
+        # list.__init__(obj, iterable) —— 所以这里不传它，语义一字不变，
+        # 但少了 mypy 的"参数过多"假错。参数本身要留着：它是调用方传进来的样本。
+        obj = super().__new__(cls)
         obj.pending = list(pending)
         return obj
 
@@ -379,7 +381,8 @@ def render_report(role: str, analysis: dict[str, Any]) -> str:
     failed_line = f"- 样本数：{analysis['n']}（排除评估失败的锚点，也排除未人工确认的条目）"
     if n_failed:
         who = "、".join(
-            f"{f.get('id')}（{str(f.get('error') or '')[:60]}）" for f in analysis.get("failed") or []
+            f"{f.get('id')}（{str(f.get('error') or '')[:60]}）"
+            for f in analysis.get("failed") or []
         )
         failed_line = (
             f"- 样本数：{analysis['n']}（另有 **{n_failed} 条锚点评估失败被排除**：{who}）\n"
@@ -615,4 +618,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # 编码兜底放在这里而不是 import 期：`run.py calibrate` 会 import 本模块，
+    # 在 import 期动 sys.stdout 等于把引导副作用塞进别人的启动路径（旧脚本就是这么写的）。
+    ensure_utf8_stdio()
     raise SystemExit(main())
