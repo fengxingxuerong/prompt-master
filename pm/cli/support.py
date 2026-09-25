@@ -12,7 +12,21 @@ from pathlib import Path
 from typing import Any
 
 # 原 run.py 同款：仓库根/logs（拆包后 __file__ 深了两层，改用 parents[2] 回到仓库根）
-LOG_DIR = Path(os.getenv("PM_LOG_DIR") or (Path(__file__).resolve().parents[2] / "logs"))
+_DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
+# 兼容旧导出名（run.py / pm.cli 都转发过它）。⚠️ 运行期取路径请用 `log_dir()`，
+# 不要拿这个常量再拼 —— 它在 import 时就冻结了，之后设的 `PM_LOG_DIR` 对它无效
+# （2026-09-25 实测：产物落在 tmp，校准账本却写进仓库 logs，同一个变量两种命运）。
+LOG_DIR = Path(os.getenv("PM_LOG_DIR") or _DEFAULT_LOG_DIR)
+
+
+def log_dir() -> Path:
+    """产物目录的**唯一**取法：每次调用都读一遍 `PM_LOG_DIR`。
+
+    晚绑定是有意的：CLI 的启动引导（`load_dotenv()`）与各测试的 env 覆盖都发生在
+    import 之后，import 期算出来的路径必然与运行期不一致。`pm/scheduler.py` 早就这么做了。
+    """
+    raw = os.getenv("PM_LOG_DIR", "").strip()
+    return Path(raw) if raw else _DEFAULT_LOG_DIR
 
 
 def setup_logging(verbose: bool) -> None:
@@ -78,15 +92,16 @@ def recursion_budget(max_iterations: int) -> int:
 
 
 def save_artifacts(state: dict[str, Any], out: Path | None) -> tuple[Path, Path]:
-    LOG_DIR.mkdir(exist_ok=True)
+    d = log_dir()  # 每次调用现取：引导里 load_dotenv() 晚于 import，冻结值会是错的
+    d.mkdir(parents=True, exist_ok=True)
     run_id = state.get("run_id", "unknown")
-    log_path = LOG_DIR / f"run_{run_id}.json"
+    log_path = d / f"run_{run_id}.json"
     log_path.write_text(
         json.dumps(state, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
 
     report = state.get("final_report") or "_未生成报告_"
-    report_path = out or (LOG_DIR / f"report_{run_id}.md")
+    report_path = out or (d / f"report_{run_id}.md")
     if isinstance(report_path, str):
         report_path = Path(report_path)
     # --out 常来自智能体拼的路径：父目录不存在时自动补齐，而不是把整轮运行砸在最后一步

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..scoring import scoring_mode
-from .support import EXIT_CONFIG, EXIT_FAILED, LOG_DIR
+from .support import EXIT_CONFIG, EXIT_FAILED, log_dir
 
 # --------------------------------------------------------------------------
 # calibrate 子命令：评委漂移监测（把 pm/calibration.py 的校准能力接进主流程）
@@ -21,7 +21,14 @@ from .support import EXIT_CONFIG, EXIT_FAILED, LOG_DIR
 # bias（系统性偏松/偏严）或 mae（绝对偏差）变化超过 _CALIB_DRIFT_ALERT 即告警。
 # --------------------------------------------------------------------------
 _CALIB_DRIFT_ALERT = 0.5
-_CALIB_HISTORY = LOG_DIR / "judge_calibration_history.json"
+
+
+def _calib_history() -> Path:
+    """校准账本路径。原来它是 `LOG_DIR / ...` 的 import 期常量，于是
+    `PM_LOG_DIR` 对 `run_*.json` 生效、对这本账不生效 —— 同一个变量两种命运，
+    结果是"我把产物挪到别处了"这个前提下，测试与运维都会以为账本也跟着走了。
+    """
+    return log_dir() / "judge_calibration_history.json"
 
 
 def _calib_fingerprints(
@@ -311,9 +318,10 @@ def _calibrate_command(argv: list[str]) -> int:
     # 有意的锚点收紧（MAE 1.07→0.37）读成了"漂移"。所以每条记录额外存三个指纹：
     # 评委模型名 + 评分 rubric 指纹 + 锚点集指纹，比较时只认三者都与本次一致的最近一条。
     history: list[dict[str, Any]] = []
-    if _CALIB_HISTORY.exists():
+    history_path = _calib_history()
+    if history_path.exists():
         try:
-            history = json.loads(_CALIB_HISTORY.read_text(encoding="utf-8"))
+            history = json.loads(history_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             history = []  # 历史损坏按空账本处理，本次照常记录
     now_model, now_rubric, now_anchors = _calib_fingerprints(ns.judge, samples, mode)
@@ -453,10 +461,9 @@ def _calibrate_command(argv: list[str]) -> int:
                 }
             )
         history.append(entry)
-        _CALIB_HISTORY.parent.mkdir(parents=True, exist_ok=True)
-        _CALIB_HISTORY.write_text(
-            json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        path = _calib_history()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if ns.json:
         print(
@@ -497,5 +504,5 @@ def _calibrate_command(argv: list[str]) -> int:
     rep_out = analysis.get("repeatability")
     if rep_out:
         print(calib.render_repeatability(rep_out))
-    print(f"校准记录已{'保存' if not ns.no_save else '跳过保存'}：{_CALIB_HISTORY}")
+    print(f"校准记录已{'保存' if not ns.no_save else '跳过保存'}：{_calib_history()}")
     return 0

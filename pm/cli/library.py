@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .history import _TERMINAL_STATUS
-from .support import EXIT_CONFIG, EXIT_FAILED, LOG_DIR
+from .support import EXIT_CONFIG, EXIT_FAILED, log_dir
 
 # --------------------------------------------------------------------------
 # library 子命令：跨任务提示词资产库（记忆层·读侧）
@@ -58,7 +58,7 @@ def _library_recommend(ns: argparse.Namespace) -> int:
     """
     new_grams = _task_sim_grams(ns.task_text or "")
     scored: list[tuple[float, dict[str, Any]]] = []
-    for f in sorted(LOG_DIR.glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for f in sorted(log_dir().glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -149,7 +149,9 @@ def _library_command(argv: list[str]) -> int:
 
     if ns.export:
         target: dict[str, Any] | None = None
-        for f in sorted(LOG_DIR.glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        for f in sorted(
+            log_dir().glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+        ):
             try:
                 d = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -171,7 +173,7 @@ def _library_command(argv: list[str]) -> int:
         if not (target.get("prompt") or "").strip():
             print(f"运行 {ns.export} 没有可导出的提示词", file=sys.stderr)
             return EXIT_FAILED
-        out = Path(ns.out) if ns.out else LOG_DIR / "exports" / f"{ns.export}.prompt.md"
+        out = Path(ns.out) if ns.out else log_dir() / "exports" / f"{ns.export}.prompt.md"
         out.parent.mkdir(parents=True, exist_ok=True)
         header = (
             f"# Prompt 资产（run_id: {target['run_id']}）\n\n"
@@ -184,7 +186,7 @@ def _library_command(argv: list[str]) -> int:
         return 0
 
     entries: list[dict[str, Any]] = []
-    for f in sorted(LOG_DIR.glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for f in sorted(log_dir().glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):

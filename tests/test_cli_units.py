@@ -30,14 +30,13 @@ cli_main = sys.modules["pm.cli.main"]
 # 基建
 # ---------------------------------------------------------------------------
 def _patch_log_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """support/history/library/calibrate 各自绑定了 LOG_DIR 引用，逐模块换到 tmp。"""
-    from pm.cli import calibrate as cli_calibrate
+    """产物目录换到 tmp：只需要设一个环境变量。
 
-    for mod in (cli_support, cli_history, cli_library):
-        monkeypatch.setattr(mod, "LOG_DIR", tmp_path)
-    monkeypatch.setattr(
-        cli_calibrate, "_CALIB_HISTORY", tmp_path / "judge_calibration_history.json"
-    )
+    以前这里要逐模块 patch `LOG_DIR` 引用（support/history/library）外加 calibrate 的
+    `_CALIB_HISTORY` 常量 —— 四个绑定点，漏一个就写进真实 `logs/`。改成晚绑定的
+    `support.log_dir()` 之后，"设 PM_LOG_DIR"就是唯一口径：代码能生效，测试才能只设一个变量。
+    """
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
 
 
 def _write_run(logs: Path, run_id: str, mtime: float | None = None, **fields: Any) -> Path:

@@ -53,7 +53,7 @@ def test_calibration_history_path_is_sealed_by_conftest_only() -> None:
     from pm.cli import calibrate as cli_calibrate
 
     real = (ROOT / "logs" / "judge_calibration_history.json").resolve()
-    got = Path(cli_calibrate._CALIB_HISTORY).resolve()
+    got = cli_calibrate._calib_history().resolve()
     assert got != real, f"conftest 的 seal_calibration_ledger 失效，用例可直接写 A/B 账本：{got}"
 
 
@@ -66,7 +66,7 @@ def test_a_forgotten_patch_still_cannot_reach_the_real_ab_ledger() -> None:
 
     real = ROOT / "logs" / "judge_calibration_history.json"
     before = real.read_bytes() if real.exists() else None
-    target = Path(cli_calibrate._CALIB_HISTORY)
+    target = cli_calibrate._calib_history()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps([{"id": "seal-canary"}]), encoding="utf-8")
     assert target.exists(), "密封把路径指到了写不出去的地方（那也算失效）"

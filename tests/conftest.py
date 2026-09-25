@@ -29,10 +29,6 @@ from pm import schemas as _pm_schemas
 
 _pm_schemas.JUDGE_JITTER = 0.0
 
-# 校准账本的路径是 import 期由 LOG_DIR 拼出来的模块常量，所以"等它被导入再改属性"
-# 会漏掉用例体内才 import 的情况（那时 autouse 夹具已经跑完）。在收集阶段就拉起来。
-from pm.cli import calibrate as _cli_calibrate  # noqa: E402
-
 
 @pytest.fixture(autouse=True)
 def legacy_measurement_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,21 +72,19 @@ def isolate_modelhub_write_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
 @pytest.fixture(autouse=True)
 def seal_calibration_ledger(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """校准账本（`logs/judge_calibration_history.json`）封进 tmp_path。
+    """校准账本（`logs/judge_calibration_history.json`）连同整个产物目录封进 tmp_path。
 
     这条与上面那条同源，只是危险面不一样：账本是 A/B 协议判定的**唯一事实源**，
     而 `scripts/compare_scoring_ab.py --ledger` 取的是"该模式最近一条有逐条明细的记录"。
-    也就是说——任何一个忘了 `_patch_log_dir()` 的进程内校准用例，只要成功入账一条假记录，
-    下一轮 A/B 结论就会安静地建立在测试数据上，而且看不出来（假记录形状是对的）。
+    也就是说——任何一个忘了设环境变量的进程内校准用例，只要成功入账一条形状完全正确的
+    假记录，下一轮"要不要换评分协议"的结论就会安静地建立在测试数据上。
 
-    `_CALIB_HISTORY` 是 import 时由 `LOG_DIR` 拼出来的模块常量，所以运行期
-    `setenv("PM_LOG_DIR", tmp)` 改不动它；必须直接换属性。而"等模块被导入再换"
-    也不行——用例体内才 import 的话，夹具早就跑完了（这条守卫最初就是这么漏的）。
-    所以在本文件**顶部**把它拉起来，保证每条用例看到的都是已经改过属性的模块。
+    2026-09-25 之前这里要逐模块 patch `LOG_DIR` / `_CALIB_HISTORY` 四个绑定点（漏一个就写进
+    真实 `logs/`），而 `_CALIB_HISTORY` 是 import 期常量、`PM_LOG_DIR` 对它无效 ——
+    第一版密封还漏了"用例体内才 import"那种情况（sys.modules 判定跑在夹具之后）。
+    现在 `support.log_dir()` 是晚绑定的，一个环境变量就把产物、历史、库导出、账本全管住。
     """
-    monkeypatch.setattr(
-        _cli_calibrate, "_CALIB_HISTORY", tmp_path / "judge_calibration_history.json"
-    )
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
 
 
 @pytest.fixture(autouse=True)

@@ -6,7 +6,7 @@ import argparse
 import json
 from typing import Any
 
-from .support import LOG_DIR
+from .support import log_dir
 
 # --------------------------------------------------------------------------
 # --------------------------------------------------------------------------
@@ -35,7 +35,7 @@ def _load_run_history(last: int, include_demo: bool) -> list[dict[str, Any]]:
     from datetime import datetime
 
     rows: list[dict[str, Any]] = []
-    files = sorted(LOG_DIR.glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(log_dir().glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     for f in files:
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
