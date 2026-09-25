@@ -66,13 +66,13 @@ source = ["pm"]
 
 [tool.coverage.report]
 # 地板值来自实测，每次抬动都要重新量（跑法见 docs/operations.md 的门禁块）：
-# 接入门禁前全量 84% → 补 modelhub 测试后 88.5% → 同日再复测（补运维路由用例后）**92.44%**（全量 rc=0）。
-# 拆开看才是重点：`pm/` 去掉网关 94.9%，而 pm/modelhub/* 从 33.5% 补到 **81.0%**
-# （streaming 89、pool 61、vkeys 85、ledger 94、agents 0→100）。这条线的含义是"别再往下掉"，
+# 接入门禁前全量 84% → 补 modelhub 测试后 88.5% → 同日再复测（补运维路由用例后）**93.49%**（全量 rc=0，补完切换链用例）。
+# 拆开看才是重点：`pm/` 去掉网关 94.9%，而 pm/modelhub/* 从 33.5% 补到 **87.1%**
+# （streaming 89、pool 61→85、vkeys 92、ledger 97、agents 0→100）。这条线的含义是"别再往下掉"，
 # 不是质量目标 —— 分项那条更紧的闸见 ci.yml。
 # 为什么现在才加：以前仓库里根本没有覆盖率门禁，文档写的"94%"是手抄快照
 # —— 2026-09-25 实测 84%，虚高 10 个点。
-fail_under = 91
+fail_under = 92
 show_missing = true
 
 [tool.coverage.json_report]
