@@ -109,6 +109,49 @@ def test_installable_package_layout_declared():
     )
 
 
+def test_precommit_hooks_cover_the_same_scope_as_ci():
+    """`.pre-commit-config.yaml` 的检查范围必须与 CI 逐条相同。
+
+    真实缺陷（2026-09-25 盘点）：钩子写的是 `pm/ tests/ run.py examples/` 与 `pm/ run.py`，
+    两边都比 CI 少一个 `run_server.py` —— 于是"本地 pre-commit 绿"和"CI 绿"不是同一件事，
+    而这正是 CI 注释里自己警告过的"第三种口径"。另外钩子默认会把 staged 文件追加到 args
+    后面，等于**门禁范围随你这次改了哪些文件而变**。
+    所以这里比两件事：三条命令的作用路径集合相等 + 每条钩子都 `pass_filenames: false`。
+    """
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    cfg_path = ROOT / ".pre-commit-config.yaml"
+    cfg = cfg_path.read_text(encoding="utf-8")
+
+    def ci_scope(sub: str) -> set[str]:
+        m = re.search(rf"run:\s*{re.escape(sub)}\s+(.+)", ci)
+        assert m, f"CI 里找不到 `{sub}` 命令，改了这一条就要同步改测试"
+        return {t for t in m.group(1).split() if not t.startswith("-")}
+
+    def hook_scope(entry_head: str) -> set[str]:
+        m = re.search(rf"entry:.*{re.escape(entry_head)}\s+(.+)", cfg)
+        assert m, f"pre-commit 配置里找不到 `{entry_head}`"
+        return {t for t in m.group(1).split() if not t.startswith("-")}
+
+    pairs = (
+        ("ruff check", "m ruff check"),
+        ("ruff format --check", "m ruff format --check"),
+        ("mypy", "m mypy"),
+    )
+    for sub, head in pairs:
+        assert ci_scope(sub) == hook_scope(head), (
+            f"`{sub}` 的检查范围与 CI 不一致：CI 多 {sorted(ci_scope(sub) - hook_scope(head))}，"
+            f"钩子多 {sorted(hook_scope(head) - ci_scope(sub))}"
+        )
+
+    hooks = re.findall(r"- id: (\S+)(.*?)(?=\n      - id: |\n  - repo: |\Z)", cfg, re.S)
+    assert hooks, "解析不到任何钩子"
+    for hook_id, body in hooks:
+        assert "pass_filenames: false" in body, (
+            f"钩子 {hook_id} 没设 pass_filenames: false —— "
+            "staged 文件会被追加进 args，门禁范围就随提交内容变化"
+        )
+
+
 def test_requires_python_covers_ci_matrix():
     """CI 矩阵里最老的 Python 版本必须 >= requires-python，否则装完就跑不起来。"""
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

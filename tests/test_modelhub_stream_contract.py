@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -174,6 +175,50 @@ def test_http_layer_returns_event_stream_not_null(monkeypatch: pytest.MonkeyPatc
 
     assert body != b"null", "FastAPI 把 None 序列化成了 null —— 流式通道没接上"
     assert b"[DONE]" in body and b"hi" in body, body
+
+
+def test_request_model_keeps_tolerating_extra_openai_fields() -> None:
+    """`extra="allow"` 是 OpenAI 客户端多带字段时不 422 的唯一原因，删不得。
+
+    顺手盯住一次清理：`Field(alias="max_tokens")` 与字段同名、pydantic 每次 import 都报
+    "no effect" 警告（真警告会被它盖掉），已删；`class Config` 换成 model_config。
+    这两处改动唯一的回归风险就是"客户端字段进不来 / max_tokens 不再生效"，所以各断一条。
+    """
+    req = S.ChatRequest.model_validate(
+        {
+            "model": "stub-model",
+            "messages": [{"role": "user", "content": "hi"}],
+            "user": "end-user-1",
+            "n": 2,
+            "seed": 7,
+            "max_tokens": 512,
+        }
+    )
+    assert req.max_tokens == 512
+    assert req.model_extra is not None and req.model_extra.get("user") == "end-user-1"
+    # 未知字段不许被静默丢掉：网关把它们原样转给上游
+    assert (
+        S.ChatRequest.model_validate(
+            {"model": "m", "messages": [{"role": "user", "content": "x"}], "stream": True}
+        ).stream
+        is True
+    )
+
+
+def test_importing_the_gateway_emits_no_pydantic_warnings() -> None:
+    """导入期不许有"弃用/无效声明"类警告：警告堆多了，真那条就没人看
+    （本次那条 `alias` no-effect 就是被一堆同类噪音盖住的）。"""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        importlib.reload(S)
+    noisy = [
+        f"{type(w.message).__name__}: {w.message}"
+        for w in caught
+        if "Deprecated" in type(w.message).__name__ or "no effect" in str(w.message)
+    ]
+    assert not noisy, f"导入又带出弃用类警告：{noisy}"
 
 
 def test_request_id_header_survives(monkeypatch: pytest.MonkeyPatch) -> None:

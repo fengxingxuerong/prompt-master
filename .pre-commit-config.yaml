@@ -1,31 +1,43 @@
-# pre-commit 质量门禁：提交前自动跑 lint / format / 测试
+# pre-commit 质量门禁 —— 与 .github/workflows/ci.yml 同口径的本地版
+#
 # 安装：pip install pre-commit && pre-commit install
+# ⚠️ 装完之前它一条都不跑：`.git/hooks/` 里没有 pre-commit 就等于没有门禁，
+#    而"我本地 pre-commit 没报错"会被当成"门禁过了"（这正是它最危险的时刻）。
+#
+# 2026-09-25 重写：
+# ① 原来的三条 args 是 `pm/ tests/ run.py examples/` 与 `pm/ run.py`——**都比 CI 少
+#    `run_server.py`**，于是造出"CI 查、本地不查"的第三种口径；现在路径与 CI 逐条对齐，
+#    并由 tests/test_packaging.py 断言两边一致（改一边就会红）。
+# ② 原来从 GitHub 拉 ruff-pre-commit / mirrors-mypy 两个远程仓：首次运行要联网，
+#    而这台机器上装钩子仓库的 venv 会被杀软/网络抖动打断。改成 `repo: local` 直接调
+#    本仓库 venv 里已钉版本的那三个工具 —— 版本与 CI 完全同源（都来自 requirements.txt）。
+# ③ `pass_filenames: false` 全部补齐：默认会把 staged 文件追加到 args 后面，
+#    于是 `ruff check pm/ ... <一堆暂存文件>` 的检查范围**取决于你这次提交了什么**，
+#    门禁范围随提交变化本身就是不可信。
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.6
-    hooks:
-      - id: ruff
-        args: [check, pm/, tests/, run.py, examples/]
-      - id: ruff-format
-        args: [pm/, tests/, run.py, examples/]
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.1
-    hooks:
-      - id: mypy
-        args: [pm/, run.py]
-        pass_filenames: false
-        additional_dependencies:
-          - pydantic>=2.13
-          - langgraph>=1.2
-          - langchain-core>=1.6
-          - langchain-openai>=1.6
-
   - repo: local
     hooks:
-      - id: pytest
-        name: pytest (quick)
-        entry: python -m pytest tests/ -q
+      - id: ruff-check
+        name: ruff check（与 CI 同路径）
+        entry: .venv/Scripts/python.exe -m ruff check pm/ tests/ run.py run_server.py examples/
+        language: system
+        pass_filenames: false
+
+      - id: ruff-format-check
+        name: ruff format --check（与 CI 同路径）
+        entry: .venv/Scripts/python.exe -m ruff format --check pm/ tests/ run.py run_server.py examples/
+        language: system
+        pass_filenames: false
+
+      - id: mypy
+        name: mypy --strict（与 CI 同路径）
+        entry: .venv/Scripts/python.exe -m mypy pm/ run.py run_server.py
+        language: system
+        pass_filenames: false
+
+      - id: pytest-quick
+        name: pytest tests/（无 Key、禁止真实出网）
+        entry: .venv/Scripts/python.exe -m pytest tests/ -q -p no:warnings
         language: system
         pass_filenames: false
         always_run: true

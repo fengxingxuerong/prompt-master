@@ -28,7 +28,7 @@ load_dotenv()
 
 from fastapi import FastAPI, Header, HTTPException, Response  # noqa: E402
 from fastapi.responses import HTMLResponse, StreamingResponse  # noqa: E402
-from pydantic import BaseModel, Field  # noqa: E402
+from pydantic import BaseModel, ConfigDict  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -119,11 +119,12 @@ class ChatRequest(BaseModel):
     role: str | None = None
     stream: bool = False
     temperature: float | None = None
-    max_tokens: int | None = Field(default=None, alias="max_tokens")
+    # 原来写的是 Field(alias="max_tokens") —— 别名与字段同名，pydantic 每次导入都报
+    # "no effect" 警告（噪音会盖住真警告），删掉。extra=allow 是必须的：
+    # OpenAI 客户端还会带 user/n/seed 等字段，网关要能原样转发而不是 422。
+    max_tokens: int | None = None
 
-    class Config:
-        populate_by_name = True
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
 
 class AgentRegisterRequest(BaseModel):
