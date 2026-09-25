@@ -181,6 +181,31 @@ def test_nothing_at_all_paired_is_still_void(
     assert "作废" in capsys.readouterr().out
 
 
+def test_report_survives_a_gbk_console(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """中文 Windows 上跑这份报告必须能跑到底：实测它在"均值差"那一行
+    （`impression − checklist` 用的是 U+2212，GBK 码页放不下）**报告中途**抛
+    UnicodeEncodeError —— 决定换不换默认的工具自己先崩，而且崩掉的后半段正是准确性。
+
+    这里不复刻 `ensure_utf8_stdio` 的判断（那是 pm/bootstrap 的职责，抄一份就是第二个口径），
+    只是把 stdout 换成 cp936 的字节管道，看脚本有没有把它救回来。
+    """
+    import io
+    import os
+
+    if os.name != "nt":
+        pytest.skip("码页问题只在 Windows 上成立")
+    # 两臂都要有极差数据：崩掉的那一行在"配对比较"段里，单发臂根本走不到那里
+    p = _ledger(tmp_path, [_rec("impression", "same-set"), _rec("checklist", "same-set")])
+    monkeypatch.setattr(sys, "argv", ["x", "--ledger", str(p)])
+    buf = io.BytesIO()
+    text = io.TextIOWrapper(buf, encoding="cp936", errors="strict")
+    monkeypatch.setattr(sys, "stdout", text)
+    assert mod.main() == 0
+    text.flush()
+    out = buf.getvalue().decode("utf-8", errors="replace")
+    assert "均值差" in out and "判据" in out, out
+
+
 def test_positions_and_ledger_are_mutually_exclusive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

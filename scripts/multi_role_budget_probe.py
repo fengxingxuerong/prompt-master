@@ -27,9 +27,10 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path.cwd()))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pm.llm as L
+from pm.bootstrap import ensure_utf8_stdio  # 与 run.py 同一份引导，别另写一套 reconfigure
 from pm.prompts import (
     CLARIFIER_SYSTEM,
     CLARIFIER_USER,
@@ -44,6 +45,10 @@ from pm.schemas import (
     MockInputSet,
     PreferenceResult,
 )
+
+# 早于任何 print：GBK 码页的中文 Windows 控制台上，报告里那个 "⚠️" 会先把脚本炸在
+# 真正的结论之前（同一个坑见 tests/test_scoring_ab_compare.py 的码页守卫）。
+ensure_utf8_stdio()
 
 N = int(os.environ.get("MR_N", "3"))
 ROLES = os.environ.get("MR_ROLES", "clarifier,mockgen,comparator").split(",")

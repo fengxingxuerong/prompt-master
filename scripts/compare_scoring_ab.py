@@ -29,6 +29,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# 与 run.py 同一套引导（同一个 helper，不在这里另写一份 reconfigure）：
+# 本脚本的报告里有 U+2212 这类 GBK 码页放不下的字符，Windows 上直接 print 会
+# 在**报告中间**抛 UnicodeEncodeError —— 决定换不换默认的工具自己先崩。
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from pm.bootstrap import ensure_utf8_stdio  # noqa: E402
+
 DEFAULT_THRESHOLD = 2.0  # 与 PM_JUDGE_DISAGREEMENT 同口径
 DEFAULT_NOISE_FLOOR = 0.25  # 同命令重跑的 rep_range_mean 散布（实测 0.45 vs 0.22）
 
@@ -120,6 +128,7 @@ def summarize(ranges: dict[str, float], threshold: float) -> dict[str, Any]:
 
 
 def main() -> int:
+    ensure_utf8_stdio()  # 必须早于任何 print / argparse 报错
     ap = argparse.ArgumentParser(description="两种评分协议的配对 A/B")
     ap.add_argument("impression", type=Path, nargs="?", help="impression 臂的 --json 输出日志")
     ap.add_argument("checklist", type=Path, nargs="?", help="checklist 臂的 --json 输出日志")
