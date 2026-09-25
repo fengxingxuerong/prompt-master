@@ -223,3 +223,41 @@ def test_requires_python_covers_ci_matrix():
     assert min(int(v[1]) for v in versions) >= minor, (
         f"requires-python {floor} 比 CI 矩阵里的最低版本还高"
     )
+
+
+def test_coverage_floors_agree_across_pyproject_ci_and_docs() -> None:
+    """覆盖率地板有三处抄件：pyproject（全局线）、ci.yml（modelhub 分项线）、
+    `docs/operations.md` 的门禁块与表格。数字一旦漂开，"照文档跑一遍门禁"就会得到
+    一条比 CI 松得多的绿 —— 那比没有门禁更坏。
+
+    真实漂移（2026-09-25 复测时发现）：CI 已经是 `--fail-under=56`，
+    而文档的门禁块还写着 `--fail-under=32`（差 24 个点，且没人会红）。
+    """
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    docs = (ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    mhub = re.search(r'--include="\*/modelhub/\*" --fail-under=(\d+)', ci)
+    assert mhub, "ci.yml 里找不到 modelhub 分项线（改了写法要同步改这条断言）"
+    floor_mhub = int(mhub.group(1))
+
+    docs_floors = {
+        m.group(1)
+        for line in docs.splitlines()
+        if "coverage report" in line  # 只比**可执行抄件**：叙述历史值的散文不是配置
+        for m in re.finditer(r"--fail-under=(\d+)", line)
+    }
+    assert docs_floors == {str(floor_mhub)}, (
+        f"docs/operations.md 的 --fail-under 抄件与 CI 不一致："
+        f"文档 {sorted(docs_floors)} vs CI {floor_mhub}"
+    )
+
+    floor_all = int(re.search(r"^fail_under\s*=\s*(\d+)", pyproject, re.M).group(1))
+    row_all = re.search(r"^\|\s*`pm/`\s*全量\s*\|.*\|\s*(\d+)\s*\|\s*$", docs, re.M)
+    row_mhub = re.search(r"^\|\s*`pm/modelhub/\*`\s*\|.*\|\s*(\d+)\s*\|\s*$", docs, re.M)
+    assert row_all and int(row_all.group(1)) == floor_all, (
+        f"文档表格的全量地板列（{row_all and row_all.group(1)}）与 pyproject fail_under={floor_all} 不一致"
+    )
+    assert row_mhub and int(row_mhub.group(1)) == floor_mhub, (
+        f"文档表格的 modelhub 地板列（{row_mhub and row_mhub.group(1)}）与 CI 的 {floor_mhub} 不一致"
+    )

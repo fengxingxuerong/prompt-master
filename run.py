@@ -38,7 +38,7 @@ from pathlib import Path
 # ModuleNotFoundError: No module named 'pm'（2026-09-25 踩过，被探针用例逮住）。
 sys.path.insert(0, str(Path(__file__).parent))
 
-from pm.bootstrap import prepare_console  # noqa: E402
+from pm.bootstrap import prepare_console
 
 prepare_console()
 

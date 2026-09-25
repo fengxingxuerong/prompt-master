@@ -37,7 +37,7 @@ jobs:
         # 这里就会 Connection error 立刻变红，而不是在开发机上静默烧额度。
         # --cov：覆盖率地板值见 pyproject [tool.coverage.report].fail_under。
         # 注意这个数只算主进程——subprocess 打真实入口的那批用例（test_cli_guards 等）
-        # 不计入分子，所以 pm/cli/main.py 的 79% 是偏保守的下界。
+        # 不计入分子，所以 pm/cli/main.py 的 80% 是偏保守的下界（这个数只作解释，不作判据）。
         env:
           PM_BASE_URL: http://127.0.0.1:9/v1
           PM_EVALUATOR_B_BASE_URL: http://127.0.0.1:9/v1
@@ -45,13 +45,14 @@ jobs:
           PM_API_KEY: sk-ci-has-no-real-key
         run: python -m pytest tests/ -q --cov=pm --cov-report=term-missing
       - name: Coverage ratchet —— pm/modelhub/* 单独一条更紧的线
-        # 全量 88.5% 会把结构问题抹平：这块网关补测前只有 33.5%、补测后 58.6%
-        # （streaming 7→89、pool 23→61、vkeys 21→85），而恰恰是它出过
+        # 全量线会把结构问题抹平：这块网关补测前只有 33.5%，2026-09-25 复测 69.8%
+        # （streaming 89、pool 61、vkeys 85、ledger 94、agents 0→100），而恰恰是它出过
         # "流式通道没有 return、stream=true 返回 None、全套测试全绿"的事故。
-        # 全局线守不住的地方，就用分项线钉住不许再掉。地板取实测 58.6% 下方留 2.5 点余量。
+        # 全局线守不住的地方，就用分项线钉住不许再掉。地板取实测 69.8% 下方留 4.8 点余量
+        # —— 缺口集中在 server.py 49%（运维路由）与 pool.py 61%，补到那儿之前别抬这条线。
         env:
           PM_API_KEY: sk-ci-has-no-real-key
-        run: python -m coverage report --include="*/modelhub/*" --fail-under=56
+        run: python -m coverage report --include="*/modelhub/*" --fail-under=65
       - name: Releases suite tests (lobster + triage) —— TestClient 进程内，零真实出网
         run: |
           python -m pytest releases/lobster/tests/ -q

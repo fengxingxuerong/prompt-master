@@ -9,7 +9,7 @@
 
 | 层次 | 命令 | 证明 | **不**证明 |
 |---|---|---|---|
-| 单元测试 | `pytest tests/ -q`（683 项，`--collect-only` 计数） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀 / 约束超载 / 定界符配平）、null 容错、演示模式隔离与产物落盘、**服务层限流**（滑动窗口 / 429+Retry-After / 赛马按任务数计费）、**两轮澄清提问语义**、**MockGen 场景覆盖校验（含注入用例）**、**用量台账**、**入口编码兜底**、**节点提示词结构契约**、**控制台渲染 XSS 防线与安全响应头**、**任务记录存储层**（内存/SQLite 行为一致 + 跨实例可见 + 并发写不丢账）、**REST API 七个路由与 404/422/401 分支**、**CLI 入参护栏与 `--fast` 快速档**、**LLM 限流退避/降级通道/记账分支**、**缓存落盘与淘汰异常分支**、**SqliteCache 多进程共享缓存**、**评委输出形状容错**（对象数组 issues / JSON 字符串 / 缺尾键 / null 数组 / **键名被按 description 同义改写**，都不该作废整条评估）、**取证先于打分的字段序**、**双向盲评与位置偏置计数**、**fixed–broken 逐条得失记账**、**对比切片与高方差用例优先**、**Δ 的基础设施有效性闸**（零有效样本报「不可采信」）、**注入存活按用例计数与代码派生校验码**、**评委同源检测**、**仲裁分数出处披露**（N/M 例出自仲裁者一人时报告必须说不，别让读者以为那是双评委共识）、**自报分与加权分相等时披露探测器失效**、**满分声明告警**（五维全 ≥9.5 却仍列 issue／或零 issue，只提醒不否决）、**评委复现性 `--repeat`**（绕缓存重复打；绕缓存不许整体替换 CallHook，否则自测会打真端点）、**仲裁失败回退仍记全出处账**（`conservative` 也要带 `judge_scores` 与分差）、**仲裁 prompt 的「给看分数」与「要求忽略」必须共生**、**出处字面量跨 judge/report 一致**（改了值不许让那行静默失效）、**评估缓存的 rubric 指纹**、**校准账本的口径指纹**、**净增量对退化基准不失真** | 任何与模型能力相关的结论 |
+| 单元测试 | `pytest tests/ -q`（844 项，`--collect-only` 计数 2026-09-25 复测） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀 / 约束超载 / 定界符配平）、null 容错、演示模式隔离与产物落盘、**服务层限流**（滑动窗口 / 429+Retry-After / 赛马按任务数计费）、**两轮澄清提问语义**、**MockGen 场景覆盖校验（含注入用例）**、**用量台账**、**入口编码兜底**、**节点提示词结构契约**、**控制台渲染 XSS 防线与安全响应头**、**任务记录存储层**（内存/SQLite 行为一致 + 跨实例可见 + 并发写不丢账）、**REST API 七个路由与 404/422/401 分支**、**CLI 入参护栏与 `--fast` 快速档**、**LLM 限流退避/降级通道/记账分支**、**缓存落盘与淘汰异常分支**、**SqliteCache 多进程共享缓存**、**评委输出形状容错**（对象数组 issues / JSON 字符串 / 缺尾键 / null 数组 / **键名被按 description 同义改写**，都不该作废整条评估）、**取证先于打分的字段序**、**双向盲评与位置偏置计数**、**fixed–broken 逐条得失记账**、**对比切片与高方差用例优先**、**Δ 的基础设施有效性闸**（零有效样本报「不可采信」）、**注入存活按用例计数与代码派生校验码**、**评委同源检测**、**仲裁分数出处披露**（N/M 例出自仲裁者一人时报告必须说不，别让读者以为那是双评委共识）、**自报分与加权分相等时披露探测器失效**、**满分声明告警**（五维全 ≥9.5 却仍列 issue／或零 issue，只提醒不否决）、**评委复现性 `--repeat`**（绕缓存重复打；绕缓存不许整体替换 CallHook，否则自测会打真端点）、**仲裁失败回退仍记全出处账**（`conservative` 也要带 `judge_scores` 与分差）、**仲裁 prompt 的「给看分数」与「要求忽略」必须共生**、**出处字面量跨 judge/report 一致**（改了值不许让那行静默失效）、**评估缓存的 rubric 指纹**、**校准账本的口径指纹**、**净增量对退化基准不失真** | 任何与模型能力相关的结论 |
 | 拓扑自检 | `python run.py --selftest` | 图能跑通、状态正确累加、迭代终止与兜底正确、双评委仲裁路径 | 优化效果（用的是假后端） |
 | 真实 HTTP e2e | `bash examples/run_e2e_stub.sh` / `examples/run_e2e_stub.ps1` | 真实客户端 → HTTP → 响应解析 → 校验链路通畅；两条结构化输出通道均可用；**所有角色端点都被锁在桩上** | 优化效果（桩服务返回固定内容） |
 | 提示词回归评测 | `python eval_prompts.py`（离线，零成本）/ `--live`（真实调用） | **节点提示词自身的结构契约**（占位符渲染、安全约束块、专项规则块）随 pytest 常态回归；`--live` 用确定性代码侧校验（质量门 / 场景覆盖 / 提问预算 / 劣质输出压分 / 修订净增量 ≤30%）验证提示词行为 | `--live` 之外的任何效果结论（离线只保证结构，不保证生成质量） |
@@ -25,7 +25,7 @@ ruff check pm/ tests/ run.py run_server.py examples/
 ruff format --check pm/ tests/ run.py run_server.py examples/
 mypy pm/ run.py run_server.py
 python -m pytest tests/ -q --cov=pm --cov-report=term-missing     # 覆盖率地板见 pyproject
-python -m coverage report --include="*/modelhub/*" --fail-under=32  # 网关那条分项线
+python -m coverage report --include="*/modelhub/*" --fail-under=65  # 网关那条分项线
 python -m pytest releases/lobster/tests/ -q
 python -m pytest releases/triage/tests/ -q
 python run.py --selftest          # CI 里额外清 PM_API_KEY 再跑一次（干净检出无 .env 也必须过）
@@ -33,21 +33,36 @@ bash examples/run_e2e_stub.sh     # 真实 HTTP 链路 + 三条结构化输出�
 ```
 覆盖率的两条线怎么读（地板值取实测下方留余量，不是质量目标）：
 
-| 范围 | 接入门禁前 | 补 modelhub 测试后 | 门禁地板 |
-|---|---|---|---|
-| `pm/` 全量 | 84% | **88.5%** | 87 |
-| `pm/` 去掉 modelhub | 95.6% | ~96% | —（被全量线覆盖） |
-| `pm/modelhub/*` | 33.5% | **58.6%** | 56 |
+| 范围 | 接入门禁前 | 补 modelhub 测试后 | 2026-09-25 复测（全量 rc=0） | 门禁地板 |
+|---|---|---|---|---|
+| `pm/` 全量 | 84% | 88.5% | **90.43%** | 89 |
+| `pm/` 去掉 modelhub | 95.6% | ~96% | **94.9%** | —（被全量线覆盖） |
+| `pm/modelhub/*` | 33.5% | 58.6% | **69.8%** | 65 |
 
+> ⚠️ 这三列是**三个时点的实测**，不是同一个数被抄来抄去。表格存在的意义就是让下一个人
+> 看见"上一轮说 58.6%、这一轮 69.8%"是真的涨了，而不是量法变了。报数前必须重测：
+> 复测跑法就是上面那条 `python -m pytest tests/ -q --cov=pm --cov-report=term-missing`，
+> 且必须先看它自己打印的 `PYTEST_RC`/汇总行（本机有 3 条用例曾在负载下假红，见
+> `tests/test_modelhub_streaming.py` 的 stub 说明）。
+
+- 缺口现在集中在两处：`pm/modelhub/server.py` 49%（admin/运维路由那一大块）、
+  `pm/modelhub/pool.py` 61%。`agents.py` 从"零条直接用例"到 100%。
 - 为什么给 modelhub 单独立一条：全量线会把结构问题抹平，而恰恰是这条网关出现过
   "流式通道没有 return、`stream=true` 返回 None、全套测试全绿"的事故（见
   `tests/test_modelhub_stream_contract.py`）。全局线守不住的地方要分项钉。
-- ⚠️ 只量子集时会踩到全局地板（`--cov=pm.modelhub` 量出 58% 会被 87 判红）。
+- ⚠️ 只量子集时会踩到全局地板（`--cov=pm.modelhub` 量出 70% 会被 89 判红）。
   量局部请补 `--cov-fail-under=0`，那不是门禁坏了。
 - 这个数字只统计主进程：`test_cli_guards.py` 那批 subprocess 打真实入口的用例不计入分子，
   所以 `pm/cli/main.py` 的读数偏保守。
 - 旧文档里"覆盖率 94%"是手抄快照、且从来没被任何门禁守过（实测 84%）；现在地板值进 CI 了，
-  改数字要连着改 `pyproject.toml` 的 `fail_under` 与 ci.yml 的分项线，别只改文档。
+  改数字要连着改 `pyproject.toml` 的 `fail_under` 与 ci.yml 的分项线，别只改文档 ——
+  三处抄件（pyproject / ci.yml / 上面的门禁块与表格）由
+  `tests/test_packaging.py::test_coverage_floors_agree_across_pyproject_ci_and_docs` 钉住。
+  这条测试是因为实测漂过才加的：CI 早已是 `--fail-under=56`，文档门禁块还写着 `32`，
+  照文档跑的人会拿到一条比 CI 松 24 个点、还打印绿色的"门禁"。
+- ⚠️ 已知间歇性红：`tests/test_modelhub_streaming.py` 偶发客户端 `WinError 10053`
+  （本机观测约 2/40 次运行，红的那几条签名完全相同）。它红在连接层，不是
+  `pm/modelhub/streaming.py` 坏了 —— 先看签名，再决定要不要动产品代码。
 Windows 本机注意：pytest 的临时目录根落在 `%TEMP%\pytest-of-<用户>\`，若其中的
 `pytest-current` 软链坏掉（本机实测 stat 都抛 WinError 5），pytest 退出期的清理函数会
 自己崩 ⇒ **用例全过也返回 rc=1**。仓根 `conftest.py` 与 `releases/*/pytest.ini` 已把临时根
@@ -55,9 +70,10 @@ Windows 本机注意：pytest 的临时目录根落在 `%TEMP%\pytest-of-<用户
 "门禁只认退出码"在这台机器上依赖这条前提，别忽略 rc。
 
 CI（GitHub Actions）在 push / PR 时对 Python 3.11/3.12/3.13 跑以上全部检查；
-本地可选 `pip install pre-commit && pre-commit install` 接入提交钩子
-（⚠️ 仓库里 `.pre-commit-config.yaml` 存在但**默认没装**，且它的 mypy 路径比 CI 少
-`run_server.py` —— 装上之前，别把"pre-commit 没报错"当成门禁过了）。
+本地可选 `pip install pre-commit && pre-commit install` 接入提交钩子。
+（⚠️ 仓库里 `.pre-commit-config.yaml` 存在但**默认没装** —— 装上之前，别把
+"pre-commit 没报错"当成门禁过了。钩子的三条命令路径与 CI 逐条相等，由
+`test_precommit_hooks_cover_the_same_scope_as_ci` 守着；但**它没装就等于没跑**。）
 
 部署与浏览器运行时验证（2026-09-13 新增，报告见 `docs/deploy_verification_2026-09-13.md`）：
 ```bash
