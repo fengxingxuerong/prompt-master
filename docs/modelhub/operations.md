@@ -73,6 +73,13 @@ curl http://127.0.0.1:8687/api/health
 | 对话 502 全池失败 | 上游全不可用或配额耗尽 | `status` 看断路器；`ledger --success 0` 看最后错误；稍等冷却自愈或回滚 |
 | 某模型一直不走 | 连败进入冷却 | `status` 看 `cooling_remaining_s`；恢复后自动回主备链 |
 | 422 未知角色 | role 名不在 roles.json | `GET /v1/roles` 对照；或在 roles.json 固定新角色 |
+| `/v1/roles` 503 | 角色文件不可读/形状不对（构造注册表当场就抛，不是取清单才失败） | 看 detail 里的路径与原因；修好后无需重启（mtime 变了会自动重载） |
+
+> 上面三条"报错必须说话"的路径都由 `tests/test_modelhub_admin_routes.py` 钉住（进程内
+> TestClient，零出网）。2026-09-25 补这批用例时它们全是 0 覆盖，实测两处**文档说 422/503、
+> 代码返回 500**：`POST /v1/agents` 绑错角色、`GET /v1/roles` 遇到坏角色文件。
+> 症状都是"网关坏了"，真相分别是"角色名写错"和"roles.json 读不到" —— 最该说话的那句话被
+> Starlette 吞成了 Internal Server Error。
 | 400 stream | v1 不支持流式 | 去掉 stream 或等 roadmap |
 | 401 | 设了 PMH_GATEWAY_TOKEN 但请求没带 | 带 `Authorization: Bearer <令牌>` |
 

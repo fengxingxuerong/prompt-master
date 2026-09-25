@@ -25,7 +25,7 @@ ruff check pm/ tests/ run.py run_server.py examples/
 ruff format --check pm/ tests/ run.py run_server.py examples/
 mypy pm/ run.py run_server.py
 python -m pytest tests/ -q --cov=pm --cov-report=term-missing     # 覆盖率地板见 pyproject
-python -m coverage report --include="*/modelhub/*" --fail-under=65  # 网关那条分项线
+python -m coverage report --include="*/modelhub/*" --fail-under=76  # 网关那条分项线
 python -m pytest releases/lobster/tests/ -q
 python -m pytest releases/triage/tests/ -q
 python run.py --selftest          # CI 里额外清 PM_API_KEY 再跑一次（干净检出无 .env 也必须过）
@@ -33,20 +33,22 @@ bash examples/run_e2e_stub.sh     # 真实 HTTP 链路 + 三条结构化输出�
 ```
 覆盖率的两条线怎么读（地板值取实测下方留余量，不是质量目标）：
 
-| 范围 | 接入门禁前 | 补 modelhub 测试后 | 2026-09-25 复测（全量 rc=0） | 门禁地板 |
-|---|---|---|---|---|
-| `pm/` 全量 | 84% | 88.5% | **90.43%** | 89 |
-| `pm/` 去掉 modelhub | 95.6% | ~96% | **94.9%** | —（被全量线覆盖） |
-| `pm/modelhub/*` | 33.5% | 58.6% | **69.8%** | 65 |
+| 范围 | 接入门禁前 | 补 modelhub 测试后 | 复测① 2026-09-25（全量 rc=0） | 复测② 同日补运维路由用例后 | 门禁地板 |
+|---|---|---|---|---|---|
+| `pm/` 全量 | 84% | 88.5% | 90.43% | **92.44%** | 91 |
+| `pm/` 去掉 modelhub | 95.6% | ~96% | 94.9% | **94.9%** | —（被全量线覆盖） |
+| `pm/modelhub/*` | 33.5% | 58.6% | 69.8% | **81.0%** | 76 |
 
-> ⚠️ 这三列是**三个时点的实测**，不是同一个数被抄来抄去。表格存在的意义就是让下一个人
-> 看见"上一轮说 58.6%、这一轮 69.8%"是真的涨了，而不是量法变了。报数前必须重测：
-> 复测跑法就是上面那条 `python -m pytest tests/ -q --cov=pm --cov-report=term-missing`，
-> 且必须先看它自己打印的 `PYTEST_RC`/汇总行（本机有 3 条用例曾在负载下假红，见
-> `tests/test_modelhub_streaming.py` 的 stub 说明）。
+> ⚠️ 五列都是**各自时点的实测**，不是同一个数被抄来抄去。表格存在的意义就是让下一个人
+> 看见"上一轮说 69.8%、这一轮 81%"是真涨了。报数前必须重测：跑法就是上面那条
+> `python -m pytest tests/ -q --cov=pm --cov-report=term-missing`，且必须先看它自己打印的
+> 汇总行与退出码（本机有间歇性假红，见上面两条注意）。
+> 复测①→② 之间做的事：给 `/v1/keys`、`/v1/agents`、`/v1/usage`、`/v1/metrics`、
+> `/v1/ledger*`、`/v1/roles`、`/console` 这批**运维路由**补了 21 条进程内用例
+> （`tests/test_modelhub_admin_routes.py`）—— 它们之前合计 194 条语句 0 覆盖。
 
-- 缺口现在集中在两处：`pm/modelhub/server.py` 49%（admin/运维路由那一大块）、
-  `pm/modelhub/pool.py` 61%。`agents.py` 从"零条直接用例"到 100%。
+- 缺口现在只剩一处大的：`pm/modelhub/pool.py` 61%（真正打上游的那段 402-553）与
+  `server.py` 里同一调用链的 361-444。`agents.py` 已从"零条直接用例"到 100%。
 - 为什么给 modelhub 单独立一条：全量线会把结构问题抹平，而恰恰是这条网关出现过
   "流式通道没有 return、`stream=true` 返回 None、全套测试全绿"的事故（见
   `tests/test_modelhub_stream_contract.py`）。全局线守不住的地方要分项钉。

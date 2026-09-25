@@ -635,7 +635,11 @@ def register_agent(
     _admin_auth(_key_from_header(authorization, x_api_key))
     default_role = (req.default_role or "").strip()
     if default_role:
-        get_registry().get_role(default_role)  # 不存在 → 422
+        try:
+            get_registry().get_role(default_role)
+        except ConfigError as e:
+            # 注册表那句"未知角色：X。可用角色：…"正是运维要看的话，别让它变成 500
+            raise HTTPException(status_code=422, detail=str(e)) from e
     agent = get_agent_store().register(
         req.name,
         framework=req.framework,
@@ -811,10 +815,13 @@ def list_roles(
         _chat_auth(authorization, x_api_key)
     except HTTPException:
         _admin_auth(_key_from_header(authorization, x_api_key))
-    registry = get_registry()
+    registry: Any
     try:
+        registry = get_registry()
         names = registry.role_names()
     except ConfigError as e:
+        # 构造注册表本身就会抛（角色文件不可读/形状不对）—— 只把 role_names() 包进
+        # try 的话这句话到不了客户端，503 也就白写
         raise HTTPException(status_code=503, detail=str(e)) from e
     return {"roles": names, "note": "角色系统提示词固定在 config/roles.json，模型切换不影响"}
 

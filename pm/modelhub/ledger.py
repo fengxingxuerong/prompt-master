@@ -126,10 +126,10 @@ def query_ledger(
     path = ledger_path()
     if not path.exists():
         return []
-    rows: list[dict[str, Any]] = []
+    rows: list[tuple[int, dict[str, Any]]] = []
     with _LEDGER_LOCK:
         text = path.read_text(encoding="utf-8", errors="replace")
-    for line in text.splitlines():
+    for pos, line in enumerate(text.splitlines()):
         line = line.strip()
         if not line:
             continue
@@ -150,9 +150,12 @@ def query_ledger(
             continue
         if until and ts > until:
             continue
-        rows.append(row)
-    rows.sort(key=lambda r: r.get("ts") or "", reverse=True)
-    return rows[: max(1, int(limit))]
+        rows.append((pos, row))
+    # 毫秒精度会撞：一次调用可以连着写多条事件（call + switch 同一毫秒），
+    # 只按 ts 排就会在并列时退回"文件顺序=最旧在前"，与"返回最近 limit 条"相反。
+    # 并列时用写入顺序倒排 ⇒ 同毫秒内后写的也在前面。
+    rows.sort(key=lambda item: (item[1].get("ts") or "", item[0]), reverse=True)
+    return [row for _pos, row in rows[: max(1, int(limit))]]
 
 
 def ledger_stats() -> dict[str, Any]:
