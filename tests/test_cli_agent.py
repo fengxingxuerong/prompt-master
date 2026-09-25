@@ -1010,3 +1010,106 @@ def test_calibrate_real_fingerprints_are_populated(monkeypatch: pytest.MonkeyPat
         "evaluator", [{"id": "a", "human_score": 5}], "checklist"
     )
     assert rubric2 != rubric and len(rubric2) == 10
+
+
+def test_form_round_trip_survives_commas_and_quotes(tmp_path: Path) -> None:
+    """打分表的上下文列里全是逗号/引号/换行（机械线索本来就要举数字）——
+    列必须各归各位，两条分数都要落进正确的行。
+
+    写这条用例的直接原因：我用一次性探针做端到端演练时，用 split(',') 拼 CSV，
+    结果第二行的分数被塞进了错误的列，回填只写了 1 条，而工具的 csv 解析正确地
+    把那条"没填"的行跳过了 —— 探针的错被伪装成工具的行为。所以这条性质要有用例，
+    不该靠一次性脚本。
+    """
+    import csv
+
+    samples = tmp_path / "cand.json"
+    samples.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "h-c1",
+                    "band": "7.0-7.9",
+                    "original_task": '需求里有"逗号, 冒号"和换行',
+                    "test_output": "输出里 6 个数字无来源：['79.3', '20.7']",
+                    "human_score": None,
+                    "confirmed": False,
+                    "note": '命中线索：含引号 "大概"',
+                    "provenance": {"judge_score": 7.6, "target_model": "glm-5.2"},
+                },
+                {
+                    "id": "h-c2",
+                    "band": "<6.0",
+                    "original_task": "另一个, 带逗号的任务",
+                    "test_output": "正文",
+                    "human_score": None,
+                    "confirmed": False,
+                    "note": "无线索",
+                    "provenance": {"judge_score": 4.83, "target_model": "glm-5.2"},
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    form = tmp_path / "form.csv"
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--make-form", str(form)]) == 0
+    )
+    rows = _form_rows(form)
+    assert len(rows) == 2 and rows[0]["human_score"] == ""
+    # 上下文列原样可读（被引号包住而不是被拆开）：线索在机械线索、数字在输出摘要
+    assert "79.3" in rows[0]["输出摘要"] and "大概" in rows[0]["机械线索"]
+    assert "逗号" in rows[0]["原始需求"] and '"' in rows[0]["原始需求"]
+
+    with form.open(encoding="utf-8-sig", newline="") as fh:
+        data = list(csv.DictReader(fh))
+    for row in data:
+        row["human_score"] = "6.5" if row["id"] == "h-c1" else "3.5"
+    _write_form(form, data)  # 用 csv 写而不是手拼字符串：这正是探针做错的地方
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == 0
+    )
+
+    after = {d["id"]: d for d in json.loads(samples.read_text(encoding="utf-8")) if "id" in d}
+    assert after["h-c1"]["human_score"] == 6.5 and after["h-c2"]["human_score"] == 3.5
+    assert after["h-c1"]["confirmed"] is True and after["h-c2"]["confirmed"] is True
+    assert after["h-c1"]["original_task"] == '需求里有"逗号, 冒号"和换行', "回填不许改上下文字段"
+    assert after["h-c1"]["note"] == '命中线索：含引号 "大概"'
+
+    # 已填完再生成一次表：分数要显示出来（幂等，不丢分）
+    form2 = tmp_path / "form2.csv"
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--make-form", str(form2)])
+        == 0
+    )
+    again = _form_rows(form2)
+    assert [r["human_score"] for r in again] == ["6.5", "3.5"]
+
+
+def test_shipped_score_form_is_in_sync_with_the_candidates_file() -> None:
+    """仓库里那份待填的  必须与锚点文件同源。
+
+    这条守的是**只有他能做的事**的前置条件：他要照着这张表填 34 个人工分。
+    如果哪天重新采集/改写了 candidates，而表没重新生成，他填的就是一张过期表 ——
+    轻则 id 对不上回填失败，重则分数落到了另一条锚点上（那比不填更坏）。
+    已确认条目（candidates 里有分数的）必须在表里显示同一个分数，防止"填过没回填"和
+    "表过期"这两种状态被混成一谈。
+    """
+    cands = json.loads(
+        (ROOT / "judge_calibration" / "samples.candidates.json").read_text(encoding="utf-8")
+    )
+    items = [c for c in cands if isinstance(c, dict) and c.get("id")]
+    pend_ids = [str(c["id"]) for c in items if c.get("confirmed") is False]
+    scored = {str(c["id"]): c.get("human_score") for c in items if c.get("human_score") is not None}
+
+    form = _form_rows(ROOT / "judge_calibration" / "score_form.csv")
+    assert [r["id"] for r in form] == pend_ids, "打分表与候选文件不同源：重新跑 --make-form"
+    assert len(form) == 34, f"待确认候选是 34 条，表里 {len(form)} 条"
+    for r in form:
+        if r["id"] in scored:
+            assert float(r["human_score"]) == float(scored[r["id"]]), (
+                f"{r['id']} 表里与锚点文件分数不一致"
+            )
+        assert r["原始需求"].strip(), f"{r['id']} 没有原始需求，人工没法判"
