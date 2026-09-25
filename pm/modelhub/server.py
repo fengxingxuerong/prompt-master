@@ -452,10 +452,30 @@ def _stream_response(
             },
         )
 
+    def _frame_content_chars(chunk: bytes | str) -> int:
+        """数一帧 SSE 里客户端会看到的正文字符数（纯记账用）。
+
+        单独成函数是因为这里原来有个真缺陷：`yield first` 发生在计数循环之前，
+        于是**第一帧的正文永远不计** —— 短回答（实测"网关连通"四个字一帧到达）
+        在台账里就是 `content_chars=None`，/v1/usage 的 `content_chars_sum` 跟着长期偏 0。
+        """
+        try:
+            if isinstance(chunk, str):
+                return 0
+            text = chunk.decode("utf-8", errors="replace")
+            if not text.startswith("data:") or "[DONE]" in text:
+                return 0
+            obj = json.loads(text[5:].strip())
+        except Exception:  # noqa: BLE001 - 记账解析失败绝不影响转发
+            return 0
+        return sum(
+            len((ch.get("delta") or {}).get("content") or "") for ch in obj.get("choices") or []
+        )
+
     def sse_gen() -> Iterator[bytes]:
-        yield first
         ok = True
-        content_chars = 0
+        content_chars = _frame_content_chars(first)
+        yield first
         err_in_stream: str | None = None
         # D-L2 心跳保活：推理久/上游慢时，15s 无数据会触发中间层读超时断流。
         # 泵线程把上游 chunk 推进队列；主循环 15s 取不到数据就发 SSE 注释行
@@ -498,15 +518,7 @@ def _stream_response(
                     if chunk.startswith("ERR::"):
                         raise RuntimeError(chunk[5:])
                     continue
-                try:
-                    text = chunk.decode("utf-8", errors="replace")
-                    if text.startswith("data:") and "[DONE]" not in text:
-                        obj = json.loads(text[5:].strip())
-                        for ch in obj.get("choices") or []:
-                            piece = (ch.get("delta") or {}).get("content") or ""
-                            content_chars += len(piece)
-                except Exception:  # noqa: BLE001
-                    pass
+                content_chars += _frame_content_chars(chunk)
                 yield chunk
         except Exception as e:  # noqa: BLE001
             ok = False

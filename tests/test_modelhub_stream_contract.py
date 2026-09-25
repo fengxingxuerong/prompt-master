@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -230,3 +231,64 @@ def test_request_id_header_survives(monkeypatch: pytest.MonkeyPatch) -> None:
     resp, _seen = _call(monkeypatch, _FakeHub([_entry()]), upstream)
     rid = resp.headers.get("X-Modelhub-Request-Id")
     assert rid and len(rid) >= 8, f"响应头缺少可对账的 request_id：{resp.headers}"
+    assert _frames(resp)  # 必须真的消费完，台账是在流收尾时写的
+
+
+def test_one_stream_request_writes_exactly_one_ledger_row_with_the_same_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """一次流式请求 = 台账里恰好一行，且它的 request_id 就是响应头那个。
+
+    为什么单独钉：2026-09-25 用浏览器点控制台时看到过**两行** ts 相差 6ms、
+    `latency_ms` 完全相同的 call 事件，而 request_id 不同。当时无法判断是
+    "浏览器发了两次"还是"一次请求写了两行" —— 而 /v1/usage 的总数、成功率、
+    平均耗时全建立在这张表上，多写一行就是把调用数虚报一次。
+    所以这里在进程内把它钉死：一次 `_stream_response` 走完全程 ⇒ 恰好一行、id 对得上。
+    """
+    log = tmp_path / "ledger.jsonl"
+    monkeypatch.setenv("PMH_LEDGER_PATH", str(log))
+
+    def upstream() -> Iterator[bytes]:
+        yield b'data: {"choices":[{"delta":{"content":"\xe4\xbd\xa0"}}]}\n\n'
+        yield b'data: {"choices":[{"delta":{"content":"\xe5\xa5\xbd"}}]}\n\n'
+        yield b"data: [DONE]\n\n"
+
+    resp, _seen = _call(monkeypatch, _FakeHub([_entry()]), upstream)
+    rid = resp.headers.get("X-Modelhub-Request-Id")
+    _frames(resp)
+    rows = [
+        json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    calls = [r for r in rows if r.get("type") == "call"]
+    assert len(calls) == 1, (
+        f"一次请求写了 {len(calls)} 行 call 事件：{[c['request_id'] for c in calls]}"
+    )
+    assert calls[0]["request_id"] == rid, "台账 id 与响应头不一致 ⇒ 拿头里的 id 查不到这次调用"
+    assert calls[0]["success"] is True and calls[0]["model"] == "stub-model"
+    # 两帧都要计入台账：第一帧原来是 `yield first` 直接发出、不进计数循环，
+    # 所以"正文全在第一帧"的短回答在台账里是 content_chars=None
+    assert calls[0]["content_chars"] == 2, calls[0]
+    assert calls[0]["latency_ms"] >= 0
+
+
+def test_interrupted_stream_still_writes_one_row_and_marks_it_failed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """上游断流时那一条也不能丢：运维要能在台账里看到"这次是中断的"，而不是查无此调用。"""
+    log = tmp_path / "ledger.jsonl"
+    monkeypatch.setenv("PMH_LEDGER_PATH", str(log))
+
+    def upstream() -> Iterator[bytes]:
+        yield b'data: {"choices":[{"delta":{"content":"\xe5\x8d\x8a\xe6\xae\xb5"}}]}\n\n'
+        raise RuntimeError("上游连接被重置")
+
+    resp, _seen = _call(monkeypatch, _FakeHub([_entry()]), upstream)
+    body = _frames(resp)
+    assert any(b"stream interrupted" in chunk for chunk in body), body
+    rows = [
+        json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    calls = [r for r in rows if r.get("type") == "call"]
+    assert len(calls) == 1, f"中断路径写了 {len(calls)} 行"
+    assert calls[0]["success"] is False and calls[0]["http_status"] is None
+    assert "上游连接被重置" in (calls[0]["error_msg"] or "")

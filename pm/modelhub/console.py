@@ -114,23 +114,40 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
 });
 function hdr() { return ADMIN ? { "X-API-Key": ADMIN, "Content-Type": "application/json" } : { "Content-Type": "application/json" }; }
 function note(sel, text, isErr) { const e = $(sel); e.textContent = text; e.className = "msg show" + (isErr ? " err" : ""); }
+// 台账/密钥表里的每个字段都来自外部（上游错误文本、agent 名称、模型名）。
+// 直接拼进 innerHTML 就等于把"任何一次上游报错"变成控制台里的可执行内容。
+const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+function esc(v) {
+  if (v === null || v === undefined) return "";
+  return String(v).replace(/[&<>"']/g, c => ESC_MAP[c]);
+}
+// 行内按钮改事件委托：原来写的是 onclick="delKey('${k.key}')"，
+// 密钥/agent 名里出现单引号就会把属性撕开（既是崩溃面也是注入面）。
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const key = b.getAttribute("data-key"); if (!key) return;
+  if (b.getAttribute("data-act") === "toggle") toggleKey(key, b.getAttribute("data-on") !== "1");
+  if (b.getAttribute("data-act") === "del") delKey(key);
+});
 async function loadPool() {
   try {
     const s = await (await fetch("/v1/pool/status", { headers: hdr() })).json();
     const models = s.models || [];
     const openCnt = models.filter(m => m.circuit !== "closed").length;
     $("#poolMetrics").innerHTML =
-      `<div class="cell"><div class="n">${models.length}</div><div class="l">池内模型</div></div>` +
-      `<div class="cell"><div class="n ${openCnt ? "bad" : "ok"}">${models.filter(m => m.enabled).length}</div><div class="l">启用</div></div>` +
-      `<div class="cell"><div class="n ${openCnt ? "bad" : "ok"}">${openCnt}</div><div class="l">熔断冷却中</div></div>` +
-      `<div class="cell"><div class="n">${s.break_threshold}</div><div class="l">熔断阈值（连败）</div></div>`;
+      `<div class="cell"><div class="n">${esc(models.length)}</div><div class="l">池内模型</div></div>` +
+      `<div class="cell"><div class="n ${openCnt ? "bad" : "ok"}">${esc(models.filter(m => m.enabled).length)}</div><div class="l">启用</div></div>` +
+      `<div class="cell"><div class="n ${openCnt ? "bad" : "ok"}">${esc(openCnt)}</div><div class="l">熔断冷却中</div></div>` +
+      `<div class="cell"><div class="n">${esc(s.break_threshold)}</div><div class="l">熔断阈值（连败）</div></div>`;
     $("#poolBody").innerHTML = models.map(m =>
-      `<tr><td class="mono">${m.name}</td><td>${m.priority}</td>` +
-      `<td class="${m.circuit === "closed" ? "ok" : "bad"}">${m.circuit}</td><td>${m.consecutive_failures}</td>` +
-      `<td class="mono" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.last_error || "—"}</td></tr>`).join("");
+      `<tr><td class="mono">${esc(m.name)}</td><td>${esc(m.priority)}</td>` +
+      `<td class="${m.circuit === "closed" ? "ok" : "bad"}">${esc(m.circuit)}</td><td>${esc(m.consecutive_failures)}</td>` +
+      `<td class="mono" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.last_error || "—")}</td></tr>`).join("");
     const mt = await (await fetch("/v1/metrics", { headers: hdr() })).json();
     $("#metricsOut").textContent = JSON.stringify(mt, null, 1);
-    $("#ver").textContent = "v1.1.0";
+    // 版本从 /api/health 取：这里写死一个字面量，网关升到 1.2.0 后控制台还会说 1.1.0
+    const h = await (await fetch("/api/health")).json();
+    $("#ver").textContent = "v" + esc(h.version || "?");
   } catch (e) { note("#cNote", "加载池状态失败：" + e, true); }
 }
 async function loadLedger() {
@@ -139,23 +156,27 @@ async function loadLedger() {
   try {
     const d = await (await fetch("/v1/ledger?" + q, { headers: hdr() })).json();
     $("#ledgerBody").innerHTML = (d.rows || []).map(r =>
-      `<tr><td class="mono">${(r.ts || "").replace("T", " ").slice(0, 19)}</td>` +
-      `<td>${r.type}</td><td class="mono">${r.model || r.to_model || "—"}</td>` +
+      `<tr><td class="mono">${esc((r.ts || "").replace("T", " ").slice(0, 19))}</td>` +
+      `<td>${esc(r.type)}</td><td class="mono">${esc(r.model || r.to_model || "—")}</td>` +
       `<td>${r.type === "switch" ? '<span class="off">切换</span>' : (r.success ? '<span class="ok">成功</span>' : '<span class="bad">失败</span>')}</td>` +
-      `<td>${r.latency_ms != null ? r.latency_ms + "ms" : "—"}</td>` +
-      `<td>${r.failovers != null ? r.failovers : (r.failover_index != null ? "#" + r.failover_index : "—")}</td>` +
-      `<td class="mono">${r.agent || "—"}</td>` +
-      `<td class="mono" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.error_msg || r.reason || "—"}</td></tr>`).join("");
-  } catch (e) { alert("台账加载失败：" + e); }
+      `<td>${r.latency_ms != null ? esc(r.latency_ms) + "ms" : "—"}</td>` +
+      `<td>${r.failovers != null ? esc(r.failovers) : (r.failover_index != null ? "#" + esc(r.failover_index) : "—")}</td>` +
+      `<td class="mono">${esc(r.agent || "—")}</td>` +
+      `<td class="mono" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.error_msg || r.reason || "—")}</td></tr>`).join("")
+      || '<tr><td colspan="8" class="off">暂无匹配记录（换个筛选条件；台账为空通常表示网关还没被调用过）</td></tr>';
+  } catch (e) {
+    // 原来这里 alert(...)：阻塞、而且"0 条"与"读不到"在画面上长得一样
+    $("#ledgerBody").innerHTML = `<tr><td colspan="8" class="bad">台账加载失败：${esc(e)}</td></tr>`;
+  }
 }
 async function loadKeys() {
   try {
     const d = await (await fetch("/v1/keys", { headers: hdr() })).json();
     $("#keysBody").innerHTML = (d.keys || []).map(k =>
-      `<tr><td class="mono">${k.key.slice(0, 10)}…${k.key.slice(-4)}</td><td class="mono">${k.agent}</td>` +
-      `<td class="${k.enabled ? "ok" : "off"}">${k.enabled ? "启用" : "停用"}</td><td class="mono">${(k.issued_at || "").slice(0, 19)}</td>` +
-      `<td><button class="ghost" onclick="toggleKey('${k.key}',${!k.enabled})">${k.enabled ? "停用" : "启用"}</button> ` +
-      `<button class="ghost" onclick="delKey('${k.key}')">删除</button></td></tr>`).join("") || '<tr><td colspan="5" class="off">暂无密钥，签发后智能体可用 vk-… 调用对话接口</td></tr>';
+      `<tr><td class="mono">${esc(k.key.slice(0, 10))}…${esc(k.key.slice(-4))}</td><td class="mono">${esc(k.agent)}</td>` +
+      `<td class="${k.enabled ? "ok" : "off"}">${k.enabled ? "启用" : "停用"}</td><td class="mono">${esc((k.issued_at || "").slice(0, 19))}</td>` +
+      `<td><button class="ghost" data-act="toggle" data-on="${k.enabled ? "1" : "0"}" data-key="${esc(k.key)}">${k.enabled ? "停用" : "启用"}</button> ` +
+      `<button class="ghost" data-act="del" data-key="${esc(k.key)}">删除</button></td></tr>`).join("") || '<tr><td colspan="5" class="off">暂无密钥，签发后智能体可用 vk-… 调用对话接口</td></tr>';
   } catch (e) { note("#kNote", "密钥加载失败（需管理员口令？）：" + e, true); }
 }
 async function toggleKey(key, enable) {
@@ -174,6 +195,11 @@ $("#kIssue").onclick = async () => {
 };
 $("#cSend").onclick = doChat(false);
 $("#cStream").onclick = doChat(true);
+// 台账面板的两个下拉原来只是"被读一次"，改筛选后画面仍是上一次的结果
+// —— 读着不匹配的数据下结论比空表更坏；刷新按钮原来根本没接线（按了没反应）。
+$("#lLoad").onclick = loadLedger;
+$("#lType").onchange = loadLedger;
+$("#lSucc").onchange = loadLedger;
 $("#cAdmin").addEventListener("change", e => { ADMIN = e.target.value.trim(); });
 function doChat(stream) {
   return async () => {
@@ -182,24 +208,46 @@ function doChat(stream) {
     if ($("#cRole").value.trim()) body.role = $("#cRole").value.trim();
     if ($("#cModel").value.trim()) body.model = $("#cModel").value.trim();
     const t0 = performance.now();
+    const box = $("#cOut");
+    // 上游首字节可能在秒级到几十秒级波动；这期间画面必须说明
+    // "还在等、已经等了多久、有没有开始收字节" —— 否则运维只能猜"网关是不是挂了"，
+    // 而猜的做法通常是刷新页面或重启网关，把那条其实在跑的请求一起丢掉。
+    // 另外客户端计时本身不可信：本机实测同一次调用，后台标签页的 performance.now()
+    // 报 68767ms，而网关台账记的是 3160ms（隐藏标签页会节流）⇒ 所以"首字节"单独显示。
+    let first = null;
+    box.textContent = "请求中… 0s（还没收到首个字节）";
+    const tick = setInterval(() => {
+      const s = Math.round((performance.now() - t0) / 1000);
+      box.textContent = first === null
+        ? `请求中… ${s}s（还没收到首个字节）`
+        : `接收中… ${s}s（首字节 ${Math.round(first - t0)}ms）`;
+    }, 500);
     try {
       if (!stream) {
         const r = await fetch("/v1/chat/completions", { method: "POST", headers: hdr(), body: JSON.stringify(body) });
+        first = performance.now();
         const d = await r.json();
+        const cost = Math.round(performance.now() - t0);
         if (r.ok) {
           const mh = d.modelhub || {};
-          $("#cOut").textContent = d.choices[0].message.content +
+          box.textContent = d.choices[0].message.content +
             `\n\n--- model=${d.model} failovers=${mh.failovers} latency=${mh.latency_ms}ms rid=${mh.request_id}` +
-            `\n总耗时 ${Math.round(performance.now() - t0)}ms`;
+            `\n总耗时 ${cost}ms（网关内部 latency=${mh.latency_ms}ms，差值即排队/序列化等客户端看不见的部分）`;
           note("#cNote", "成功");
-        } else { $("#cOut").textContent = JSON.stringify(d, null, 1); note("#cNote", "失败 HTTP " + r.status, true); }
+        } else { box.textContent = JSON.stringify(d, null, 1); note("#cNote", `失败 HTTP ${esc(r.status)}，耗时 ${cost}ms`, true); }
       } else {
         const r = await fetch("/v1/chat/completions", { method: "POST", headers: hdr(), body: JSON.stringify(body) });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); $("#cOut").textContent = JSON.stringify(d, null, 1); note("#cNote", "失败 HTTP " + r.status, true); btn.disabled = false; return; }
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          box.textContent = JSON.stringify(d, null, 1);
+          note("#cNote", "失败 HTTP " + r.status, true);
+          return;
+        }
         const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "", parts = [], model = "?", done = false;
-        $("#cOut").textContent = "";
+        box.textContent = "";
         while (true) {
           const { done: rd, value } = await reader.read(); if (rd) break;
+          if (first === null) first = performance.now();
           buf += dec.decode(value, { stream: true });
           const lines = buf.split("\n\n"); buf = lines.pop();
           for (const ln of lines) {
@@ -210,13 +258,14 @@ function doChat(stream) {
               model = o.model || model;
               for (const ch of o.choices || []) { const p = (ch.delta || {}).content || ""; if (p) parts.push(p); } } catch (e) {}
           }
-          $("#cOut").textContent = parts.join("") + (done ? "" : " ▌");
+          box.textContent = parts.join("") + (done ? "" : " ▌");
         }
-        $("#cOut").textContent = parts.join("") + `\n\n--- [流式] model=${model} 总耗时 ${Math.round(performance.now() - t0)}ms`;
+        box.textContent = parts.join("") +
+          `\n\n--- [流式] model=${model} 首字节 ${first === null ? "未收到" : Math.round(first - t0) + "ms"} / 总耗时 ${Math.round(performance.now() - t0)}ms`;
         note("#cNote", "流式完成");
       }
     } catch (e) { note("#cNote", "请求异常：" + e, true); }
-    btn.disabled = false;
+    finally { clearInterval(tick); btn.disabled = false; }
   };
 }
 loadPool();
