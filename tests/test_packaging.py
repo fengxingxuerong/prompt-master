@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -225,13 +227,17 @@ def test_requires_python_covers_ci_matrix():
     )
 
 
-def test_coverage_floors_agree_across_pyproject_ci_and_docs() -> None:
-    """覆盖率地板有三处抄件：pyproject（全局线）、ci.yml（modelhub 分项线）、
-    `docs/operations.md` 的门禁块与表格。数字一旦漂开，"照文档跑一遍门禁"就会得到
-    一条比 CI 松得多的绿 —— 那比没有门禁更坏。
+def test_coverage_floors_agree_across_all_copies() -> None:
+    """覆盖率地板的抄件必须同数：pyproject（全局线）、ci.yml（modelhub 分项线）、
+    `docs/operations.md` 的门禁块与表格、根 README §五。数字一旦漂开，"照文档跑一遍门禁"
+    就会得到一条比 CI 松得多的绿 —— 那比没有门禁更坏。
 
     真实漂移（2026-09-25 复测时发现）：CI 已经是 `--fail-under=56`，
     而文档的门禁块还写着 `--fail-under=32`（差 24 个点，且没人会红）。
+
+    同日第二轮发现的另一半：**上面这三处当时都在断言里，唯独根 README 不在**。
+    README 是访客第一眼读的那份，它写着"地板 87 / 分项线 56"，真闸已经是 92 / 82 ——
+    断言绿着、最容易被照抄的文件漂着。所以这次把 README 纳进来。
     """
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     docs = (ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
@@ -260,4 +266,77 @@ def test_coverage_floors_agree_across_pyproject_ci_and_docs() -> None:
     )
     assert row_mhub and int(row_mhub.group(1)) == floor_mhub, (
         f"文档表格的 modelhub 地板列（{row_mhub and row_mhub.group(1)}）与 CI 的 {floor_mhub} 不一致"
+    )
+
+    # 根 README 是访客第一眼照抄的那份，所以它也算配置抄件。README 里"实测 x%"是**快照**
+    # （允许比现状旧，只要在下面这行不漂的前提下重测时顺手改），"（地板 N）"才是抄件。
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme_floors = re.findall(r"（地板 (\d+)）", readme)
+    assert sorted(readme_floors) == sorted([str(floor_all), str(floor_mhub)]), (
+        f"README 的地板抄件与真闸不一致：README {sorted(readme_floors)} "
+        f"vs pyproject fail_under={floor_all} / CI 分项线 {floor_mhub}"
+        "（两条都要有：少一条会静默放过一整个文件的漂移）"
+    )
+
+
+def test_test_count_copies_match_the_live_collection() -> None:
+    """ "多少条用例"这句话在三个文件里被抄了三遍，而它是那种**只会变、没人回头改**的数。
+
+    2026-09-25 深夜实测：README 写 728+、docs/operations.md 写 844、`.pre-commit-config.yaml`
+    写 844+，而活体收集是 886 条。所以这里不抄数，去问 pytest 本身。
+
+    用 subprocess 打 `--collect-only`：它不执行用例（不会递归跑测试），实测约 3 秒，
+    换来的是"文档说一套、门禁做另一套"这一整类漂移被钉住。
+
+    ⚠️ **必须先认退出码，数字本身会骗人**：植入一条 import 就崩的用例后实测，pytest 仍然打印
+    `886 tests collected, 1 error` 而 rc=2 —— 也就是说"读不到计数"这个假设是错的，
+    只读那行会把"有个模块根本收集不动"读成"文档漂了 6 条"。（本机拿错解释器时是 39 条收集错误。）
+    """
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/",
+            "--collect-only",
+            "-q",
+            "-o",
+            "addopts=",  # 别把 pyproject 的 -q 叠上来，数法要固定
+            "-p",
+            "no:cacheprovider",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert out.returncode == 0, (
+        f"收集本身就坏了（rc={out.returncode}），先去修套件，别急着改文档里的数：\n"
+        f"{(out.stdout or '')[-600:]}\n{(out.stderr or '')[-300:]}"
+    )
+    m = re.search(r"(\d+) tests? collected", out.stdout or "")
+    assert m, f"rc=0 却没有计数行，是数法变了（不是文档漂移）：\n{(out.stdout or '')[-600:]}"
+    live = int(m.group(1))
+
+    copies = {
+        "README.md": re.search(
+            r"CI 门禁；(\d+)\+? 条", (ROOT / "README.md").read_text(encoding="utf-8")
+        ),
+        "docs/operations.md": re.search(
+            r"`pytest tests/ -q`（(\d+) 项",
+            (ROOT / "docs" / "operations.md").read_text(encoding="utf-8"),
+        ),
+        ".pre-commit-config.yaml": re.search(
+            r"(\d+)\+? 条用例", (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+        ),
+    }
+    stale = {
+        k: (v.group(1) if v else "读不到")
+        for k, v in copies.items()
+        if v is None or int(v.group(1)) != live
+    }
+    assert not stale, (
+        f"活体收集是 {live} 条，但这些文件里的抄件不是：{stale}。"
+        "加了用例就顺手把这三处一起改（它们是同一句话的三份复印件）。"
     )

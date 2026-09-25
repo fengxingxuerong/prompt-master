@@ -45,11 +45,12 @@ jobs:
           PM_API_KEY: sk-ci-has-no-real-key
         run: python -m pytest tests/ -q --cov=pm --cov-report=term-missing
       - name: Coverage ratchet —— pm/modelhub/* 单独一条更紧的线
-        # 全量线会把结构问题抹平：这块网关补测前只有 33.5%，2026-09-25 复测 69.8%
-        # （streaming 89、pool 61、vkeys 85、ledger 94、agents 0→100），而恰恰是它出过
-        # "流式通道没有 return、stream=true 返回 None、全套测试全绿"的事故。
-        # 全局线守不住的地方，就用分项线钉住不许再掉。地板取实测 87.1% 下方留 5 点余量
-        # —— 缺口集中在上游调用链：pool.py 61% 与 server.py 的 361-444，补到那儿之前别抬这条线。
+        # 全量线会把结构问题抹平，而恰恰是这块网关出过"流式通道没有 return、stream=true
+        # 返回 None、全套测试全绿"的事故（见 tests/test_modelhub_stream_contract.py）——
+        # 全局线守不住的地方就用分项线钉住不许再掉。地板取实测下方留 5 点余量。
+        # ⚠️ 逐轮实测值只在 docs/operations.md 的表格里维护，别抄进这段注释：
+        # 之前这里把两轮的数字并排写着（复测①的分项值与复测③的地板依据），谁也看不出是两个时点。
+        # 剩余缺口集中在上游调用体（server.py 的对话主路由与 pool.py 真 urllib 那段），补到那儿之前别抬这条线。
         env:
           PM_API_KEY: sk-ci-has-no-real-key
         run: python -m coverage report --include="*/modelhub/*" --fail-under=82

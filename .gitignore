@@ -18,6 +18,8 @@ __pycache__/
 logs/
 *.db
 *.log
+# watchdog 的"这条我已经提醒过"标记：纯运行态，入库会让 git status 长期脏
+releases/suite/.stale_notified.json
 
 # 一次性终端输出别再落回仓库根（历史证据已归档到 releases/archive/coverage-notes-20260925/）
 /.cov*.txt

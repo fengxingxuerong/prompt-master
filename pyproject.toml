@@ -69,11 +69,12 @@ addopts = "-q"
 source = ["pm"]
 
 [tool.coverage.report]
-# 地板值来自实测，每次抬动都要重新量（跑法见 docs/operations.md 的门禁块）：
-# 接入门禁前全量 84% → 补 modelhub 测试后 88.5% → 同日再复测（补运维路由用例后）**93.49%**（全量 rc=0，补完切换链用例）。
-# 拆开看才是重点：`pm/` 去掉网关 94.9%，而 pm/modelhub/* 从 33.5% 补到 **87.1%**
-# （streaming 89、pool 61→85、vkeys 92、ledger 97、agents 0→100）。这条线的含义是"别再往下掉"，
-# 不是质量目标 —— 分项那条更紧的闸见 ci.yml。
+# 地板值来自实测，每次抬动都要重新量。**逐轮实测数字只在 `docs/operations.md` 的表格里维护**：
+# 这里再抄一份就会变成第四个没人管的口径 —— 2026-09-25 就发生过 ci.yml 的注释里把两轮实测
+# 并排写、读者以为是同一个数。这条线的含义是"别再往下掉"，不是质量目标；
+# 分项那条更紧的闸见 ci.yml。
+# 改这个值要连着改 ci.yml 的分项线、文档表格与根 README —— 抄件同数由
+# `tests/test_packaging.py::test_coverage_floors_agree_across_all_copies` 钉住。
 # 为什么现在才加：以前仓库里根本没有覆盖率门禁，文档写的"94%"是手抄快照
 # —— 2026-09-25 实测 84%，虚高 10 个点。
 fail_under = 92

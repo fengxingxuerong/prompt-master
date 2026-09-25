@@ -51,10 +51,14 @@ MCP 接入（9 个工具，stdio）：`python -m pm.mcp_server`。计算类工�
 
 ## 三、这个产品对自己的结论有多硬（先读这节再用它给的分数）
 
-- **评委这把尺子尚未收敛**。实测（2026-09-24，n=11 锚点，真实端点）：与人工分 MAE 0.65、
-  Pearson r 0.954，看着漂亮；但**过线判定一致率只有 0.818**，同一输入连打 3 次的极差最大 2.2
-  （阈值 2.0 已越）。所以"8.0 分"这类单点数字请当方向，别当结论；差 0.3 的两次比较无意义。
-  口径与实测记录见 `docs/evaluation.md`，账本在 `logs/judge_calibration_history.json`。
+- **评委这把尺子尚未收敛**。最新一轮真实端点实测（`logs/judge_calibration_history.json`
+  里 `mode=impression` 的最后一条，2026-09-25，n=18 锚点）：与人工分 MAE 0.65、Pearson r 0.955
+  看着漂亮，但**过线判定一致率只有 0.722、κ 0.444**，同一输入连打 3 次的极差均值 0.30、最大 1.25。
+  ⚠️ 更要紧的是**这些读数本身不稳**：账本里近四轮 impression 记录（09-24 晚~09-25 凌晨）
+  一致率在 0.722~0.909、κ 在 0.444~0.814、复现极差最大在 0.5~2.25（判据阈值 2.0 有时越有时不到）之间摆
+  ⇒ 单次读数不能当"这把尺子的精度"。
+  所以"8.0 分"这类单点数字请当方向，别当结论；差 0.3 的两次比较无意义。
+  口径与逐轮记录见 `docs/evaluation.md`，账本在 `logs/judge_calibration_history.json`。
 - **判定式评分协议（`PM_SCORING_MODE=checklist`）默认关闭，且已被实测否证**。它把五个整数的
   填数权从评委手里拿走一半（评委只答二值判定+证据，分数由代码算）。同一批锚点、评委预算
   抬到 24000 后重测：**17 条配对上 MAE 0.58 → 1.79、bias +1.79，且 Δ 一条负数都没有**；
@@ -73,7 +77,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；728+ 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；886 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（samples.json 已确认 / samples.candidates.json 待人工分）
 case_templates/     可直接喂 --cases-file 的 5 份领域用例集
@@ -84,12 +88,17 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
 
 ## 五、已知边界（按会不会骗到你排序）
 
-1. **仪表未收敛**（见 §三）——产品输出的核心数字仍带 ±2 量级的自身抖动。
-2. **覆盖率有门禁了，但它是地板不是目标**：`pm/` 全量实测 88.5%（地板 87），
-   拆开看 `pm/` 去掉网关 ~96%、`pm/modelhub/*` **58.6%**（分项线 56；这块从 33.5% 补上来，
-   `streaming.py` 7%→89%、`pool.py` 23%→61%、`vkeys.py` 21%→85%）。
+1. **仪表未收敛**（见 §三）——产品输出的核心数字仍带 ±1~2 量级的自身抖动，
+   而这个"量级"本身也是逐轮摆动的读数，不是这把尺子的固定精度。
+2. **覆盖率有门禁了，但它是地板不是目标**（2026-09-25 深夜独占复测，全量 rc=0）：
+   `pm/` 全量实测 **93.49%**（地板 92），拆开看 `pm/` 去掉网关 95.6%、
+   `pm/modelhub/*` **87.1%**（地板 82）。这块从 33.5% 补上来：`agents.py` 0→100%、
+   `pool.py` 61%→85%、`vkeys.py` 21%→92%、`streaming.py` 7%→89%。剩下的缺口很集中在
+   `server.py` 361-444 与 `pool.py` 331-367，两段都要活上游才走得到。
    薄弱的那块恰好是出过"流式通道整条失效而测试全绿"事故的那块。
-   以前文档写的"94%"是手抄的、没有任何东西守着它。口径见 `docs/operations.md`。
+   以前文档写的"94%"是手抄的、没有任何东西守着它。逐轮实测表与口径见 `docs/operations.md`；
+   **上面两个"地板"是配置抄件，与 `pyproject.toml` / `ci.yml` / `docs/operations.md` 的同数关系由
+   `tests/test_packaging.py::test_coverage_floors_agree_across_all_copies` 钉住** —— 改地板要四处一起改。
 3. **多进程是显式前提，不是默认**：任务表默认进程内内存（`--workers > 1` 必须先设 `PM_TASK_DB`）、
    缓存默认 JSON 每进程一份、限流是进程内滑窗。单进程才成立的东西别横向复制。
 4. **版本号只有一个事实源**（2026-09-25 收口）：`pm/__init__.py:__version__` = 2.1.0，
