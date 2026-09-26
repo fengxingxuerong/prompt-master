@@ -59,7 +59,22 @@ $ErrorActionPreference = 'Stop'
 # 路径与编码
 # --------------------------------------------------------------------------
 if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent $PSScriptRoot }
-if (-not $PythonExe)   { $PythonExe = Join-Path $ProjectRoot '.venv\Scripts\python.exe' }
+if (-not $PythonExe) {
+    # 与 run_e2e_stub.sh 的 PY 探测同口径：优先 .venv，没有则回退 PATH 上的 python。
+    # CI（actions/setup-python + pip install）根本没有 .venv——首跑 4 job 里 Windows
+    # 独挂在"找不到解释器"就是这个缺口（Linux 靠 ci.yml 传 PY=python 绕过了它）。
+    $default = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+    if (Test-Path -LiteralPath $default) {
+        $PythonExe = $default
+    } else {
+        $cmd = Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $cmd) { $cmd = Get-Command python -ErrorAction SilentlyContinue | Select-Object -First 1 }
+        if (-not $cmd) {
+            throw "找不到解释器：既没有 $default，PATH 上也没有 python.exe（用 -PythonExe 显式指定）"
+        }
+        $PythonExe = $cmd.Source
+    }
+}
 if (-not $WorkDir)     { $WorkDir = Join-Path $env:TEMP 'pm_e2e_stub' }
 
 if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'run.py'))) {
