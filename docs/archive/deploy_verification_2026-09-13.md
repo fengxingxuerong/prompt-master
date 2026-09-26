@@ -1,6 +1,6 @@
 # 部署与浏览器运行时验证报告（2026-09-13）
 
-对 `docs/qa_report_2026-09-13.md` 两项遗留项（Dockerfile 构建验证、playwright 浏览器运行时校验）
+对 `docs/archive/qa_report_2026-09-13.md` 两项遗留项（Dockerfile 构建验证、playwright 浏览器运行时校验）
 的逐项处理结果。环境事实：**本机无 docker / podman**，**未安装 python playwright**，
 但存在 node `playwright-core@1.62.1` 与本地缓存的 chromium（`chromium-1234`）。
 
