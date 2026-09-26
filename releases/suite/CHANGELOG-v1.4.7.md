@@ -18,6 +18,7 @@
 ### 3. CI 首跑消红——两处「本机残留掩盖 CI 缺口」
 - **无 .env 池初始化炸**（1ecd88a）：CI 干净检出没有 `.env`，`/v1/usage` 触发池初始化解析 `${PM_API_KEY_*}` 抛 ConfigError，4 job 全红；本地全绿纯靠本机 `.env` 掩盖。修：`gateway` fixture 注入假值——涉事路由只读池状态与台账、零真实出网。
 - **ps1 e2e 不回退 PATH**（93e8c6e）：`run_e2e_stub.ps1` 只认 `.venv\Scripts\python.exe`，CI Windows runner 无 `.venv` 必挂（Linux 靠 ci.yml 显式传 `PY=python` 早已绕过）。修：与 sh 版探测同口径，`.venv` 不存在时回退 PATH 上的 python。
+- **进度可见性测试盲睡赌窄窗口**（c911245）：`test_progress_visible_while_running` 固定睡 1 秒后断言「clarify 已完成且任务仍在跑」——慢 runner 上 1 秒不够 clarify 跑完即红（9d3fd45 Windows job 偶挂，同期 Linux 三 job 全绿）。修：轮询等 `llm_calls >= 1` 再读进度快照，窗口不再依赖机器速度；即 2026-09-15 记录的已知 flaky 尾巴「time.sleep＋多线程 TaskManager 负载高时偶挂」的正式收口。
 - **验证方法**：干净 worktree（无 `.env`、无 `logs/`）先复现 CI 红、修复后全量 EXIT=0；隐藏 `.venv` + PATH 前置装好依赖的临时 venv，完整模拟 CI 场景跑通三通道（24/24×3、exit=0）。
 
 ## 回归证据
@@ -25,7 +26,7 @@
 | 项 | 结果 |
 |---|---|
 | 根目录全量 pytest | 890 全绿（v1.4.6 时 691 → 加固轮 +199），0 失败 0 跳过，本地与 CI 双口径 |
-| GitHub Actions | 4/4 job success（windows 11 步 + Linux×3 各 16 步），对 93e8c6e |
+| GitHub Actions | 4/4 job success（windows 11 步 + Linux×3 各 16 步），对 c911245（flaky 修复后全绿） |
 | ruff check / format / mypy | 零告警（本地与 CI 同钉版本口径） |
 | pre-commit | 四条钩子（ruff check / format / mypy strict / pytest 全量）提交期实测走通 |
 | 干净检出复现 | git worktree（无 .env / logs/）先复现两处 CI 红根因、修复后 EXIT=0 |
