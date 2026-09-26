@@ -16,10 +16,13 @@ __pycache__/
 
 # 运行产物（状态存档 / 报告 / 缓存 / 检查点）
 logs/
-*.db
 *.log
 # watchdog 的"这条我已经提醒过"标记：纯运行态，入库会让 git status 长期脏
 releases/suite/.stale_notified.json
+# watchdog 告警台账同理：append-only 运行态（2026-09-26 出索引）
+releases/suite/watchdog_log.jsonl
+# 本地手工备份目录：历史版本 git 里都有，双轨拷贝只制造噪音（2026-09-26 出索引）
+backups/
 # 跨进程写锁句柄（pm/modelhub 的 JSON 台账用）：运行态，不属于配置
 *.lock
 
@@ -39,8 +42,6 @@ e2e_report*.md
 e2e_*_report.md
 examples/sample_report.md
 .pytest_cache*
-coverage.xml
-htmlcov/
 
 # IDE / 系统
 .idea/
