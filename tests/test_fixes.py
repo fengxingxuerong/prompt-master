@@ -479,8 +479,17 @@ def test_progress_visible_while_running(tmp_path: Path, monkeypatch):
 
     tm = TaskManager(max_workers=1)
     rid = tm.submit("slow-run", task="t", n_test_cases=1, max_iterations=1)
-    time.sleep(1.0)  # 让 clarify 跑完，卡在 optimize
-    st = tm.get_status(rid)
+    # 不能盲睡固定 1 秒碰运气：CI 慢 runner 上 clarify 可能还没跑完（llm_calls=0
+    # 就断言红，Windows job 实测偶挂过）。gate 卡住的是 optimize 的 plain 通道，
+    # clarify 走结构化通道即时返回——轮询等到 llm_calls >= 1，即为"clarify 已
+    # 完成且任务仍卡在 optimize"的稳定窗口，之后再读进度快照。
+    deadline = time.monotonic() + 10
+    st = None
+    while time.monotonic() < deadline:
+        st = tm.get_status(rid)
+        if st is not None and st.get("llm_calls", 0) >= 1:
+            break
+        time.sleep(0.05)
     st2 = tm.get_status(rid)  # 连续第二次轮询：曾经在这里 TypeError（对已裁剪快照再 len()）
     gate.set()
     st_final = _wait_terminal(tm, rid)
