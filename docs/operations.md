@@ -90,7 +90,7 @@ CI（GitHub Actions）在 push / PR 时对 Python 3.11/3.12/3.13 跑以上全部
 `--no-verify` 是关掉门禁，不是"门禁慢"的解药。钩子的三条命令路径与 CI 逐条相等，
 由 `test_precommit_hooks_cover_the_same_scope_as_ci` 守着。）
 
-部署与浏览器运行时验证（2026-09-13 新增，报告见 `docs/deploy_verification_2026-09-13.md`）：
+部署与浏览器运行时验证（2026-09-13 新增，报告见 `docs/archive/deploy_verification_2026-09-13.md`）：
 ```bash
 # 无 docker 环境的替代验证：干净 venv 复刻 COPY → pip install . → 起服务 → healthcheck → 任务闭环
 PYTHON="<python3.11+>" bash examples/docker_step_sim.sh

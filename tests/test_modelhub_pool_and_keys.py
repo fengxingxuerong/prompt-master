@@ -331,7 +331,7 @@ def test_two_store_instances_in_one_process_do_not_lose_keys(isolated_data: Path
     """同进程两个 store 实例并发签发：一把都不能丢，也不许抛。
 
     修前实测（两实例各发 200 把）：`issued=396 / 盘上 169`，还有一路 worker 直接抛
-    `PermissionError(13, 另一个程序正在使用此文件)`。四个成因见 `docs/fix-log.md` P30。
+    `PermissionError(13, 另一个程序正在使用此文件)`。四个成因见 `docs/archive/fix-log.md` P30。
     这条**主要**盯的是"写前强制重读"：把它摘掉，3/3 红。
     共享路径锁与唯一 tmp 名是补完 —— 单独把它们换回旧写法，本机 3 轮都没复现丢失
     （强制重读已把窗口压到约 200µs），所以那两处不在这条的证据链里，别照着这个用例声称。

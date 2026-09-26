@@ -54,7 +54,7 @@
 
 | 提示词里的规则 | 实测依据 |
 |---|---|
-| 约束预算 ≤8 条（`prompts.py` OPTIMIZER 硬性规则 4 / `quality.py` `CONSTRAINT_LIMIT`） | `docs/e2e_iteration_log_2026-09-13.md` R1-b：12 条约束的交付物被评委点名「模型漏执行」，constraint_compliance 8.38→7.0、task_completion 9.25→7.75 |
+| 约束预算 ≤8 条（`prompts.py` OPTIMIZER 硬性规则 4 / `quality.py` `CONSTRAINT_LIMIT`） | `docs/archive/e2e_iteration_log_2026-09-13.md` R1-b：12 条约束的交付物被评委点名「模型漏执行」，constraint_compliance 8.38→7.0、task_completion 9.25→7.75 |
 | 禁止抑制型条款（OPTIMIZER 硬性规则 7 / `quality.py` `suppressive_rule`） | 同上 R1-c：「停止处理」「不输出任何结论」「仅输出固定 token」→ robustness 8.75→7.88，且与"边界仍要作答"的骨架要求冲突 |
 | 「完全为空」与「非空但数据不足」两条互斥分支（OPTIMIZER 硬性规则 8 / `quality.py` `blanket_missing_branch`） | 同日志第 1、2 轮：合并成一条兜底后，含 120 万/98 万的用例被整段判「数据缺失」，事实断言失败，两轮修订都没修掉 |
 | 「格式不规范」≠「字段缺失」（OPTIMIZER 硬性规则 8） | 同日志第 2 轮：日期写法混排被判成"没有该字段" |

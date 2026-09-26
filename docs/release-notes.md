@@ -96,4 +96,4 @@ PM_TARGET_MAX_TOKENS=16000
 [evaluation.md](evaluation.md) 第八节。**三家 flag 的是同两条锚点**（偏松 +2.25~+3.53，
 其余 9 条三家都在线内）—— 这是 rubric 缺口而不是评委谱系问题，已记为本版残留偏差；
 反过来，"仲裁席坐的是被标定刷下来的那一家"这个怀疑经测量后**不成立**（见矩阵文档发现 13）。
-真机矩阵数据与读法见 [llm_e2e_matrix_2026-09-18.md](llm_e2e_matrix_2026-09-18.md)。
+真机矩阵数据与读法见 [llm_e2e_matrix_2026-09-18.md](archive/llm_e2e_matrix_2026-09-18.md)。
