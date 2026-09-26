@@ -47,7 +47,7 @@ python run.py wait <run_id>                     # 轮询到终态，输出结果
 | 资产与记忆 | `run.py library` / `run.py history` | 达标提示词可按任务相似度检索、导出；history 给 Δ 与显著性 |
 | 评委可信度 | `run.py calibrate [--repeat N]` | 锚点人工分 vs 评委分（MAE/偏置/排序一致性）+ 评委自我复现性极差 |
 
-MCP 接入（9 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
+MCP 接入（10 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
 
 ## 三、这个产品对自己的结论有多硬（先读这节再用它给的分数）
 
@@ -58,6 +58,9 @@ MCP 接入（9 个工具，stdio）：`python -m pm.mcp_server`。计算类工�
   一致率在 0.722~0.909、κ 在 0.444~0.814、复现极差最大在 0.5~2.25（判据阈值 2.0 有时越有时不到）之间摆
   ⇒ 单次读数不能当"这把尺子的精度"。
   所以"8.0 分"这类单点数字请当方向，别当结论；差 0.3 的两次比较无意义。
+  要把"能信多宽"量化：`run.py calibrate --aggregate` 把账本里带明细的最近几轮合并成
+  带置信区间的跨轮读数（MAE 的锚点重抽 CI 与轮间极差分开报，口径见 `docs/evaluation.md` §十四）
+  ——两次校准的差值是否成立，先看 CI 宽度再说话。
   口径与逐轮记录见 `docs/evaluation.md`，账本在 `logs/judge_calibration_history.json`。
 - **判定式评分协议（`PM_SCORING_MODE=checklist`）默认关闭，且已被实测否证**。它把五个整数的
   填数权从评委手里拿走一半（评委只答二值判定+证据，分数由代码算）。同一批锚点、评委预算
@@ -77,7 +80,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；890 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；901 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（samples.json 已确认 / samples.candidates.json 待人工分）
 case_templates/     可直接喂 --cases-file 的 5 份领域用例集

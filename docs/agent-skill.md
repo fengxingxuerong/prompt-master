@@ -11,7 +11,7 @@
 
 ## 两种接入方式（选一）
 
-### 方式 A：MCP（推荐，9 个工具）
+### 方式 A：MCP（推荐，10 个工具）
 
 ```json
 {"command": "python", "args": ["-m", "pm.mcp_server"], "cwd": "<仓库根>"}
@@ -26,6 +26,7 @@
 | `library_recommend` | 新任务 → 历史相似高分资产推荐 |
 | `library_export` | 导出历史最佳提示词 |
 | `calibrate_judge` | 评委可信度校准 + 漂移对比（真实计费） |
+| `calibrate_aggregate` | 跨轮聚合：账本重算带 CI 的合并读数（零调用，回答"单轮读数能信多宽"） |
 
 ### 方式 B：CLI（四态退出码）
 

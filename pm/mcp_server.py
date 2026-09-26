@@ -139,6 +139,20 @@ def calibrate_judge(judge: str = "evaluator") -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+@mcp.tool()
+def calibrate_aggregate(judge: str = "evaluator", scoring_mode: str = "impression") -> str:
+    """跨轮聚合：把漂移账本里同口径的最近几轮合并成带置信区间的读数（零调用、不花钱）。
+
+    与 calibrate_judge 互补：这个只重算账本、不调任何模型，回答"单轮读数能信多宽"
+    （MAE 的锚点重抽 95% CI 与轮间极差分开报，口径见 docs/evaluation.md §十四）。
+    账本里没有同口径带明细记录时返回 {"error": ...}。
+    """
+    result = _run_cli_json(
+        ["calibrate", "--judge", judge, "--scoring-mode", scoring_mode, "--aggregate", "--json"]
+    )
+    return json.dumps(result, ensure_ascii=False)
+
+
 # --------------------------------------------------------------------------
 # 长任务工具（转发常驻 server）
 # --------------------------------------------------------------------------

@@ -182,6 +182,16 @@ def test_calibrate_judge_uses_long_timeout(capture_cli):
     assert "--judge" in capture_cli[0] and "evaluator_b" in capture_cli[0]
 
 
+def test_calibrate_aggregate_is_offline_ledger_read(capture_cli):
+    """聚合是零调用的账本重算：不碰样本文件、不触发任何计费路径。"""
+    M.calibrate_aggregate("evaluator_b", "impression")
+    args = capture_cli[0]
+    assert "calibrate" in args and "--aggregate" in args
+    assert "--judge" in args and "evaluator_b" in args
+    assert "--scoring-mode" in args and "impression" in args
+    assert "--json" in args
+
+
 def test_task_text_with_shell_metacharacters_stays_one_arg(capture_cli):
     """任务文本含 shell 元字符时，仍应作为**单个** argv 元素传给 CLI。"""
     evil = "分析数据; rm -rf / --force"
@@ -308,6 +318,8 @@ def test_all_tools_return_json_strings(capture_cli, capture_http):
         (M.run_history, {}),
         (M.library_recommend, {"task_text": "t"}),
         (M.library_export, {"run_id": "x"}),
+        (M.calibrate_judge, {"judge": "evaluator"}),
+        (M.calibrate_aggregate, {"judge": "evaluator", "scoring_mode": "impression"}),
     ):
         out = fn(**kw)  # type: ignore[operator]
         assert isinstance(out, str)

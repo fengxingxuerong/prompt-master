@@ -258,6 +258,12 @@ def _calibrate_command(argv: list[str]) -> int:
         metavar="CSV",
         help="不跑校准：把填好的打分表写回 --samples（只改填了分的那几条）",
     )
+    ap.add_argument(
+        "--aggregate",
+        action="store_true",
+        help="不跑校准：只把账本里同 judge+协议的最近几轮合并成带 CI 的跨轮读数"
+        "（纯账本重算，零调用不花钱；口径见 docs/evaluation.md §十四）",
+    )
     ns = ap.parse_args(argv)
 
     # 两个"只动表、不花钱"的入口先分流：它们不需要 Key、不调模型，
@@ -274,6 +280,40 @@ def _calibrate_command(argv: list[str]) -> int:
         except (OSError, ValueError, json.JSONDecodeError) as e:
             print(f"回填打分表失败：{e}", file=sys.stderr)
             return EXIT_CONFIG
+    if ns.aggregate:
+        from .. import calibration as _calib
+
+        history_path = _calib_history()
+        ledger: list[dict[str, Any]] = []
+        if history_path.exists():
+            try:
+                ledger = json.loads(history_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                msg = f"账本损坏，无法聚合：{history_path}"
+                if ns.json:
+                    print(json.dumps({"error": msg}, ensure_ascii=False))
+                else:
+                    print(msg, file=sys.stderr)
+                return EXIT_CONFIG
+        eff_mode = ns.scoring_mode or scoring_mode()
+        agg = _calib.aggregate_history(ledger, mode=eff_mode, judge=ns.judge)
+        if agg is None:
+            msg = (
+                f"账本里没有 {ns.judge} × {eff_mode} 口径、带逐锚点明细的记录可聚合"
+                "（旧记录只有轮级聚合数，重算不出逐锚点分布）。"
+            )
+            # README 的约定：--json 时 stdout 恰好一个 JSON 对象——错误路径也不例外，
+            # 否则 MCP 的 _run_cli_json 会在 json.loads("") 上炸出无关错误。
+            if ns.json:
+                print(json.dumps({"error": msg}, ensure_ascii=False))
+            else:
+                print(msg, file=sys.stderr)
+            return EXIT_CONFIG
+        if ns.json:
+            print(json.dumps({"aggregate": agg}, ensure_ascii=False, indent=2))
+        else:
+            print(_calib.render_aggregate(agg))
+        return 0
 
     from .. import calibration as calib
 
@@ -465,6 +505,12 @@ def _calibrate_command(argv: list[str]) -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # 跨轮聚合：把账本里同 judge+协议、带逐锚点明细的最近几轮（保存路径下含刚入账的本次）
+    # 合并成带 CI 的读数。单轮校准把锚点取样波动 + 评委逐轮抖动都抹进一个数——这是对
+    # README §三 "这些读数本身不稳，单次读数不能当尺子的精度"的正面回应：
+    # CI 管两次比较的分辨率，轮间极差管单轮读数能信多宽，两个数不收敛就都别当结论。
+    agg = calib.aggregate_history(history, mode=mode, judge=ns.judge)
+
     if ns.json:
         print(
             json.dumps(
@@ -473,6 +519,7 @@ def _calibrate_command(argv: list[str]) -> int:
                     "mode": mode,
                     "analysis": analysis,
                     "drift": drift,
+                    "aggregate": agg,
                     "n_pending": len(pending),
                     # history 已 append（保存路径），len 即账本当前条数；
                     # 旧写法再 +1 会把本次记录数成两倍，误导"已校准过几轮"的判断
@@ -504,5 +551,8 @@ def _calibrate_command(argv: list[str]) -> int:
     rep_out = analysis.get("repeatability")
     if rep_out:
         print(calib.render_repeatability(rep_out))
+    agg_out = calib.render_aggregate(agg)
+    if agg_out:
+        print(agg_out)
     print(f"校准记录已{'保存' if not ns.no_save else '跳过保存'}：{_calib_history()}")
     return 0

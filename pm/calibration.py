@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 import statistics
 import sys
 from pathlib import Path
@@ -541,6 +542,249 @@ def repeatability(
         "threshold_exceeded": max(ranges) > judge_disagreement_threshold(),
         "per_item": per_item,
     }
+
+
+# --------------------------------------------------------------------------
+# 跨轮聚合：把账本里同口径的最近几轮合并成「带不确定度的读数」（纯代码，零 LLM）
+# --------------------------------------------------------------------------
+# README §三 的问题："这些读数本身不稳……单次读数不能当'这把尺子的精度'"。
+# 单轮校准把 n 条锚点读成一个数（MAE/bias/κ），锚点本身的取样波动 + 评委的逐轮抖动
+# 都被抹进这一个数里。聚合做的事：① 逐锚点聚类自助法（cluster bootstrap）给出
+# "换一批锚点重测"的重抽不确定度；② 轮间极差给出"同一把尺子逐轮的漂移幅度"。
+# 两个数回答两个不同的问题，混用任何一个都会把噪声读成信号。
+AGGREGATE_BOOTSTRAP = 2000
+AGGREGATE_LAST_ROUNDS = 4
+# 与 repeatability 文档里"极差阈值"同一件事的披露线：CI 宽过它，两次校准差值小于它的比较不成立
+AGGREGATE_CI_WIDTH_NOTE = 0.5
+
+
+def _percentile(sorted_vals: list[float], q: float) -> float:
+    """线性插值分位数（与 numpy 默认 linear 法一致）。q ∈ [0,100]，空表是调用方的 bug。"""
+    if not sorted_vals:
+        raise ValueError("分位数的输入为空")
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    idx = q / 100 * (len(sorted_vals) - 1)
+    lo = math.floor(idx)
+    hi = math.ceil(idx)
+    if lo == hi:
+        return sorted_vals[lo]
+    frac = idx - lo
+    return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * frac
+
+
+def _round_mode(r: dict[str, Any]) -> str:
+    """账本记录的评分协议。mode 字段引入之前的记录一律是印象式（与漂移对比同口径）。"""
+    return str(r.get("mode") or "impression")
+
+
+def aggregate_history(
+    history: list[dict[str, Any]],
+    *,
+    mode: str = "impression",
+    judge: str = "evaluator",
+    last: int = AGGREGATE_LAST_ROUNDS,
+    bootstrap: int = AGGREGATE_BOOTSTRAP,
+    seed: int = 20260925,
+) -> dict[str, Any] | None:
+    """合并账本里同 judge+mode、带逐锚点明细的最近 `last` 轮，产出带不确定度的读数。
+
+    返回 None 的两种情形都不是错误：账本里还没有该口径的带明细记录（旧账本只有
+    轮级聚合数，重算不出逐锚点分布），或轮记录里一条有效配对都没有。调用方按
+    "本轮不聚合"处理即可，不该报错吓人。
+
+    为什么按锚点聚类而不是按配对重抽：同一锚点在 K 轮里出现 K 次，配对之间**不独立**
+    ——按配对重抽会把"锚点好/坏"的方差撕碎进 2K 个独立样本里，CI 系统性偏窄，
+    那是在用统计学制造精度幻觉。聚类自助法把每条锚点（连同它的全部轮次读数）作为
+    一个整体重抽，锚点外推（换一批锚点重测）的不确定度才是这个 CI 想量的东西。
+
+    与漂移对比（_comparable）刻意的不同：漂移只认"指纹完全一致"的轮，因为它是
+    信号检测；聚合刻意放宽到同 judge+mode 即可，因为它是**量具刻画**——考卷不同
+    时照常合并（对锚点总体的估计依然成立），但会显式声明，不给读数的人埋雷。
+    """
+    rounds = [
+        r
+        for r in history
+        if r.get("judge") == judge
+        and _round_mode(r) == mode
+        # 空 items 列表 = 这轮没落明细（与"没有 items 字段"同罪），不算有明细的轮
+        and isinstance(r.get("items"), list)
+        and r.get("items")
+    ]
+    if not rounds:
+        return None
+    rounds = rounds[-max(1, last) :] if last > 0 else rounds
+    pairs: list[dict[str, Any]] = []
+    for r in rounds:
+        for it in r.get("items") or []:
+            if not isinstance(it, dict):
+                continue
+            try:
+                float(it["human"]), float(it["judge"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            pairs.append(it)
+    if not pairs:
+        return None
+
+    humans = [float(p["human"]) for p in pairs]
+    judges = [float(p["judge"]) for p in pairs]
+    deltas = [j - h for h, j in zip(humans, judges, strict=True)]
+    n_pairs = len(pairs)
+    pooled: dict[str, Any] = {
+        "n_rounds": len(rounds),
+        "n_pairs": n_pairs,
+        "n_anchors": len({str(p["id"]) for p in pairs}),
+        "mae": round(sum(abs(d) for d in deltas) / n_pairs, 3),
+        "bias": round(sum(deltas) / n_pairs, 3),
+        # 合并判定统计：κ/一致率是按混淆计数定义的，把各轮配对并起来直接重算即可
+        "decision": _decision_stats(humans, judges, PASS_THRESHOLD),
+    }
+
+    # 聚类自助法 CI：锚点为重抽单位（见 docstring）。锚点 <2 时重抽是常数，CI 退化为
+    # 一个点——报出来就是"看起来很精确的零信息"，宁可声明跳过。
+    clusters: dict[str, list[tuple[float, float]]] = {}
+    for p in pairs:
+        clusters.setdefault(str(p["id"]), []).append((float(p["human"]), float(p["judge"])))
+    ids = sorted(clusters)
+    if len(ids) >= 2 and bootstrap > 0:
+        rng = random.Random(seed)
+        by_id = [clusters[sid] for sid in ids]
+        maes: list[float] = []
+        biases: list[float] = []
+        for _ in range(bootstrap):
+            ds = [j - h for cl in (by_id[rng.randrange(len(by_id))] for _ in by_id) for h, j in cl]
+            maes.append(sum(abs(d) for d in ds) / len(ds))
+            biases.append(sum(ds) / len(ds))
+        maes.sort()
+        biases.sort()
+        pooled["mae_ci95"] = [round(_percentile(maes, 2.5), 3), round(_percentile(maes, 97.5), 3)]
+        pooled["bias_ci95"] = [
+            round(_percentile(biases, 2.5), 3),
+            round(_percentile(biases, 97.5), 3),
+        ]
+    else:
+        pooled["ci_skipped"] = f"锚点 {len(ids)} 条 < 2，聚类自助法退化，不给 CI"
+
+    def _span(key: str) -> dict[str, float] | None:
+        vals = [float(r[key]) for r in rounds if isinstance(r.get(key), (int, float))]
+        if not vals:
+            return None
+        return {
+            "min": round(min(vals), 3),
+            "max": round(max(vals), 3),
+            "range": round(max(vals) - min(vals), 3),
+            "n_rounds": len(vals),
+        }
+
+    rep_rounds = [
+        r
+        for r in rounds
+        if isinstance(r.get("rep_range_max"), (int, float)) and r.get("rep_threshold")
+    ]
+    return {
+        "judge": judge,
+        "mode": mode,
+        "rounds_used": len(rounds),
+        # 旧→新，读的时候"最近一轮"是最后一行
+        "rounds": [
+            {
+                "ts": r.get("ts"),
+                "n": r.get("n"),
+                "mae": r.get("mae"),
+                "bias": r.get("bias"),
+                "decision_agree": r.get("decision_agree"),
+                "decision_kappa": r.get("decision_kappa"),
+                "r": r.get("r"),
+                "rep_range_max": r.get("rep_range_max"),
+            }
+            for r in rounds
+        ],
+        "pooled": pooled,
+        "dispersion": {k: _span(k) for k in ("mae", "bias", "decision_agree", "decision_kappa")},
+        "rep_threshold_crossings": sum(
+            1 for r in rep_rounds if float(r["rep_range_max"]) > float(r["rep_threshold"])
+        ),
+        "n_rep_rounds": len(rep_rounds),
+        "papers_differ": len({r.get("n") for r in rounds}) > 1,
+    }
+
+
+def render_aggregate(agg: dict[str, Any] | None) -> str:
+    """跨轮聚合读数的渲染。agg 为 None 返回空串——"没有可聚合的账本"不是一件事。"""
+    if not agg:
+        return ""
+    pooled = agg["pooled"]
+    label = _ROLE_LABEL.get(str(agg["judge"]), str(agg["judge"]))
+    lines = [
+        "",
+        f"## 跨轮聚合（最近 {agg['rounds_used']} 轮 · {agg['mode']} · {label} · 纯账本重算，零调用）",
+        "",
+        "| 轮(旧→新) | 时间 | n | MAE | bias | 一致率 | κ | r | 复现极差max |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for i, r in enumerate(agg["rounds"], 1):
+        lines.append(
+            f"| {i} | {r.get('ts') or '-'} | {r.get('n') if r.get('n') is not None else '-'} "
+            f"| {r.get('mae')} | {r.get('bias')} "
+            f"| {r.get('decision_agree') if r.get('decision_agree') is not None else '-'} "
+            f"| {r.get('decision_kappa') if r.get('decision_kappa') is not None else '-'} "
+            f"| {r.get('r') if r.get('r') is not None else '-'} "
+            f"| {r.get('rep_range_max') if r.get('rep_range_max') is not None else '-'} |"
+        )
+    mae_ci = pooled.get("mae_ci95")
+    bias_ci = pooled.get("bias_ci95")
+    mae_line = f"MAE **{pooled['mae']}**" + (
+        f"［95% CI {mae_ci[0]}~{mae_ci[1]}］" if mae_ci else ""
+    )
+    bias_line = f"bias **{pooled['bias']:+}**" + (
+        f"［95% CI {bias_ci[0]:+}~{bias_ci[1]:+}］" if bias_ci else ""
+    )
+    dec = pooled.get("decision") or {}
+    agree_s = f"一致率 {dec.get('agree')}" if dec.get("agree") is not None else "一致率 -"
+    kappa_s = "-" if dec.get("kappa") is None else f"κ {dec.get('kappa')}"
+    lines.append("")
+    lines.append(
+        f"- 合并读数：{pooled['n_pairs']} 条配对（{pooled['n_anchors']} 条锚点）——"
+        f"{mae_line}，{bias_line}，{agree_s}、{kappa_s}"
+    )
+    if pooled.get("ci_skipped"):
+        lines.append(f"- ⚠️ {pooled['ci_skipped']}")
+    disp = agg.get("dispersion") or {}
+    spans = []
+    if agg.get("rounds_used", 0) >= 2:  # 单轮没有"轮间"可言，极差 0.0 是噪声不是信息
+        for key, name in (
+            ("mae", "MAE"),
+            ("bias", "bias"),
+            ("decision_agree", "一致率"),
+            ("decision_kappa", "κ"),
+        ):
+            s = disp.get(key)
+            if s:
+                spans.append(f"{name} {s['min']}~{s['max']}（极差 {s['range']}）")
+    if spans:
+        lines.append(f"- 轮间极差（单轮读数的摆动幅度）：{'、'.join(spans)}")
+    if agg.get("n_rep_rounds"):
+        lines.append(
+            f"- 复现极差越线：{agg['rep_threshold_crossings']}/{agg['n_rep_rounds']} 轮"
+            "超过分差阈值——判定式「双评委分歧→仲裁」在这些轮里部分读的是评委自己的抖动"
+        )
+    if agg.get("papers_differ"):
+        lines.append(
+            "- ⚠️ 各轮参与的锚点条数不同（换过考卷）：合并读数是对**锚点总体**的估计依然成立，"
+            "但轮间数值对比（含上表的逐轮趋势）不成立。"
+        )
+    if mae_ci and mae_ci[1] - mae_ci[0] > AGGREGATE_CI_WIDTH_NOTE:
+        lines.append(
+            f"- ⚠️ MAE 的 CI 宽 {round(mae_ci[1] - mae_ci[0], 2)}：两次校准的 MAE 差值小于"
+            "这个宽度的，都不构成「评委变好/变坏」的证据。"
+        )
+    lines.append(
+        "> 怎么读（口径见 docs/evaluation.md §十四）：CI 是「换一批锚点重测」的重抽不确定度，"
+        "轮间极差是「这台仪表逐轮的漂移」——前者管比较的分辨率，后者管单轮读数能信多宽。"
+        "两者都不收敛之前，任何单轮读数都是 ±极差量级的方向参考。"
+    )
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------
