@@ -458,7 +458,11 @@ def test_task_table_is_bounded(tmp_path: Path, monkeypatch):
     for i in range(6):
         tm.submit(f"run-{i}", task="t", n_test_cases=1, max_iterations=1)
     for i in range(3, 6):
-        _wait_terminal(tm, f"run-{i}", timeout=30)
+        tm.submit(f"run-{i}", task="t", n_test_cases=1, max_iterations=1)
+    # 只等队尾 run-5：max_records=2 时 run-3 早已被淘汰（get_status 返回 None），
+    # 等它会空转满 timeout=30 秒（实测这条测试 30s 全耗在此）。串行队列下
+    # 队尾终态 ⇔ run-3/4 也终态，排空意图不变。
+    _wait_terminal(tm, "run-5", timeout=30)
     assert len(tm._tasks) <= 3  # 淘汰后仍留有界余量
 
 

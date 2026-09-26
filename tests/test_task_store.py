@@ -201,7 +201,10 @@ def test_taskmanager_memory_store_compat_view(tmp_path: Path, monkeypatch):
             tm.submit(f"view-{i}", task="t", n_test_cases=1, max_iterations=1)
         assert len(tm._tasks) <= 4  # 淘汰后有界
     finally:
-        _wait_terminal(tm, rid, timeout=30)
+        # 等队尾而非首个 rid：max_records=3 时 view-run 早已被淘汰（get_status
+        # 返回 None，store 层也查不到），等它会空转满 timeout=30 秒（实测 30s 全
+        # 浪费在这）。串行队列下队尾终态 ⇔ 全部跑完，排空意图不变。
+        _wait_terminal(tm, "view-4", timeout=30)
 
 
 def test_progress_snapshot_shape_is_store_agnostic(tmp_path: Path, monkeypatch):

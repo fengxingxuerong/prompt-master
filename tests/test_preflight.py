@@ -146,6 +146,11 @@ def test_run_py_preflight_wiring(tmp_path):
     env["PYTHONIOENCODING"] = "utf-8"
     env["PM_API_KEY"] = "sk-test-dummy-key-0000"
     env["PM_TIMEOUT"] = "5"
+    # preflight 的逐角色探测超时是独立口子 PM_PREFLIGHT_TIMEOUT（默认 20s，
+    # 见 pm/preflight.py 的 PREFLIGHT_ROLE_TIMEOUT）——不设它，"拒绝被静默
+    # 丢弃"的机器上角色探测各等满 20s（实测这条测试 30s 的真正来源）。
+    # discard 端口是即时拒绝，1 秒兜底足够，语义不变（照样断言不可达→退出码 1）。
+    env["PM_PREFLIGHT_TIMEOUT"] = "1"
     env["PM_RATE_LIMIT_MAX_WAIT"] = "0"  # 不退避：连接拒绝是普通错误，直接上抛
     dead = "http://127.0.0.1:9/v1"  # discard 端口，本机必然连接拒绝
     for role in (
