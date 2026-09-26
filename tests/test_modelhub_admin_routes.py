@@ -44,6 +44,18 @@ def gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("PMH_LEDGER_PATH", str(store / "ledger.jsonl"))
     monkeypatch.setenv("PMH_ROLES", str(roles))
     monkeypatch.setenv("PMH_CONFIG", str(ROOT / "config" / "modelhub.json"))
+    # config/modelhub.json 通过 ${PM_API_KEY_*} 占位符引用 .env，而 CI 是干净检出、
+    # 没有 .env —— 池初始化解析占位符会直接 ConfigError（真发生过：CI 首跑 4 个 job
+    # 全红在这里，本地却全绿，因为本机 .env 把它掩盖了）。这些路由（/v1/metrics、
+    # /v1/usage）只读池状态与台账，零真实出网，假值即可满足"变量非空"。
+    for _var in (
+        "PM_API_KEY_1",
+        "PM_API_KEY_AMD",
+        "PM_API_KEY_NVIDIA",
+        "PM_API_KEY_OPENROUTER",
+        "PM_API_KEY_STEP",
+    ):
+        monkeypatch.setenv(_var, "test-key-not-real")
     monkeypatch.delenv("PMH_GATEWAY_TOKEN", raising=False)
     monkeypatch.setattr(VK, "_VK", None)
     monkeypatch.setattr(VK, "_AG", None)
