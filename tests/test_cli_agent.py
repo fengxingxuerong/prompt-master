@@ -1091,7 +1091,7 @@ def test_form_round_trip_survives_commas_and_quotes(tmp_path: Path) -> None:
 def test_shipped_score_form_is_in_sync_with_the_candidates_file() -> None:
     """仓库里那份待填的  必须与锚点文件同源。
 
-    这条守的是**只有他能做的事**的前置条件：他要照着这张表填 34 个人工分。
+    这条守的是**只有他能做的事**的前置条件：他要照着这张表填 48 个人工分。
     如果哪天重新采集/改写了 candidates，而表没重新生成，他填的就是一张过期表 ——
     轻则 id 对不上回填失败，重则分数落到了另一条锚点上（那比不填更坏）。
     已确认条目（candidates 里有分数的）必须在表里显示同一个分数，防止"填过没回填"和
@@ -1106,7 +1106,7 @@ def test_shipped_score_form_is_in_sync_with_the_candidates_file() -> None:
 
     form = _form_rows(ROOT / "judge_calibration" / "score_form.csv")
     assert [r["id"] for r in form] == pend_ids, "打分表与候选文件不同源：重新跑 --make-form"
-    assert len(form) == 34, f"待确认候选是 34 条，表里 {len(form)} 条"
+    assert len(form) == 48, f"待确认候选是 48 条，表里 {len(form)} 条"
     for r in form:
         if r["id"] in scored:
             assert float(r["human_score"]) == float(scored[r["id"]]), (

@@ -152,7 +152,18 @@ def collect(log_dir: Path) -> list[dict[str, Any]]:
                     "hints": _hints(test_input, output),
                 }
             )
-    return rows
+    # 同一份输出会被多次跑批复现：id 按 out_sha 生成，不去重就是同 id 两条，
+    # `load_samples` 的「样本 id 重复」防线会拒收整份文件——2026-09-26 实测发生
+    # （50 条候选里 2 条重复 id，校准被卡死）。保留首次出现（glob 排序序 = 旧→新），
+    # 确定性可复现；被丢的只是同一份输出在第 N 次跑批里的复读。
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for r in rows:
+        if r["out_sha"] in seen:
+            continue
+        seen.add(r["out_sha"])
+        deduped.append(r)
+    return deduped
 
 
 def _existing_shas(paths: list[Path]) -> set[str]:
@@ -231,19 +242,35 @@ def to_samples(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def render_review(samples: list[dict[str, Any]], skipped: int) -> str:
+    band_counts = {name: 0 for name, _, _ in BANDS}
+    for s in samples:
+        band_counts[s.get("band", _band_of(float(s["provenance"]["judge_score"])))] += 1
     lines: list[str] = [
         "# 锚点复核清单",
         "",
         f"> 由 `harvest_anchors.py` 生成。{len(samples)} 条候选，另剔除 {skipped} 条与现有锚点集重复的输出。",
         "",
+        "分带分布：" + "　".join(f"{b}:{n}" for b, n in band_counts.items()),
+        "条数少的带优先填——人工分覆盖的分数带数 < 3 时，排序一致性 r 在窄区间里算，没有意义。",
+        "",
         "## 怎么复核",
         "",
         "1. 每条只需回答一个问题：**换你来看这份输出，值不值 8.0（可上线）**，再给一个 1-10 的分。",
-        "2. 打开 `judge_calibration/samples.candidates.json`，把该条的 `human_score` 从 `null` 改成分数，",
-        "   并把 `confirmed` 改成 `true`。**没改的条目不参与校准**——这是刻意的：",
-        "   未确认的分数一旦进集，测出来的 r 只是在读评委自己的口味。",
-        "3. 复核顺序按下方清单（判定线附近 + 线索命中的优先，它们对结论的信息量最大）。",
-        "4. 跑校准：`python run.py calibrate --samples judge_calibration/samples.candidates.json`",
+        "2. 填分有两种做法，任选：",
+        "   - **推荐：填表格** `judge_calibration/score_form.csv`（同目录下，只填 `human_score` 一列，",
+        "     可用 Excel/WPS 直接打开）。填完回填：",
+        "     `python run.py calibrate --samples judge_calibration/samples.candidates.json --apply-scores judge_calibration/score_form.csv`",
+        "     —— 只改你**填了分**的那几条（并把它们置 `confirmed=true`）；有任何一行非法就一条都不写；",
+        "     表格里没填的条目继续不参与校准。",
+        "     （表重新生成：`python run.py calibrate --samples … --make-form judge_calibration/score_form.csv`，",
+        "     已确认条目的现值会被带出来，不会丢。）",
+        "   - 或者直接改 JSON：打开 `judge_calibration/samples.candidates.json`，把该条的 `human_score`",
+        "     从 `null` 改成分数，并把 `confirmed` 改成 `true`。",
+        "3. **没改的条目不参与校准**——这是刻意的：未确认的分数一旦进集，测出来的 r 只是在读评委自己的口味。",
+        "4. 复核顺序按下方清单（判定线附近 + 线索命中的优先，它们对结论的信息量最大）。",
+        "5. 跑校准：`python run.py calibrate --samples judge_calibration/samples.candidates.json --aggregate`",
+        "   （注意：人工分进锚点集指纹，回填后第一次校准与历史记录的漂移对比会判为\"换考卷\"，这是对的；",
+        "   `--aggregate` 会在报告末尾附上跨轮合并读数与置信区间，口径见 `docs/evaluation.md` §十四。）",
         "",
         "评委自己给的分列在每条里，**用途是让你先去看它和直觉不一致的那些**，不是让你抄它。",
         "",
