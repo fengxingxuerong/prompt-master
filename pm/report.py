@@ -253,6 +253,12 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
                 " —— 输出只有占位/拒答标记，没有实质交付物；"
                 "「拒答得体」应体现为 task_completion 低分，不该换来可上线判定"
             )
+        elif state.get("empty_cap"):
+            lines.append(
+                f"- ℹ️ 空产出硬封顶已生效：{state.get('empty_cap')} 条评估命中空产出画像，"
+                "加权分已由代码压到 4.0（不可用档）。这不是评委的意见，是确定性约束"
+                "——校准口径不含此封顶，量的是评委裸分。"
+            )
         # 评委配置体检：同源评委 = 同一分布采样两次，交叉验证不提供独立证据
         jh = state.get("judge_health") or {}
         if jh.get("homogeneous"):

@@ -1036,4 +1036,5 @@ def evaluate_node(state: State) -> dict[str, Any]:
         n_cache_hit=n_cache_hit,
         n_arbitrated=n_arbitrated,
         injection_gate_blocked=injection_gate_blocked,
+        empty_cap=n_capped,
     )
