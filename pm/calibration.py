@@ -41,6 +41,7 @@ from .bootstrap import ensure_utf8_stdio
 from .llm import structured_call
 from .prompts import EVALUATOR_SYSTEM, EVALUATOR_USER, render
 from .schemas import PASS_THRESHOLD, EvaluationResult, judge_disagreement_threshold
+from .scoring import has_empty_deliverable_profile
 
 # 仓库根（本文件在 pm/ 下，parents[1] 才是检出根）：锚点目录 judge_calibration/ 在这里
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -312,6 +313,14 @@ def analyze(samples: list[dict[str, Any]], judge_scores: list[float]) -> dict[st
     r = pearson(humans, judges)
     rho = spearman(humans, judges)
     hist = _band_hist(humans)
+    # 空产出高分（2026-09-27 人工锚点实测）：空壳/纯拒答画像的输出被评委判可上线。
+    # 警告不否决——告的从来不是"输出差"，是"高分与交付物缺失并存"这个矛盾。
+    empty_high = [
+        p["id"]
+        for s, p in zip(samples, pairs, strict=False)
+        if p["judge"] >= PASS_THRESHOLD
+        and has_empty_deliverable_profile(str(s.get("test_output") or ""))
+    ]
     return {
         "n": n,
         "pairs": pairs,
@@ -320,6 +329,7 @@ def analyze(samples: list[dict[str, Any]], judge_scores: list[float]) -> dict[st
         "r": None if r is None else round(r, 3),
         "rho": None if rho is None else round(rho, 3),
         "flags": [p["id"] for p in pairs if p["flag"]],
+        "empty_high": empty_high,
         "human_band_hist": hist,
         "bands_covered": sum(1 for c in hist.values() if c),
         "decision": _decision_stats(humans, judges, PASS_THRESHOLD),
@@ -409,6 +419,12 @@ def render_report(role: str, analysis: dict[str, Any]) -> str:
     if analysis["flags"]:
         lines.append(
             f"- ⚠️ 大偏差样本（|Δ| > {LARGE_DEVIATION}）：{', '.join(analysis['flags'])}——优先人工复核这几条"
+        )
+    if analysis.get("empty_high"):
+        lines.append(
+            f"- ⚠️ 空产出获高分（≥{PASS_THRESHOLD}）：{', '.join(analysis['empty_high'])}"
+            " —— 输出呈空壳/纯拒答画像，没有实质交付物；"
+            "「拒答得体」应体现为 task_completion 低分，不该换来可上线判定"
         )
     if analysis["n"] < MIN_SAMPLES_FOR_VERDICT:
         lines.append(

@@ -230,6 +230,29 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
                 f"{'、'.join('#' + str(i) for i in ceil_no_issue)} —— 本轮人工锚点里最高只到 8.7，"
                 "满分声明建议人工抽查"
             )
+        # 空产出高分：输出只剩占位/拒答标记却被判可上线（2026-09-27 人工锚点实测：
+        # 两条空壳日报评委 7.0/9.85、人工 2/2）。与满分声明同一待遇：提醒，不否决。
+        from .scoring import has_empty_deliverable_profile
+
+        _out_by_idx = {
+            str(tr.get("test_case_index", "0")): str(tr.get("output") or "")
+            for tr in state.get("test_runs") or []
+        }
+        empty_high = [
+            "#" + str(e.get("test_case_index"))
+            for e in evals
+            if isinstance(e.get("weighted_score"), (int, float))
+            and e["weighted_score"] >= PASS_THRESHOLD
+            and has_empty_deliverable_profile(
+                _out_by_idx.get(str(e.get("test_case_index", "0")), "")
+            )
+        ]
+        if empty_high:
+            lines.append(
+                f"- ⚠️ 空产出获高分（≥{PASS_THRESHOLD}）：{'、'.join(empty_high)}"
+                " —— 输出只有占位/拒答标记，没有实质交付物；"
+                "「拒答得体」应体现为 task_completion 低分，不该换来可上线判定"
+            )
         # 评委配置体检：同源评委 = 同一分布采样两次，交叉验证不提供独立证据
         jh = state.get("judge_health") or {}
         if jh.get("homogeneous"):

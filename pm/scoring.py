@@ -389,3 +389,38 @@ def _is_placeholder(basis: str) -> bool:
 def _norm(text: str) -> str:
     """条目文本归一化：评委照抄时会改空格、加句号，回配必须对这些不敏感。"""
     return re.sub(r"\s+", "", (text or "").strip().rstrip("。.，,"))
+
+
+# --------------------------------------------------------------------------
+# 空产出画像（警告级启发式，"提醒不否决"）——2026-09-27 六条人工锚点实测的产物
+# --------------------------------------------------------------------------
+# 两条空壳日报（模板+占位标记，无实质交付物）被评委打 7.0 / 9.85，人工分 2/2；
+# AI 参考分也给出 7.0/7.5——这不是某一个模型的失误，是"拒答得体 ≈ 质量好"的
+# 共性盲区。拒答是否得体应由 task_completion 维度扣分体现，不该换来可上线判定。
+# 这里只做**画像识别**，告警在 report.py 与 calibration.py 两处消费；刻意不进
+# 判定链——告警误报的代价（多看一眼）远低于判错一条真"无缺失"报告的代价。
+EMPTY_DELIVERABLE_MARKERS: tuple[str, ...] = (
+    "数据缺失",
+    "暂无",
+    "无可用",
+    "请提供",
+    "请补充",
+    "无法生成",
+    "无法判断趋势",
+    "无法进行",
+)
+_EMPTY_MARKERS_NEEDED = 2
+
+
+def has_empty_deliverable_profile(text: str) -> bool:
+    """输出是否呈现"空壳/纯拒答"画像：占位或拒答标记累计 ≥2 处，或几乎没有内容。
+
+    标记按**出现次数**累计而非去重——「• 数据缺失」×3 的模板只含一种标记，
+    按去重会漏。画像刻意保守：命中只意味着"这条高分需要人工看一眼"，不参与
+    任何达标判定。
+    """
+    stripped = (text or "").strip()
+    if len(stripped) < 8:
+        return True
+    hits = sum(stripped.count(m) for m in EMPTY_DELIVERABLE_MARKERS)
+    return hits >= _EMPTY_MARKERS_NEEDED
