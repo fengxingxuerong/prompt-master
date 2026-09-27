@@ -1101,14 +1101,18 @@ def test_shipped_score_form_is_in_sync_with_the_candidates_file() -> None:
         (ROOT / "judge_calibration" / "samples.candidates.json").read_text(encoding="utf-8")
     )
     items = [c for c in cands if isinstance(c, dict) and c.get("id")]
-    pend_ids = [str(c["id"]) for c in items if c.get("confirmed") is False]
+    # 表单覆盖**全部**条目（含已确认的：make-form 会把现值带出来防止重复劳动），
+    # 所以同步的对象是全体 id 而不是待确认子集——2026-09-27 起出现"6 条已确认、
+    # 42 条待填"的混合态，按 pend_ids 断言会让混合态永远红。
+    all_ids = [str(c["id"]) for c in items]
     scored = {str(c["id"]): c.get("human_score") for c in items if c.get("human_score") is not None}
 
     form = _form_rows(ROOT / "judge_calibration" / "score_form.csv")
-    assert [r["id"] for r in form] == pend_ids, "打分表与候选文件不同源：重新跑 --make-form"
-    assert len(form) == 48, f"待确认候选是 48 条，表里 {len(form)} 条"
+    assert [r["id"] for r in form] == all_ids, "打分表与候选文件不同源：重新跑 --make-form"
+    assert len(form) == 48, f"候选共 48 条，表里 {len(form)} 条"
     for r in form:
         if r["id"] in scored:
+            assert r["human_score"].strip(), f"{r['id']} 已确认但表里没带现值"
             assert float(r["human_score"]) == float(scored[r["id"]]), (
                 f"{r['id']} 表里与锚点文件分数不一致"
             )
