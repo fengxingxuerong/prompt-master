@@ -833,6 +833,28 @@ def evaluate_node(state: State) -> dict[str, Any]:
         rules_fn=_rules_for_case(state),
     )
     evals = [EvaluationResult.model_validate(e) for e in evaluations]
+    # 空产出硬封顶(2026-09-27 八轮校准:三家厂商两版条款都管不住空壳日报,
+    # 8.8~9.85 vs 人工 2)——从"评委自觉"下沉为代码约束,与 scoring.py 的
+    # 判定式封顶同一哲学。只动主流程达标判定;校准路径不经过此处,裸口径不变。
+    from ..scoring import apply_empty_deliverable_cap
+
+    _out_by_idx = {str(r.get("test_case_index", "0")): str(r.get("output") or "") for r in runs}
+    n_capped = 0
+    for e in evaluations:
+        raw = e.get("weighted_score")
+        if isinstance(raw, (int, float)):
+            capped = apply_empty_deliverable_cap(
+                float(raw), _out_by_idx.get(str(e.get("test_case_index", "0")), "")
+            )
+            if capped != raw:
+                e["weighted_score"] = capped
+                n_capped += 1
+    if n_capped:
+        logger.warning(
+            "空产出硬封顶:%d 条评估的加权分被压到 %.1f(空产出画像命中,原分更高)",
+            n_capped,
+            4.0,
+        )
     # 事实断言（ground-truth）：从 test_runs 收集断言结果，参与聚合的一票否决
     assertions = _merge_rule_verdicts(_collect_assertions(runs), evals)
     # 规则判定只活在 aggregate 里的话，报告的断言表看不到它（真实跑暴露的）：

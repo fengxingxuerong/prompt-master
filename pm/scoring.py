@@ -424,3 +424,21 @@ def has_empty_deliverable_profile(text: str) -> bool:
         return True
     hits = sum(stripped.count(m) for m in EMPTY_DELIVERABLE_MARKERS)
     return hits >= _EMPTY_MARKERS_NEEDED
+
+
+EMPTY_DELIVERABLE_CAP = 4.0
+
+
+def apply_empty_deliverable_cap(score: float, output: str) -> float:
+    """空产出画像命中时把加权分硬封顶到 4.0(不可用档)——确定性,不依赖评委自觉。
+
+    为什么是代码而不是提示词:2026-09-27 八轮实测——三家厂商、两版条款、两种
+    推理预算,空壳日报始终 8.8~9.85(人工 2):评委系统性地把"无可用记录"读进
+    「真正信息不足」的保护路径。凡"必须记得才生效"的规则都拦不住它;判定式
+    协议已验证过同一条哲学:硬约束交给代码。
+    只压主流程的达标判定;校准路径不经过这里——量具归量具,校准测的是评委
+    裸分,不被本封顶污染。
+    """
+    if score > EMPTY_DELIVERABLE_CAP and has_empty_deliverable_profile(output):
+        return EMPTY_DELIVERABLE_CAP
+    return score

@@ -43,3 +43,13 @@ def test_analyze_flags_high_score_on_skeleton_only() -> None:
     text = render_report("evaluator", analysis)
     assert "空产出获高分" in text
     assert "sk" in text
+
+
+def test_code_cap_binds_where_prompt_could_not() -> None:
+    """代码硬封顶:八轮实测评委两版条款都管不住空壳日报(8.85~9.85),代码管得住。"""
+    from pm.scoring import EMPTY_DELIVERABLE_CAP, apply_empty_deliverable_cap
+
+    assert apply_empty_deliverable_cap(9.85, _SKELETON) == EMPTY_DELIVERABLE_CAP
+    assert apply_empty_deliverable_cap(9.85, _MISSING_TPL) == EMPTY_DELIVERABLE_CAP
+    assert apply_empty_deliverable_cap(8.0, _GOOD) == 8.0  # 真分析不挨刀
+    assert apply_empty_deliverable_cap(2.0, _SKELETON) == 2.0  # 本就更低不抬升
