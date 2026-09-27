@@ -66,8 +66,11 @@ MAX_TOKENS: dict[str, int] = {
     "clarifier": 3000,  # 原 1500：实测 reasoning=1500 恰好吃满，正文 0
     "optimizer": 6000,  # 原 4000：与 reviser 同级（整份提示词）
     "mockgen": 4000,  # 原 2000：n 上限 8 时用例 + rationale，需留推理余量
-    "evaluator": 8000,  # 有对照：6000 → 33% 额度耗尽；8000 → 0%
-    "evaluator_b": 8000,  # 对齐 evaluator（.env 里本就是 8000）
+    "evaluator": 24000,  # 8000→24000（2026-09-27，有对照）：人工锚点校准中空产出类
+    # 锚点（空壳日报/纯拒答）在最难评的输入上反复 reasoning 耗尽 → 空 JSON → 重试 3 次
+    # 全灭（每次重试都计费，比一次长调用更贵）；24000 下同批锚点成功出分。
+    # max_tokens 是上限不是目标——正常调用不会因上限抬高而多花钱。
+    "evaluator_b": 24000,  # 对齐 evaluator
     "arbiter": 8000,  # 同 evaluator 类角色
     "reviser": 6000,  # 2026-09-12：4000 → 6000。思考型模型的 reasoning 计入 max_tokens，
     # glm-5.2 两次真实运行都在修订环节把预算耗光、返回空内容 → early_stopped；
