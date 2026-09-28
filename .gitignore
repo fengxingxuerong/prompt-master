@@ -26,6 +26,14 @@ backups/
 # 跨进程写锁句柄（pm/modelhub 的 JSON 台账用）：运行态，不属于配置
 *.lock
 
+# ModelHub 运行态台账（2026-09-28 出索引）：usage_daily 每次 API 调用都写（跟踪它 =
+# git status 常脏），vkeys/agents 是热载注册表（缺失自动从空重建，见 usage_store._load /
+# vkeys._reload）。损坏留存件 .corrupt-* 是本地排查现场，不进历史
+data/usage_daily.json
+data/usage_daily.json.corrupt-*
+data/vkeys.json
+data/agents.json
+
 # 一次性终端输出别再落回仓库根（历史证据已归档到 releases/archive/coverage-notes-20260925/）
 /.cov*.txt
 /pytest_summary.txt

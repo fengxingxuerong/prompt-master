@@ -3,7 +3,8 @@
 补这块的理由和 `tests/test_modelhub_pool_and_keys.py` 同源：网关的验收用例都在
 `tests_modelhub/` 那堆脚本里（pytest 收集 0 条），所以"记账对不对"这件事在流水线里
 没人看过。而台账是 `/v1/ledger`、看板、故障复盘的唯一事实源，`usage_daily.json`
-更是出过事的文件（仓库里还躺着一份 `data/usage_daily.json.corrupt-20260922-165846`）。
+更是出过事的文件（当时仓库里还躺着一份 `data/usage_daily.json.corrupt-20260922-165846`，
+2026-09-28 已随 data/ 运行态台账移出 git 跟踪一起清理）。
 
 这里盯三条性质：① 写台账绝不影响主流程（但必须把失败说出来）；② 检索的过滤/排序/limit
 语义；③ 聚合文件坏了要**留存现场**而不是静默清零，且并发记账不能丢笔。
