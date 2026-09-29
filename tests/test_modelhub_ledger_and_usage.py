@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -295,3 +296,37 @@ def test_concurrent_records_lose_nothing(isolated: Path) -> None:
     day = US.load_daily()[_today()]
     assert day["calls"] == 8 * rounds, f"并发记账丢笔：{day['calls']} != {8 * rounds}"
     assert day["by_model"]["m"]["calls"] == 8 * rounds
+
+
+def test_record_call_retries_windows_replace_lock(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AV 短锁 os.replace（WinError 5）时有界重试兜回，一笔不丢。
+
+    2026-09-29 实测偶发：8×5 并发记账丢 4 笔，线程栈是
+    os.replace → PermissionError（杀毒/索引短暂打开刚写完的文件）。
+    确定性复现：前两次 replace 抛 PermissionError，第三次必须成功落盘。
+    """
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def flaky_replace(src: Any, dst: Any) -> None:
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise PermissionError(5, "拒绝访问。")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(US.os, "replace", flaky_replace)
+    US.record_call(
+        model="m",
+        agent="bot",
+        role="",
+        success=True,
+        latency_ms=1,
+        failovers=0,
+        content_chars=1,
+    )
+    # 不 monkeypatch.undo()：它会连 isolated fixture 的 PMH_DATA_DIR 一起撤掉。
+    # flaky_replace 在第 3 次后直接透传 real_replace，无残留副作用。
+    assert calls["n"] == 3, f"应重试至第 3 次成功，实际调了 {calls['n']} 次"
+    assert US.load_daily()[_today()]["calls"] == 1

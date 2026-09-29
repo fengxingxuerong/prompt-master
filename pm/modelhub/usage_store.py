@@ -102,6 +102,23 @@ def _merge(
         ent["success"] += 1
 
 
+def _atomic_replace(tmp: Path, p: Path) -> None:
+    """os.replace 的 Windows 短锁重试。
+
+    实时杀毒/索引扫描会短暂打开刚写完的文件，replace 随即 WinError 5
+    （2026-09-29 并发记账实测偶发：8×5 笔丢 4 笔，线程栈即此行）。
+    有界重试把环境竞态兜回来；耗尽仍失败照抛——调用侧可见，不静默丢笔。
+    """
+    for attempt in range(3):
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:
+            if attempt == 2:
+                raise
+            time.sleep(0.02 * (attempt + 1))
+
+
 def record_call(
     *,
     model: str,
@@ -129,7 +146,7 @@ def record_call(
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.replace(tmp, p)
+        _atomic_replace(tmp, p)
 
 
 def load_daily() -> dict[str, Any]:
