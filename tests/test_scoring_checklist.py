@@ -187,6 +187,63 @@ def test_fabrication_lands_on_constraint_and_robustness_together() -> None:
 
 
 # --------------------------------------------------------------------------
+# 顶档举证门槛：band 5 不是"选了就给"（docs/evaluation.md §十三 的重开前置条件）
+# --------------------------------------------------------------------------
+def test_band5_full_positive_evidence_keeps_9_5() -> None:
+    """全满足且逐条有非占位证据：顶档如实给 9.5，不降档。"""
+    dims, detail = S.score_checklist(_all_ok(band=5), _CHECKLIST)
+    assert dims.quality == 9.5
+    assert "band_downgraded" not in detail
+
+
+def test_band5_missing_one_evidence_downgrades_to_8_5() -> None:
+    """全部判满足、但一条证据是占位语：顶档必须降 8.5（复用 _is_placeholder 口径）——
+    否则"没举证"与"举了证"在分数上没有区别，17 条锚点 10 条挤在 9.35 的塌陷就会回来。"""
+    ev = _all_ok(band=5)
+    ev.verdicts[0] = ev.verdicts[0].model_copy(update={"evidence": "无"})
+    dims, detail = S.score_checklist(ev, _CHECKLIST)
+    assert dims.quality == 8.5
+    assert "证据" in detail["band_downgraded"]
+    assert detail["quality_band"] == 5, "原始档位留痕：说了什么与采信什么分开"
+
+
+def test_band5_with_unanswered_downgrades_to_8_5() -> None:
+    """漏答一条：顶档降 8.5，理由必须点名"未回答"（与"答了不满足"分得开）。"""
+    verdicts = [
+        CheckVerdict(item=r["item"], satisfied=True, evidence="x")
+        for r in _CHECKLIST
+        if r["item"] != _CHECKLIST[0]["item"]
+    ]
+    ev = ChecklistEvaluation(
+        n_items_checked=len(verdicts), verdicts=verdicts, unsourced=[], quality_band=5
+    )
+    dims, detail = S.score_checklist(ev, _CHECKLIST)
+    assert dims.quality == 8.5
+    assert "未回答" in detail["band_downgraded"]
+
+
+def test_band5_with_unsatisfied_item_downgrades_to_8_5() -> None:
+    """一条不满足：顶档同样降 8.5（清单已有下压项，顶档不再成立）。"""
+    items = {r["item"]: True for r in _CHECKLIST}
+    items[_CHECKLIST[0]["item"]] = False
+    dims, detail = S.score_checklist(_ev(items, band=5), _CHECKLIST)
+    assert dims.quality == 8.5
+    assert detail["band_downgraded"] == "存在不满足条目"
+
+
+def test_band_below_5_untouched_by_gate() -> None:
+    """门槛只压顶档：band 4/3 缺证据时拿它们本来的分值、不产生降档标记——
+    防止未来有人把门槛扩成全局。"""
+    ev = _all_ok(band=4)
+    ev.verdicts[0] = ev.verdicts[0].model_copy(update={"evidence": ""})
+    dims, detail = S.score_checklist(ev, _CHECKLIST)
+    assert dims.quality == 8.5  # 4 档本来的分值（与降档后的 5 档同值，语义不同）
+    assert "band_downgraded" not in detail
+    dims3, _ = S.score_checklist(_all_ok(band=3), _CHECKLIST)
+    assert dims3.quality == 6.5
+
+
+# --------------------------------------------------------------------------
 # 适用性门禁与协议开关
 # --------------------------------------------------------------------------
 def test_checklist_usable_rejects_thin_prompts() -> None:
@@ -293,6 +350,38 @@ def test_merge_quality_takes_the_lower_band() -> None:
         }
     )
     assert S.merge_checklist_results(hi, lo, cl).dimension_scores.quality == 6.5
+
+
+def test_merge_propagates_band_downgrade_marker() -> None:
+    """合并结果的 trace 里要能看到"为什么 quality 是 8.5"：降档标记跟着走。"""
+    cl = [{"item": "[约束] a", "bucket": "constraint"}]
+    hi = EvaluationResult(
+        dimension_scores=DimensionScores(
+            task_completion=9.5,
+            format_adherence=9.5,
+            constraint_compliance=9.5,
+            robustness=9.5,
+            quality=9.5,
+        ),
+        model_reported_score=9.5,
+        judge="evaluator",
+        checklist_detail={},
+    ).finalize()
+    lo = hi.model_copy(
+        update={
+            "judge": "evaluator_b",
+            "dimension_scores": hi.dimension_scores.model_copy(update={"quality": 8.5}),
+            "checklist_detail": {
+                "violations": [],
+                "unanswered": [],
+                "unsourced_unexplained": [],
+                "band_downgraded": "1 条缺正面证据（如：[约束] a）",
+            },
+        }
+    )
+    merged = S.merge_checklist_results(hi, lo, cl)
+    assert merged.dimension_scores.quality == 8.5
+    assert merged.checklist_detail["band_downgraded"] == "1 条缺正面证据（如：[约束] a）"
 
 
 def test_scoring_mode_defaults_to_impression(monkeypatch: pytest.MonkeyPatch) -> None:

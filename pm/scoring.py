@@ -214,12 +214,40 @@ def score_checklist(
         buckets["constraint"].append(_FABRICATION_ITEM)
         buckets["robustness"].append(_FABRICATION_ITEM)
 
+    # 顶档举证门槛（docs/evaluation.md §十三 的重开 A/B 前置条件，2026-09-28 落地）：
+    # 实测 17 条锚点里 10 条挤在同一个 9.35 —— 清单无违规就没有下压项，评委只要选
+    # 顶档总分就是常数，"稳"是读数塌掉而不是量具变好。所以顶档不再是"选了就给"：
+    # 每条判据都要交出非占位的正面证据，否则代码侧降到第 4 档。
+    # 判定顺序 unanswered → 不满足 → 缺证据：unanswered 已被计入 violated，先单查它
+    # 是为了让降档理由分得清"没答"与"答了不满足"两种形态。
+    # 有意不做第四条：编造（unsourced_unexplained 非空）不参与门槛——它已触发 6.0
+    # 封顶支配总分，quality 拿 9.5 还是 8.5 不改变判定结果，多加条件只多一种理由形态。
+    band = int(ev.quality_band)
+    quality = _BAND_POINTS.get(band, 6.5)
+    band_downgraded: str | None = None
+    if band >= 5:
+        if unanswered:
+            band_downgraded = f"{len(unanswered)} 条清单未回答"
+        elif violated:
+            band_downgraded = "存在不满足条目"
+        else:
+            needed = {_norm(row["item"]) for row in checklist}
+            missing = [
+                v.item
+                for v in ev.verdicts
+                if _norm(v.item) in needed and _is_placeholder(v.evidence)
+            ]
+            if missing:
+                band_downgraded = f"{len(missing)} 条缺正面证据（如：{missing[0]}）"
+        if band_downgraded:
+            quality = _BAND_POINTS[4]
+
     dims = DimensionScores(
         task_completion=_points(buckets["deliverable"], violated_set),
         format_adherence=_points(buckets["format"], violated_set),
         constraint_compliance=_points(buckets["constraint"], violated_set),
         robustness=_points(buckets["robustness"], violated_set),
-        quality=_BAND_POINTS.get(int(ev.quality_band), 6.5),
+        quality=quality,
     )
     caps: list[float] = [_FABRICATION_CAP] if fab else []
     details: dict[str, Any] = {
@@ -234,6 +262,9 @@ def score_checklist(
         "quality_band": int(ev.quality_band),
         "bucket_sizes": {k: len(v) for k, v in buckets.items()},
     }
+    if band_downgraded:
+        # 降档只写事实：quality_band 留的是评委原始档位，说了什么与采信什么分开留痕
+        details["band_downgraded"] = band_downgraded
     return dims, details
 
 
@@ -356,6 +387,12 @@ def merge_checklist_results(
         "n_items": len(checklist),
         "merged_from": [ev_a.judge, ev_b.judge],
     }
+    # 顶档降档标记的传播（不做二次判定）：两侧各自过 score_checklist 时门槛已生效，
+    # quality 取 min 天然保留较低侧；在这里重跑一遍门槛等于第二份实现，
+    # 正是"主管道与校准共用同一协议"要防的漂移点。
+    downgrades = [d for d in (da.get("band_downgraded"), db.get("band_downgraded")) if d]
+    if downgrades:
+        detail["band_downgraded"] = "；".join(downgrades)
     weighted, passed = apply_caps(dims, detail)
     return EvaluationResult(
         dimension_scores=dims,
