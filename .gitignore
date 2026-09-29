@@ -54,6 +54,7 @@ examples/sample_report.md
 # IDE / 系统
 .idea/
 .vscode/
+.trae/
 .DS_Store
 Thumbs.db
 
