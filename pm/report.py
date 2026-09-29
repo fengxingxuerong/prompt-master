@@ -108,6 +108,53 @@ def pick_best(state: ReportState) -> tuple[dict[str, Any], str]:
     return {"iteration": 0, "prompt": ""}, "无可用版本"
 
 
+def _calibration_disclosure(agg: ReportState) -> str | None:
+    """校准披露行：把账本里量得的评委系统性偏差折进报告的读数语境。
+
+    2026-09-29 落地，依据 docs/evaluation.md §十五：48 锚点人工基线把「评委 A
+    系统性偏松 bias +3.64、8.0 判定漏放 35/45」坐实——绝对分不带这把尺子的
+    已知误差就会被误读，8.2 不是"接近满分"，折算后约 4.6。与空产出封顶同一
+    哲学的另一半：**只披露、不修复**——点估计、判定行、保守下界全部照旧，
+    读者拿误差棒自己折算。
+
+    偏差在告警线（±1.0，calibration.BIAS_ALERT）内时降为弱措辞，否则未来换了
+    校准合格的评委，报告还在喊狼来了。
+    """
+    from .calibration import BIAS_ALERT, latest_pooled
+
+    cal = latest_pooled()
+    if not cal:
+        return None
+    bias = cal.get("bias")
+    if not isinstance(bias, (int, float)):
+        return None
+    ci = cal.get("bias_ci95")
+    ci_note = (
+        f"（95% CI {ci[0]:+.2f}~{ci[1]:+.2f}）" if isinstance(ci, list) and len(ci) == 2 else ""
+    )
+    src_parts = [str(cal.get(k)) for k in ("n_anchors", "n_rounds") if isinstance(cal.get(k), int)]
+    src = f"{src_parts[0]} 条人工锚点、{src_parts[1]} 轮校准的" if len(src_parts) == 2 else ""
+    avg = agg.get("avg_score")
+    if abs(bias) < BIAS_ALERT:
+        return (
+            f"- 评委校准披露：{src}聚合平均偏差 {bias:+.2f}{ci_note}，在告警线"
+            f"（±{BIAS_ALERT}）内，绝对分可按面值理解"
+        )
+    direction = "偏松" if bias > 0 else "偏严"
+    kappa = (cal.get("decision") or {}).get("kappa")
+    kappa_note = f"，κ={kappa}" if isinstance(kappa, (int, float)) else ""
+    fold = (
+        f"；本报告均分 {avg} 按此折算约 **{max(0.0, float(avg) - float(bias)):.1f}**"
+        if isinstance(avg, (int, float))
+        else ""
+    )
+    return (
+        f"- ⚠️ 评委校准披露：{src}聚合平均偏差 **{bias:+.2f}**{ci_note}——评委系统性{direction}"
+        f"已实测坐实{fold}。{PASS_THRESHOLD} 达标判定在裸读数下不可采信{kappa_note}，"
+        "达标结论建议人工抽查复核（量具刻画见 docs/evaluation.md §十五）"
+    )
+
+
 def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     """渲染 Markdown 交付报告，返回 (报告文本, 选定的交付版本)。"""
     status = state.get("status", "running")
@@ -187,6 +234,9 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
                 else ""
             )
         )
+        cal_line = _calibration_disclosure(agg)
+        if cal_line:
+            lines.append(cal_line)
         # 这台"放水探测器"其实大部分是恒零的：提示词把权重给了模型、演算示例直接示范
         # 怎么求加权，而 model_reported_score 又排在 dimension_scores 之后生成——
         # 实测 109 次原始评委调用里评委 A 有 80%、仲裁 88% 是**逐字复述**加权结果。

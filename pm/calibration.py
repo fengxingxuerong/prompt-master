@@ -726,6 +726,29 @@ def aggregate_history(
     }
 
 
+def latest_pooled(judge: str = "evaluator") -> dict[str, Any] | None:
+    """当前评分口径下，校准账本的跨轮聚合读数（None=没有可聚合的账本）。
+
+    给交付报告的校准披露行用：报告渲染不自己翻账本算 bootstrap——量具
+    刻画全部收口在 aggregate_history，这里只负责"找到账本、对上口径"。
+    读不到账本不是错误（新检出没有校准历史时报告不披露即可）；文件坏了
+    也返回 None，披露行缺席总比渲染崩掉好。
+    """
+    from .cli.support import log_dir  # 局部 import：晚绑定 PM_LOG_DIR，不顶层拉 CLI 层
+    from .scoring import scoring_mode
+
+    path = log_dir() / "judge_calibration_history.json"
+    try:
+        history = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(history, list):
+        return None
+    # aggregate_history 返回 {pooled, rounds, ...} 外层结构；披露行只消费 pooled。
+    result = aggregate_history(history, judge=judge, mode=scoring_mode())
+    return result.get("pooled") if result else None
+
+
 def render_aggregate(agg: dict[str, Any] | None) -> str:
     """跨轮聚合读数的渲染。agg 为 None 返回空串——"没有可聚合的账本"不是一件事。"""
     if not agg:

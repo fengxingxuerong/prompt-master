@@ -138,6 +138,55 @@ def test_unstable_cases_and_judge_bias_are_surfaced():
     assert "评委在放水" in text
 
 
+# ---- 校准披露行（2026-09-29）：账本里量得的评委偏差必须折进报告读数语境 ----
+# 依据 §十五：48 锚点基线 bias +3.64 坐实评委系统性偏松，裸读数会被误读。
+# conftest 的 seal_calibration_ledger 已把 PM_LOG_DIR 钉进 tmp_path，所以
+# "无账本→不披露"是默认态；有账本的用例自己往 tmp 里写 fixture。
+
+
+def _write_ledger(monkeypatch: pytest.MonkeyPatch, tmp_path, items: list[dict]) -> None:
+    """往被密封的产物目录里写一份只含一轮的校准账本。"""
+    import json
+
+    ledger = tmp_path / "judge_calibration_history.json"
+    ledger.write_text(
+        json.dumps([{"ts": "2026-09-29 10:00:00", "judge": "evaluator", "items": items}]),
+        encoding="utf-8",
+    )
+
+
+def test_calibration_disclosure_folds_known_bias(monkeypatch, tmp_path):
+    """bias ≥ 告警线：披露行必须给出折算读数，并声明裸判定不可采信。"""
+    _write_ledger(
+        monkeypatch,
+        tmp_path,
+        [{"id": f"a{i}", "human": 2.0, "judge": 6.0} for i in range(6)],  # bias = +4.0
+    )
+    text, _ = render_report(_state(aggregate=_agg(avg_score=8.2)))
+    assert "评委校准披露" in text
+    assert "系统性偏松" in text
+    assert "折算约 **4.2**" in text, "8.2 − 4.0：不折算，读者会把 8.2 读成接近满分"
+    assert "不可采信" in text, "达标判定行还在渲染，但必须声明它不可采信"
+
+
+def test_calibration_disclosure_quiet_when_bias_small(monkeypatch, tmp_path):
+    """bias < 告警线：弱措辞，不喊狼来了——未来换合格评委时报告措辞要跟得上。"""
+    _write_ledger(
+        monkeypatch,
+        tmp_path,
+        [{"id": f"a{i}", "human": 6.0, "judge": 6.4} for i in range(6)],  # bias = +0.4
+    )
+    text, _ = render_report(_state(aggregate=_agg(avg_score=8.2)))
+    assert "可按面值理解" in text
+    assert "不可采信" not in text
+
+
+def test_calibration_disclosure_absent_without_ledger():
+    """conftest 已密封 PM_LOG_DIR（tmp 里无账本）：不披露，渲染不炸。"""
+    text, _ = render_report(_state())
+    assert "评委校准披露" not in text
+
+
 def test_cases_short_note_blocks_inflated_confidence():
     state = _state(aggregate=_agg(n_cases=1, n_cases_expected=8, cases_complete=False))
     text, _ = render_report(state)
