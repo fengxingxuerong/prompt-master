@@ -14,7 +14,7 @@ from pm import cache as cache_mod
 from pm import llm as llm_mod
 from pm.graph import build_app
 from pm.llm import build_config, call_fingerprint
-from pm.nodes import _build_feedback, evaluate_node, mock_node, revise_node
+from pm.nodes import _build_feedback, evaluate_node, mock_node, optimize_node, revise_node
 from pm.prompts import EVALUATOR_USER, OPTIMIZER_USER, render
 from pm.quality import EXTRA_LEAK_MARKERS, LEAK_TAGS, check_prompt_quality
 from pm.scheduler import TaskManager
@@ -186,6 +186,26 @@ def test_revise_empty_terminates_without_duplicate_version():
     assert "prompt_versions" not in out, "不能追加一条与上一版相同的版本"
     assert out["early_stop_reason"]
     assert any("修订返回空内容" in e for e in out["errors"])
+
+
+# --------------------------------------------------------------------------
+# 2026-09-30 两轮 E2E 实测：optimize 返回空提示词（两轮复发）→ 无早停兜底，
+# 空 prompt 继续跑完整评估循环，浪费 50+ 次调用。对齐 revise：空产物直接早停。
+# --------------------------------------------------------------------------
+def test_optimize_empty_early_stops_without_version():
+    def plain(role, system, user, overrides=None):
+        # 空产物会让质量门判 too_short 触发带 hint 重试，重试仍空
+        return "", {"model": "fake", "channel": "plain", "attempts": 1, "latency_ms": 1}
+
+    state = initial_state(task="t", target_model="fake", n_test_cases=2)
+    with testing.scope("progress", plain=plain):
+        out = optimize_node(state)  # type: ignore[arg-type]
+    assert out["status"] == "early_stopped"
+    assert out["early_stop_reason"]
+    assert any("优化器返回空提示词" in e for e in out["errors"])
+    assert "prompt_versions" not in out, "空提示词不得追加为版本"
+    assert "prompt" not in out, "空提示词不得覆盖 state 里的 prompt"
+    assert out["llm_calls"] >= 2, "质量门重试的调用也要如实入账"
 
 
 # --------------------------------------------------------------------------

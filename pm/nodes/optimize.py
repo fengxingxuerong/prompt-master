@@ -85,6 +85,24 @@ def optimize_node(state: State) -> dict[str, Any]:
             error=str(e),
         )
 
+    # 2026-09-30 两轮 E2E 实测：optimizer 空产物连续发生（两轮都返回空提示词），
+    # 空 prompt 继续跑完整评估循环 = 浪费 50+ 次调用。与 revise 对齐：空产物直接早停。
+    if not prompt.strip():
+        logger.warning("优化器返回空提示词，终止流程并如实入账")
+        return _apply(
+            state,
+            node,
+            {
+                "status": "early_stopped",
+                "early_stop_reason": "优化器返回空内容（端点截断/思考耗尽），无可优化提示词",
+                "errors": ["optimize: 优化器返回空提示词，无法继续优化流程"],
+                "llm_calls": state.get("llm_calls", 0) + calls,
+                "prompt_quality_issues": [{"iteration": 0, "issues": q_report.describe()}],
+            },
+            "optimize_empty",
+            calls=calls,
+        )
+
     versions = list(state.get("prompt_versions", []))
     versions.append(PromptVersion(iteration=0, prompt=prompt, note="初版").model_dump())
 

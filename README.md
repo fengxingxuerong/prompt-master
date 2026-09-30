@@ -57,7 +57,11 @@ MCP 接入（10 个工具，stdio）：`python -m pm.mcp_server`。计算类工�
   等幅失守（4.1~4.4）⇒ 是评分协议缺了所有者的标准，不是某个模型的锅。
   已落地：空产出与安全可见性两类盲区有了提示词条款 + 代码硬封顶（校准口径不含封顶，
   量的是评委裸分）；完整实验链见 `docs/evaluation.md` §十四/§十五。
-  ⚠️ 锚点 23/48，聚合 CI 宽 2.66——方向性结论可信，精细比较还不行。
+  ⚠️ 考卷已换过三张（9-27 首批 23 条 → candidates 48 条全确认 → 9-29 叠加 19 条
+  A/B 考卷，聚合覆盖 64 条）：最近 4 轮 impression 聚合（2026-09-30 零调用重算）
+  MAE 3.13［95% CI 2.42~3.86，宽 1.44］、bias +3.09、一致率 0.368、κ 0.074——
+  放水方向未变；CI 宽 1.44 且轮间考卷不同，「评委变好/变坏」的精细比较与
+  逐轮趋势对比均不成立，单轮读数仍是 ±极差量级的方向参考。
   量化工具：`run.py calibrate --aggregate`（零调用，口径见 §十四）。
   口径与逐轮记录见 `docs/evaluation.md`，账本在 `logs/judge_calibration_history.json`。
 - **判定式评分协议（`PM_SCORING_MODE=checklist`）默认关闭，且已被实测否证**。它把五个整数的
@@ -78,9 +82,10 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；918 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；919 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
-judge_calibration/  评委校准锚点集（samples.json 已确认 / samples.candidates.json 待人工分）
+judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
+                    AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）
 case_templates/     可直接喂 --cases-file 的 5 份领域用例集
 releases/           三服务套件与历史发布快照（不是本产品）
 logs/               运行产物（run_*.json / report_*.md / 缓存），gitignored，会持续膨胀

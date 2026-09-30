@@ -38,6 +38,16 @@ def legacy_measurement_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def pin_force_json_channel_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """宿主机 .env 的 PM_FORCE_JSON_CHANNEL=1（2026-09-30：sensenova 结构化输出引擎
+    全程 500，本地强制走文本通道）会经 load_dotenv 灌进测试进程，让默认走通道 A 的
+    用例被静默切到文本通道（假 _ToolLLM 没有 .invoke，直接炸）。钉回默认 0；
+    需要强制文本通道的用例自己 setenv（test_llm_branches 已如此）。
+    """
+    monkeypatch.setenv("PM_FORCE_JSON_CHANNEL", "0")
+
+
+@pytest.fixture(autouse=True)
 def no_shared_disk_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     """默认关掉落盘缓存：不让开发机 `logs/*_cache.json` 里的残留决定测试结果。
 
