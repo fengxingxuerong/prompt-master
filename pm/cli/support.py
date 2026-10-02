@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from pm.state import SEED_PROMPT_MAX_CHARS
+
 # 原 run.py 同款：仓库根/logs（拆包后 __file__ 深了两层，改用 parents[2] 回到仓库根）
 _DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
 # 兼容旧导出名（run.py / pm.cli 都转发过它）。⚠️ 运行期取路径请用 `log_dir()`，
@@ -40,6 +42,42 @@ def setup_logging(verbose: bool) -> None:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         logging.getLogger("openai").setLevel(logging.WARNING)
+
+
+def read_seed_prompt(p: argparse.ArgumentParser, args: argparse.Namespace) -> str:
+    """读取并护栏化原稿（--prompt / --prompt-file）；两者都没给时返回空串。
+
+    同步 CLI 与 `submit` 子命令共用这一个函数：两条入口对原稿的护栏必须同数，
+    否则同一份文件在一条路上能跑、另一条路上把成本护栏绕过去。
+    """
+    raw_prompt = getattr(args, "prompt", None)
+    raw_file = getattr(args, "prompt_file", None)
+    if raw_prompt and raw_file:
+        p.error("--prompt 与 --prompt-file 互斥，二选一")
+    if not raw_prompt and not raw_file:
+        return ""
+    raw = ""
+    if raw_file:
+        try:
+            raw = Path(raw_file).read_text(encoding="utf-8")
+        except OSError as e:
+            p.error(f"--prompt-file 读取失败：{e}")
+    else:
+        raw = str(raw_prompt)
+    seed = raw.strip()
+    # 下限 8 字：短到这个程度基本是把需求粘错了参数（那种情况该走 --task），
+    # 与其让它进改进器白烧一轮调用，不如当场指出入口用错了
+    if len(seed) < 8:
+        p.error(
+            f"原稿只有 {len(seed)} 字，不像是成形的提示词。"
+            "如果这是需求描述，请改用 --task；原稿改进模式要求 --prompt 是你要改的那一版提示词"
+        )
+    if len(seed) > SEED_PROMPT_MAX_CHARS:
+        p.error(
+            f"原稿 {len(seed)} 字符超过上限 {SEED_PROMPT_MAX_CHARS}："
+            "它会作为基线臂进 target 端点每条用例的每次调用，上不封顶等于绕过成本护栏"
+        )
+    return seed
 
 
 def _resolve_case_mode(

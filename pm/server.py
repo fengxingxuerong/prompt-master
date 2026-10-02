@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from . import __version__ as PKG_VERSION
 from .ratelimit import SlidingWindowLimiter, parse_rate_limit_env
 from .scheduler import TaskManager
+from .state import SEED_PROMPT_MAX_CHARS
 from .store import store_from_env
 from .web import WEB_CONSOLE_HTML
 
@@ -353,6 +354,12 @@ class OptimizeRequest(BaseModel):
         pattern=r"^(|exact|contains|regex|rule|custom:[a-zA-Z][a-zA-Z0-9_]*)$",
         description="事实断言模式；空 = contains，rule = 把 expected 当需求规则交评委核验",
     )
+    seed_prompt: str = Field(
+        default="",
+        max_length=SEED_PROMPT_MAX_CHARS,
+        description="待改进的用户原稿提示词。非空时 optimize 节点走改进分支（保留原稿术语、"
+        "只做最小改动），且基线臂换成这份原稿——返回的 Δ 读作「比你自己的版本好多少」",
+    )
 
 
 class OptimizeResponse(BaseModel):
@@ -490,6 +497,7 @@ async def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
         max_iterations=req.max_iterations,
         test_cases=seeds,
         assertion_mode=req.assertion_mode,
+        seed_prompt=req.seed_prompt.strip(),
     )
     return OptimizeResponse(
         run_id=run_id, message=f"任务已提交，查询状态：GET /api/status/{run_id}"

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from .history import _TERMINAL_STATUS
-from .support import EXIT_FAILED, _result_exit_code, assert_mode_arg
+from .support import EXIT_FAILED, _result_exit_code, assert_mode_arg, read_seed_prompt
 
 
 def _http_json(
@@ -64,6 +64,12 @@ def _build_agent_parser(cmd: str) -> argparse.ArgumentParser:
             "（与同步 CLI 的 --assert-mode 同一解析器，白名单不分叉）",
         )
         ap.add_argument("--max-iter", type=int, default=3)
+        ap.add_argument(
+            "--prompt",
+            help="待改进的原稿提示词（你已经写好的那一版）。给定时基线臂换成它，"
+            "报告的 Δ 读作「比你自己的版本好多少」",
+        )
+        ap.add_argument("--prompt-file", help="从文件读取原稿提示词（与 --prompt 互斥）")
     else:
         ap.add_argument("run_id", help="submit 返回的 run_id")
     if cmd == "report":
@@ -75,7 +81,8 @@ def _build_agent_parser(cmd: str) -> argparse.ArgumentParser:
 
 
 def agent_subcommand(cmd: str, argv: list[str]) -> int:
-    ns = _build_agent_parser(cmd).parse_args(argv)
+    ap = _build_agent_parser(cmd)
+    ns = ap.parse_args(argv)
     base = _agent_server(ns)
 
     if cmd == "submit":
@@ -86,6 +93,11 @@ def agent_subcommand(cmd: str, argv: list[str]) -> int:
             "max_iterations": ns.max_iter,
             "assertion_mode": ns.assert_mode if ns.cases_file else "contains",
         }
+        # 原稿护栏与同步 CLI 同一个函数：两条入口对 --prompt/--prompt-file 的
+        # 互斥、长度上下限必须同数，分叉迟早变成"一边能跑一边白烧钱"
+        seed = read_seed_prompt(ap, ns)
+        if seed:
+            payload["seed_prompt"] = seed
         if ns.cases_file:
             raw = json.loads(Path(ns.cases_file).read_text(encoding="utf-8"))
             payload["test_cases"] = [

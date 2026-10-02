@@ -28,26 +28,33 @@ PM_FAKE_BACKEND=progress python run.py --task "让 AI 分析销售数据" --fast
 python run.py --preflight                       # 花大钱之前先逐角色冒烟，必做
 python run.py --task "让 AI 分析销售数据" --target-model deepseek-v3
 
+# 2b) 已经有一版提示词了：先免费体检，再决定要不要花钱改
+python run.py check --prompt-file 我的提示词.md          # 零调用，命中规则就退出码 1
+python run.py --task "让 AI 分析销售数据" --prompt-file 我的提示词.md
+#     ↑ 带 --prompt-file 时基线臂自动换成你的原稿，报告里的 Δ 即「比你自己的版本好多少」
+
 # 3) 长任务别占终端：起常驻服务，用子命令
 python run_server.py &                          # REST + Web 控制台 + MCP 同源，:8080
 python run.py submit --task "……"                # 秒回 run_id
 python run.py wait <run_id>                     # 轮询到终态，输出结果 JSON
 ```
 
-`python run.py --help` 会列出全部参数与**子命令**（`submit/status/report/wait/history/calibrate/library`）。
+`python run.py --help` 会列出全部参数与**子命令**（`submit/status/report/wait/history/calibrate/library/check`）。
 退出码是给 Agent 做分支的协议：`0` 达标交付 / `1` 未达标但已交付 / `2` 参数或配置错误 / `3` 运行失败。
 加 `--json` 时 stdout 恰好一个 JSON 对象，进度全部走 stderr。
 
-## 二、四条能力线
+## 二、五条能力线
 
 | 线 | 命令 | 说明 |
 |---|---|---|
 | 优化闭环 | `run.py --task`（或 `POST /api/optimize`） | 澄清 → 生成 → 用例 → 执行 → 评估 → 修订，最多 N 轮；带基线对照与成对盲评 |
+| 原稿改进 | 加 `--prompt-file 我的提示词.md` | 不从零生成：对**你已有的那一版**做最小改动（保留术语与字段名），基线臂自动换成原稿，Δ 读作「比你自己的版本好多少」 |
+| 静态体检 | `run.py check --prompt-file x.md --json` | **零调用、零出网**：用优化闭环里那套代码侧规则当场量一份提示词（约束超载 / 抑制型条款 / 元话语泄漏 / 定界符…），退出码 0=无命中 1=有命中 |
 | 事实断言 | `--cases-file cases.json --assert-mode rule` | 你给的 `expected` 有一票否决权；`rule` 模式交评委逐条核验，`custom:<名>` 可挂你自己的断言函数 |
 | 资产与记忆 | `run.py library` / `run.py history` | 达标提示词可按任务相似度检索、导出；history 给 Δ 与显著性 |
 | 评委可信度 | `run.py calibrate [--repeat N]` | 锚点人工分 vs 评委分（MAE/偏置/排序一致性）+ 评委自我复现性极差 |
 
-MCP 接入（10 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
+MCP 接入（11 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
 
 ## 三、这个产品对自己的结论有多硬（先读这节再用它给的分数）
 
@@ -82,7 +89,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；919 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；955 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）
@@ -96,13 +103,16 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
 
 1. **仪表未收敛**（见 §三）——产品输出的核心数字仍带 ±1~2 量级的自身抖动，
    而这个"量级"本身也是逐轮摆动的读数，不是这把尺子的固定精度。
-2. **覆盖率有门禁了，但它是地板不是目标**（2026-09-25 深夜独占复测，全量 rc=0）：
-   `pm/` 全量实测 **93.49%**（地板 92），拆开看 `pm/` 去掉网关 95.6%、
-   `pm/modelhub/*` **87.1%**（地板 82）。这块从 33.5% 补上来：`agents.py` 0→100%、
+2. **覆盖率有门禁了，但它是地板不是目标**（2026-10-02 独占复测，全量 955 条 rc=0）：
+   `pm/` 全量实测 **93.37%**（地板 92），拆开看 `pm/` 去掉网关 **94.91%**、
+   `pm/modelhub/*` **86.37%**（地板 82）。这块从 33.5% 补上来：`agents.py` 0→100%、
    `pool.py` 61%→85%、`vkeys.py` 21%→92%、`streaming.py` 7%→89%。剩下的缺口很集中在
    `server.py` 361-444 与 `pool.py` 331-367，两段都要活上游才走得到。
    薄弱的那块恰好是出过"流式通道整条失效而测试全绿"事故的那块。
-   以前文档写的"94%"是手抄的、没有任何东西守着它。逐轮实测表与口径见 `docs/operations.md`；
+   ⚠️ 与上一轮（2026-09-25）比：全量 93.49%→93.37%、网关 87.1%→86.37%，**两条都低 0.1~0.7pp**；
+   本轮新增的 36 条全在原稿改进模式那侧、没给 `pm/modelhub/*` 加用例，
+   但差值本身没做逐文件归因（只有两个总数时不许编归因）。以前文档写的"94%"是手抄的、
+   没有任何东西守着它。逐轮实测表与口径见 `docs/operations.md`；
    **上面两个"地板"是配置抄件，与 `pyproject.toml` / `ci.yml` / `docs/operations.md` 的同数关系由
    `tests/test_packaging.py::test_coverage_floors_agree_across_all_copies` 钉住** —— 改地板要四处一起改。
 3. **多进程是显式前提，不是默认**：任务表默认进程内内存（`--workers > 1` 必须先设 `PM_TASK_DB`）、

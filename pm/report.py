@@ -27,6 +27,11 @@ BASELINE_DISCRIMINATION_FLOOR = 8.0
 ReportState = Mapping[str, Any]
 
 
+def _seed_arm(state: ReportState) -> str:
+    """原稿改进模式下的用户原稿；没交原稿时为空串（基线臂=原始需求直喂）。"""
+    return str(state.get("seed_prompt") or "").strip()
+
+
 def _report_safe_int(value: Any) -> int:
     """尽力取非负整数，取不到就是 0（state 里的字段类型不可信）。
 
@@ -172,6 +177,13 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     if state.get("early_stop_reason"):
         lines.append(f"- 提前终止：{state['early_stop_reason']}")
     lines.append(f"- 目标模型：`{state.get('target_model')}`")
+    if _seed_arm(state):
+        # 基线语义随模式改变，必须在头部就说清：否则读者把 Δ 当成"比不优化好多少"读，
+        # 而它实际是"比交来的那份原稿好多少"
+        lines.append(
+            f"- 模式：原稿改进（输入原稿 {len(_seed_arm(state))} 字符；"
+            "基线 = 用户原稿，Δ 读作「比你自己的版本好多少」）"
+        )
     lines.append(f"- LLM 调用次数：{state.get('llm_calls', 0)}")
     lines.append("")
 
@@ -353,7 +365,11 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         d_min = round(
             float(agg.get("min_score", 0.0) or 0.0) - float(base.get("min_score", 0.0) or 0.0), 2
         )
-        lines.append("## 与基线对比（原始需求直喂 target，同口径采样与评分）")
+        lines.append(
+            "## 与基线对比（"
+            + ("用户原稿直喂 target" if _seed_arm(state) else "原始需求直喂 target")
+            + "，同口径采样与评分）"
+        )
         lines.append("")
         lines.append("| 指标 | 基线 | 优化后 | Δ |")
         lines.append("|---|---|---|---|")
@@ -385,9 +401,10 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         # 任何合理提示词都能过，优化版的分数证明不了相对价值（评不出差异）。
         base_avg = float(base.get("avg_score") or 0.0)
         if base_avg >= BASELINE_DISCRIMINATION_FLOOR:
+            easy_arm = "连原始需求都能拿高分" if not _seed_arm(state) else "连你的原稿都能拿高分"
             lines.append(
                 f"> ⚠️ **用例区分度不足**：基线均分已达 {base_avg}（≥ {BASELINE_DISCRIMINATION_FLOOR}），"
-                "说明当前测试用例对优化不敏感——连原始需求都能拿高分，"
+                f"说明当前测试用例对优化不敏感——{easy_arm}，"
                 "本报告的达标结论不能证明优化版相对更好。"
                 "建议换用更难的用例（参考 `case_templates/` 的边界与注入场景）或提高采样口径后重跑。"
             )
@@ -395,7 +412,10 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     elif not pw:
         lines.append("## 与基线对比")
         lines.append("")
-        lines.append("_未跑基线（PM_BASELINE=0 或基线失败）——因此无法回答“比不优化好多少”。_")
+        lines.append(
+            "_未跑基线（PM_BASELINE=0 或基线失败）——因此无法回答"
+            + ("“比你的原稿好多少”。_" if _seed_arm(state) else "“比不优化好多少”。_")
+        )
         lines.append("")
 
     if pw:
@@ -578,7 +598,8 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         base_surv = state.get("baseline_injection_survival")
         if isinstance(base_surv, dict) and base_surv.get("total"):
             lines.append(
-                f"- 同一批用例打基线（原始需求直喂）：被劫持 "
+                f"- 同一批用例打基线（"
+                f"{'用户原稿直喂' if _seed_arm(state) else '原始需求直喂'}）：被劫持 "
                 f"{_report_safe_int(base_surv.get('hijacked'))}/{base_surv['total']} 条"
                 + (
                     "——基线未中招而优化版中招，说明劫持由这版提示词自己引入"
@@ -609,6 +630,26 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         lines.append("")
         for qi in q_issues:
             lines.append(f"- v{qi.get('iteration', '?')}：{qi.get('issues', '')}")
+        lines.append("")
+
+    seed = _seed_arm(state)
+    if seed:
+        lines.append("## 原稿体检（代码侧确定性规则，未跑模型）")
+        lines.append("")
+        findings = [str(f) for f in (state.get("seed_quality_findings") or []) if str(f).strip()]
+        if findings:
+            lines.append(
+                f"你交来的原稿命中 {len(findings)} 条规则，这些命中项已作为判据交给改进器："
+            )
+            lines.append("")
+            lines.extend(f"- {f}" for f in findings)
+        else:
+            lines.append(
+                "- 原稿未命中任何确定性规则。注意这只说明「实测到会出事的那几类」没踩到，"
+                "不等于原稿已经够用——它的分数由下面的基线对比给出。"
+            )
+        lines.append("")
+        lines.append(f"- 原稿 {len(seed)} 字符 → 交付版 {len(best.get('prompt') or '')} 字符")
         lines.append("")
 
     lines.append(f"## 最终提示词（{best_note}）")

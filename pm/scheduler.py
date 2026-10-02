@@ -380,6 +380,7 @@ class TaskManager:
                 auto_clarify=True,  # API 模式无交互终端
                 seed_cases=kwargs.get("test_cases") or None,
                 assertion_mode=str(kwargs.get("assertion_mode") or ""),
+                seed_prompt=str(kwargs.get("seed_prompt") or ""),
             )
             # 对外的 run_id 必须是唯一真相：否则报告内文里的 run_id 与 API 句柄对不上（M0）
             init["run_id"] = run_id

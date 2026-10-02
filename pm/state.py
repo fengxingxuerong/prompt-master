@@ -21,6 +21,12 @@ def new_run_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+# 原稿（seed_prompt）长度上限，单位字符。CLI / REST / 节点三层共用这一个数：
+# 原稿不只进改进器一次，还会作为基线臂进 target 端点 n×k 次，上不封顶时
+# 粘一份 20 万字的文件就能绕过成本护栏（与 task 的 8000 上限同一动机）。
+SEED_PROMPT_MAX_CHARS = 20000
+
+
 # trace 重置标记（L7）：纯累加 reducer 在用同一 thread_id 重新提交时会把
 # 上一轮的 trace 全部带进本轮（实测 20 条历史记录混进新报告）。
 # 新一轮运行以该标记开头提交 trace，即丢弃历史重新计数。
@@ -57,9 +63,14 @@ class State(TypedDict, total=False):
     # 非空时 mockgen 不再生成用例（省一次调用），expected 参与确定性校验
     seed_cases: list[dict[str, Any]]
     assertion_mode: str  # exact | contains | regex | custom:<name>；空 = contains
+    # 用户已有提示词（原稿）：非空时 optimize 走改进分支（REFINER 模板，最小改动），
+    # 且基线臂改为跑这份原稿——此时 Δ 回答的是"比你自己的版本好多少"，
+    # 而不是原来那个"比把需求直接喂给模型好多少"
+    seed_prompt: str
 
     # --- 测量层（基线 / 重复采样 / 成对盲评）---
-    baseline_runs: list[dict[str, Any]]  # 原始需求直喂 target 的输出（含多采样）
+    baseline_runs: list[dict[str, Any]]  # 基线臂输出（含多采样）：默认原始需求直喂，
+    # 给了 seed_prompt 时基线臂改跑用户原稿——Δ 的语义跟着变，报告必须披露跑的是哪臂
     baseline_aggregate: dict[str, Any] | None  # 与主路同口径的基线聚合分，用于算 Δ
     # 基线臂的注入存活：{total, hijacked, details}；无注入用例为 None。
     # 与主路同口径检测，读者才知道"劫持"是优化版独有的缺陷，还是测试数据本身带指令。
@@ -85,6 +96,9 @@ class State(TypedDict, total=False):
     # --- Node 2 优化 ---
     prompt: str
     prompt_versions: list[dict[str, Any]]  # list[PromptVersion -> dict]
+    # 原稿的确定性体检命中项（只在 seed_prompt 非空时出现）：与 prompt_quality_issues
+    # 分开存，前者是"用户的版本哪儿不行"，后者会按轮次注入评委
+    seed_quality_findings: list[str]
     prompt_quality_issues: list[
         dict[str, Any]
     ]  # list[{iteration, issues}] 质量门警告（元话语泄漏等）
@@ -139,6 +153,7 @@ def initial_state(
     auto_clarify: bool = True,
     seed_cases: list[dict[str, Any]] | None = None,
     assertion_mode: str = "",
+    seed_prompt: str = "",
 ) -> dict[str, Any]:
     """构造初始状态（普通 dict，LangGraph 会按 State 的 reducer 合并更新）。"""
     return {
@@ -151,6 +166,7 @@ def initial_state(
         "auto_clarify": auto_clarify,
         "seed_cases": list(seed_cases or []),
         "assertion_mode": assertion_mode or "",
+        "seed_prompt": (seed_prompt or "").strip(),
         "baseline_runs": [],
         "baseline_aggregate": None,
         "pairwise": None,
@@ -164,6 +180,7 @@ def initial_state(
         "prompt": "",
         "prompt_versions": [],
         "prompt_quality_issues": [],
+        "seed_quality_findings": [],
         "test_cases": [],
         "case_scenarios": [],
         "hijack_markers": [],

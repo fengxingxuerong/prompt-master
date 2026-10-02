@@ -36,6 +36,9 @@ logger = logging.getLogger("pm.nodes.baseline")
 def baseline_node(state: State) -> dict[str, Any]:
     """基线：把**原始需求原样当 prompt** 喂 target，同口径采样 + 同口径评委评分。
 
+    用户交来原稿（seed_prompt）时，基线臂改跑**那份原稿**——此时读者要的答案
+    已经不是"比不优化好多少"，而是"比我自己写的版本好多少"。
+
     为什么必须有：没有基线就只能报"最终 8.2 分"，报不出"比不优化好多少"。
     而"分数高"本身几乎不能说明什么——同一批用例、同一个评委，
     只有跟未优化状态对比，才能判断这套流水线是否创造了价值。
@@ -52,6 +55,12 @@ def baseline_node(state: State) -> dict[str, Any]:
     task = state["task"]
     context = state.get("context", "")
     target_model = state.get("target_model", "未指定")
+    # 基线臂跑什么，取决于有没有交来原稿：
+    # - 无原稿 → 原始需求直喂（回答"比不优化好多少"）
+    # - 有原稿 → 跑用户自己的版本（回答"比你写的版本好多少"）
+    # 采样次数与评分口径两边共用同一组函数，否则 Δ 不可比。
+    seed = str(state.get("seed_prompt") or "").strip()
+    arm_prompt = seed or task
     # 与主路共用同一个口径函数：expected / mode / rules 三者必须逐条一致，否则 Δ 不可比
     _expected, _mode, rules_fn = _case_ground_truth(state)
 
@@ -61,13 +70,13 @@ def baseline_node(state: State) -> dict[str, Any]:
     k = _samples_per_case()
     try:
         runs, n_calls = _run_matrix(
-            cases, task, target_model, _expected, _mode, k, _target_concurrency()
+            cases, arm_prompt, target_model, _expected, _mode, k, _target_concurrency()
         )
         evals_raw, errors, _, n_eval_calls = _evaluate_runs(
             [r.model_dump() for r in runs],
             task=task,
             context=context,
-            prompt=task,  # 基线的"提示词"就是原始需求本身
+            prompt=arm_prompt,
             judges=judges,
             judge_spec=judge_spec,
             q_warns=[],
@@ -106,6 +115,7 @@ def baseline_node(state: State) -> dict[str, Any]:
         n_samples=k,
         avg=agg.avg_score,
         min=agg.min_score,
+        arm="user_seed" if seed else "raw_task",
         injection_hijacked_base=(
             f"{base_surv['hijacked']}/{base_surv['total']}" if base_surv else None
         ),

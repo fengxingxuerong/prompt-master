@@ -36,6 +36,25 @@ python run.py --task "..." --fast --json
 # 日志在 stderr；退出码见上表
 ```
 
+### 手上已有一版提示词（原稿改进 + 免费体检）
+
+```bash
+# 先零调用体检：不联网、不花 token，命中规则 → 退出码 1（判据与优化循环内那套同源）
+python run.py check --prompt-file 我的提示词.md --json
+# → {"mode":"prompt_check","ok":false,"findings":[{"code":"constraint_overload",...}],
+#    "constraints":11,"constraint_limit":8,"delimiter_problems":[...],"leak_tags":[...]}
+
+# 再决定改不改：交原稿时不再从零生成，而是做最小改动（保留原稿术语与字段名）
+python run.py --task "..." --prompt-file 我的提示词.md --json      # submit 子命令同参数
+```
+
+- `--prompt` / `--prompt-file` 互斥；长度 8–20000 字（原稿会作为基线臂进每条用例的每次调用）。
+- **`--task` 仍然必填**：用例只按需求命题，原稿不参与出题，否则考卷会偏袒原稿自己。
+- 交原稿时**基线臂自动换成原稿**，报告头与 Δ 表头都会写明跑的是哪一臂；
+  此时 Δ 读作「比你自己的版本好多少」，不再是「比把需求直接喂给模型好多少」。
+- 原稿的体检命中项写进报告「原稿体检」节并作为判据交给改进器，
+  但**不进** `prompt_quality_issues`（那一列会按轮次注入评委，改进版不该为原稿的毛病挨扣分）。
+
 ### 异步模式（全配置，10~30 分钟）：submit → wait
 
 ```bash
@@ -108,6 +127,7 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 | 工具 | 类型 | 说明 |
 |---|---|---|
 | `estimate_cost` | 本地计算 | 提交前预算闸门（调用数区间） |
+| `prompt_check` | subprocess 调 CLI | 零调用静态体检一份已有提示词（`run.py check --json` 同口径） |
 | `run_history` / `library_recommend` / `library_export` / `calibrate_judge` | subprocess 调 CLI | 与 `run.py --json` 单一口径，永不出现两套行为 |
 | `optimize_submit` / `optimize_status` / `optimize_wait` / `optimize_report` | 转发常驻 server | 10~30 分钟的长任务必须外置到 server（stdio 进程随客户端会话生死） |
 

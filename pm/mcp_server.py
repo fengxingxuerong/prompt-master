@@ -84,6 +84,21 @@ def _http_json(
 
 
 @mcp.tool()
+def prompt_check(prompt: str) -> str:
+    """零调用静态体检一份已有提示词：返回命中的确定性规则与结构统计（不联网、不花 token）。
+
+    Args:
+        prompt: 要体检的提示词正文（你自己写好、或从别处抄来的那一版）
+
+    判据来自 `pm/quality.py`（元话语泄漏 / 上下文泄漏 / 约束超载 / 抑制型条款 /
+    全局「数据缺失」兜底 / 定界符不配平 / 过短），每条都对应一次真实事故。
+    它回答"这版会不会出事"，不回答"这版能不能完成任务"——后者要走 optimize_submit。
+    """
+    result = _run_cli_json(["check", "--prompt", prompt, "--json"])
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def estimate_cost(task: str, cases: int = 3, max_iter: int = 3, fast: bool = False) -> str:
     """预估一次优化任务的 LLM 调用次数区间。不联网、不需要 Key，提交前的预算闸门。
 
@@ -166,6 +181,7 @@ def optimize_submit(
     max_iterations: int = 3,
     cases_json: str = "",
     assertion_mode: str = "contains",
+    seed_prompt: str = "",
 ) -> str:
     """提交提示词优化任务（异步：秒回 run_id，用 optimize_wait 等终态）。
 
@@ -183,6 +199,11 @@ def optimize_submit(
             评委逐条核验，custom:<已注册名> 调用方注册的断言函数。
             ⚠️ 人写的 expected 常常是"需求规则"而不是字面片段，那种写法 contains/exact
             永远命不中，会把基线和优化版一起打死 —— 请改用 rule。
+        seed_prompt: 可选，你自己已经写好的那一版提示词（原稿，≤20000 字）。
+            给定时不再从零生成，而是对原稿做最小改动改进（保留其术语与字段名），
+            且基线臂自动换成这份原稿——此时报告里的 Δ 读作「比你自己的版本好多少」，
+            而不再是「比把需求直接喂给模型好多少」。task 仍然必填：用例只按需求命题，
+            原稿不参与出题，否则考卷会偏袒原稿自己。
     """
     payload: dict[str, Any] = {
         "task": task,
@@ -197,6 +218,8 @@ def optimize_submit(
         cases = json.loads(cases_json)
         payload["test_cases"] = cases
         payload["n_test_cases"] = len(cases)
+    if seed_prompt.strip():
+        payload["seed_prompt"] = seed_prompt.strip()
     resp = _http_json("POST", f"{SERVER_URL}/api/optimize", payload)
     return json.dumps(resp, ensure_ascii=False)
 

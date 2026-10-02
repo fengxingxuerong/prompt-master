@@ -11,10 +11,16 @@ from typing import Any
 
 from .. import llm
 from ..memory import find_similar_asset, render_memory_hint
-from ..prompts import OPTIMIZER_SYSTEM, OPTIMIZER_USER, render
+from ..prompts import (
+    OPTIMIZER_SYSTEM,
+    OPTIMIZER_USER,
+    REFINER_SYSTEM,
+    REFINER_USER,
+    render,
+)
 from ..quality import QualityReport, check_prompt_quality, retry_hint
 from ..schemas import PromptVersion
-from ..state import State
+from ..state import SEED_PROMPT_MAX_CHARS, State
 from .common import _apply, _strip_code_fence
 from .profiles import _model_profile
 
@@ -50,31 +56,72 @@ def _generate_prompt_with_gate(
     return prompt2, meta2, report2, calls
 
 
+def _seed_findings(seed: str) -> list[str]:
+    """对原稿做代码侧确定性体检，返回问题描述列表（零 LLM 调用）。"""
+    return [i.detail for i in check_prompt_quality(seed).issues]
+
+
 def optimize_node(state: State) -> dict[str, Any]:
     node = "optimize"
     task = state["task"]
     context = state.get("context", "")
     target_model = state.get("target_model", "未指定")
+    seed = str(state.get("seed_prompt") or "").strip()
 
-    # 记忆层·写侧：命中相似达标资产时注入参考块（PM_MEMORY_HINT=0 关闭）。
-    # 注入的是"结构参考"不是答案：块内已标注按需取舍，且只借鉴 passed + Δ≥0 的运行。
-    asset = find_similar_asset(task, exclude_run_id=state.get("run_id"))
-    if asset:
-        context = (context or "") + render_memory_hint(asset)
+    if seed and len(seed) > SEED_PROMPT_MAX_CHARS:
+        # 入口层（CLI/API）已有同口径护栏，这里兜住直接构造 state 的调用方
+        logger.warning("原稿超长（%d > %d），终止流程", len(seed), SEED_PROMPT_MAX_CHARS)
+        return _apply(
+            state,
+            node,
+            {
+                "status": "failed",
+                "errors": [
+                    f"optimize: 原稿 {len(seed)} 字符超过上限 {SEED_PROMPT_MAX_CHARS}，"
+                    "请裁剪后再提交（原稿会进基线臂每条用例的每次调用）"
+                ],
+            },
+            "optimize_seed_too_long",
+            seed_chars=len(seed),
+        )
 
-    user_prompt = render(
-        OPTIMIZER_USER,
-        target_model=target_model,
-        model_profile=_model_profile(target_model),
-        task_description=task,
-        context=context or "（无）",
-        revision_hint="",
-    )
+    if seed:
+        # 原稿改进分支：不进记忆层（相似资产的骨架会诱导整段重写，与"最小改动"对冲），
+        # 但把代码侧体检命中项原样递给改进器——确定性规则比评委更值得采信。
+        findings = _seed_findings(seed)
+        user_prompt = render(
+            REFINER_USER,
+            target_model=target_model,
+            model_profile=_model_profile(target_model),
+            original_task=task,
+            user_prompt=seed,
+            quality_findings="\n".join(f"- {f}" for f in findings) or "（无命中）",
+            context=context or "（无）",
+            seed_len=len(seed),
+            max_len=int(len(seed) * 1.3) + 200,
+        )
+        system, note = REFINER_SYSTEM, "改进自用户原稿"
+        asset = None
+    else:
+        findings = []
+        # 记忆层·写侧：命中相似达标资产时注入参考块（PM_MEMORY_HINT=0 关闭）。
+        # 注入的是"结构参考"不是答案：块内已标注按需取舍，且只借鉴 passed + Δ≥0 的运行。
+        asset = find_similar_asset(task, exclude_run_id=state.get("run_id"))
+        if asset:
+            context = (context or "") + render_memory_hint(asset)
+
+        user_prompt = render(
+            OPTIMIZER_USER,
+            target_model=target_model,
+            model_profile=_model_profile(target_model),
+            task_description=task,
+            context=context or "（无）",
+            revision_hint="",
+        )
+        system, note = OPTIMIZER_SYSTEM, "初版"
 
     try:
-        prompt, meta, q_report, calls = _generate_prompt_with_gate(
-            "optimizer", OPTIMIZER_SYSTEM, user_prompt
-        )
+        prompt, meta, q_report, calls = _generate_prompt_with_gate("optimizer", system, user_prompt)
     except Exception as e:
         logger.exception("optimize 失败")
         return _apply(
@@ -104,13 +151,17 @@ def optimize_node(state: State) -> dict[str, Any]:
         )
 
     versions = list(state.get("prompt_versions", []))
-    versions.append(PromptVersion(iteration=0, prompt=prompt, note="初版").model_dump())
+    versions.append(PromptVersion(iteration=0, prompt=prompt, note=note).model_dump())
 
     patch: dict[str, Any] = {
         "prompt": prompt,
         "prompt_versions": versions,
         "llm_calls": state.get("llm_calls", 0) + calls,
     }
+    if findings:
+        # 原稿自身的问题单独入账：不进 prompt_quality_issues——那一列会被 judge 按
+        # 当前轮次注入评委，让改进版为原稿的毛病挨扣分（v0 的分数必须只反映 v0）。
+        patch["seed_quality_findings"] = findings
     if not q_report.ok:
         patch["prompt_quality_issues"] = [{"iteration": 0, "issues": q_report.describe()}]
 
@@ -131,5 +182,7 @@ def optimize_node(state: State) -> dict[str, Any]:
         latency_ms=meta.get("latency_ms"),
         channel=meta.get("channel"),
         attempts=meta.get("attempts"),
+        seed_chars=len(seed) or None,
+        seed_findings=len(findings) or None,
         **patch_extra,
     )

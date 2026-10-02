@@ -13,6 +13,7 @@ from pm.state import initial_state
 
 from .agent_mode import agent_subcommand
 from .calibrate import _calibrate_command
+from .check import check_command
 from .history import _history_command
 from .library import _library_command
 from .support import (
@@ -22,6 +23,7 @@ from .support import (
     _result_exit_code,
     assert_mode_arg,
     emit_json_result,
+    read_seed_prompt,
     save_artifacts,
     setup_logging,
 )
@@ -41,6 +43,7 @@ _SUBCOMMAND_HELP = """
   history     运行历史 + 相对基线的 Δ 显著性（--last N / --include-demo / --json）
   calibrate   评委校准：评委分 vs 锚点人工分，--repeat N 测评委自我复现性
   library     达标提示词资产库（--recommend --task-text 找参考 / --export 导出）
+  check       零调用静态体检：拿规则闸当场量你已有的那一版提示词（--prompt-file / --json）
 
 本地无 Key 路径：
   {prog} --selftest                               图拓扑与控制流自检（秒级）
@@ -49,7 +52,7 @@ _SUBCOMMAND_HELP = """
 退出码协议（--json / 子命令共用）：0=达标交付 1=未达标但已交付 2=参数或配置错误 3=运行失败
 """
 
-_SUBCOMMANDS = ("submit", "status", "report", "wait", "history", "calibrate", "library")
+_SUBCOMMANDS = ("submit", "status", "report", "wait", "history", "calibrate", "library", "check")
 
 
 def _self_prog() -> str:
@@ -74,6 +77,8 @@ def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
         return _history_command(argv)
     if cmd == "calibrate":
         return _calibrate_command(argv)
+    if cmd == "check":
+        return check_command(argv)
     return _library_command(argv)
 
 
@@ -93,6 +98,14 @@ def main() -> int:
     )
     p.add_argument("--task", help="原始需求描述")
     p.add_argument("--task-file", help="从文件读取需求描述")
+    p.add_argument(
+        "--prompt",
+        help="待改进的原稿提示词（你自己已经写好的那一版）。给定时不再从零生成："
+        "改走改进分支（保留原稿术语与结构、只做最小改动），"
+        "且基线臂自动换成这份原稿——报告里的 Δ 读作「比你自己的版本好多少」。"
+        "需求描述仍必须给（--task）：用例只按需求命题，原稿不参与出题，否则考卷会偏袒原稿",
+    )
+    p.add_argument("--prompt-file", help="从文件读取待改进的原稿提示词（与 --prompt 互斥）")
     p.add_argument("--context", default="", help="补充上下文")
     p.add_argument(
         "--target-model", default="未指定", help="提示词最终运行的目标模型，影响优化策略"
@@ -223,6 +236,14 @@ def main() -> int:
     if len(task) < 4 or len(task) > 8000:
         p.error(f"需求描述长度需在 4-8000 字之间（当前 {len(task)} 字）")
 
+    seed_prompt = read_seed_prompt(p, args)
+    if seed_prompt and not args.json:
+        print(
+            f"原稿改进模式：收到原稿 {len(seed_prompt)} 字符，"
+            "基线臂 = 你的原稿，报告里的 Δ 读作「比你自己的版本好多少」",
+            file=sys.stderr,
+        )
+
     seed_cases: list[dict[str, Any]] = []
     if args.cases_file:
         try:
@@ -343,6 +364,7 @@ def main() -> int:
         auto_clarify=not args.interactive,
         seed_cases=seed_cases or None,
         assertion_mode=args.assert_mode if seed_cases else "",
+        seed_prompt=seed_prompt,
     )
 
     if not args.json:
