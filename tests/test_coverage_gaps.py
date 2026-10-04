@@ -466,3 +466,26 @@ def test_revise_node_accumulates_quality_issues(monkeypatch: pytest.MonkeyPatch)
     out = revise_mod.revise_node(_state(prompt_history=[]))
     dumped = _jdump(out)
     assert "疑似注入" in dumped and "prompt_quality_issues" in dumped
+
+
+def test_revise_node_call_budget_exceeded_degrades_to_early_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """reviser 墙钟预算用尽（如 429 风暴叠层烧光 600s）必须优雅降级为 early_stopped，
+    不能像第六轮 E2E 实测那样把整轮炸成 failed——评估闭环已完成的版本该被交付。
+
+    与「修订返回空内容」同语义：都是"修订器没能给出新版本"，差别只在没给出
+    的原因（空返回 vs 预算耗尽）。错误信息保留预算细节供报告披露。
+    """
+    from pm.llm import CallBudgetExceeded
+
+    def _budget_boom(*a: Any, **kw: Any) -> Any:
+        raise CallBudgetExceeded("reviser", 600.0, 600.0, 3, "Request timed out.")
+
+    monkeypatch.setattr("pm.nodes.revise._generate_prompt_with_gate", _budget_boom)
+    out = revise_mod.revise_node(_state(prompt_history=[]))
+    dumped = _jdump(out)
+    assert "early_stopped" in dumped, f"墙钟耗尽应优雅降级，实际：{dumped[:300]}"
+    assert "failed" not in dumped or "early_stopped" in dumped
+    assert "600s 用尽" in dumped or "墙钟预算" in dumped, "预算细节要进 errors 供报告披露"
+    assert "保留" in dumped

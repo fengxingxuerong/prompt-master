@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..llm import CallBudgetExceeded
 from ..prompts import REVISER_SYSTEM, REVISER_USER, render
 from ..quality import MIN_PROMPT_LENGTH, SIZE_GROWTH_RATIO
 from ..schemas import PromptVersion
@@ -54,6 +55,24 @@ def revise_node(state: State) -> dict[str, Any]:
     try:
         new_prompt, meta, q_report, calls = _generate_prompt_with_gate(
             "reviser", REVISER_SYSTEM, user_prompt
+        )
+    except CallBudgetExceeded as e:
+        # 墙钟预算用尽（如 429 风暴下重试叠层烧光 600s）与"空返回"同语义：
+        # 都是修订器没能给出新版本。第六轮 E2E 实测（run 87d9c16e0e48）这条
+        # 曾被下面的通用 except 炸成整轮 failed——评估闭环已完成的版本没被交付。
+        # 转 early_stopped 保留历史最佳，预算细节进 errors 供报告披露。
+        logger.warning("修订器墙钟预算用尽，保留上一版并终止迭代：%s", e)
+        return _apply(
+            state,
+            node,
+            {
+                "status": "early_stopped",
+                "early_stop_reason": "修订器墙钟预算用尽（端点限流/重试叠层），保留历史最佳版本",
+                "errors": [f"revise: {e}"],
+                "should_revise": False,
+            },
+            "revise_budget_exhausted",
+            error=str(e),
         )
     except Exception as e:
         logger.exception("revise 失败")
