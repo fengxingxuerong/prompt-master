@@ -2,9 +2,12 @@
 
 用法：
   python watchdog_suite.py              # 前台守护（Ctrl+C 停止看门狗，不影响已拉起服务）
-  python watchdog_suite.py --once       # 单次巡检+拉起（供计划任务调用）
-  python watchdog_suite.py --install    # 注册 Windows 计划任务（开机自启 + 每 5 分钟巡检）
-  python watchdog_suite.py --uninstall  # 移除计划任务
+  python watchdog_suite.py --once       # 单次巡检+拉起（手动触发）
+  python watchdog_suite.py --uninstall  # 清理历史计划任务（若残留）
+
+注意（2026-10-01 变更）：--install 已停用。本项目不再注册任何计划任务，
+不使用本项目时不会有任何服务被后台自动拉起；只有上述手动命令（或 --once）
+才会触发巡检与拉起。
 
 守护逻辑：每 30s 探测三端口；DOWN 则以独立进程拉起对应 app（detach，不随看门狗退出）。
 告警写 releases/suite/watchdog_log.jsonl（含拉起动作留痕）。
@@ -167,21 +170,20 @@ def patrol() -> list[str]:
     return actions
 
 def install() -> None:
-    self_exe = PY
-    self_script = str(Path(__file__).resolve())
-    tasks = []
-    sch = subprocess.run(["schtasks", "/Query", "/TN", "SuiteWatchdog_OnStart"], capture_output=True, text=True)
-    if "SuiteWatchdog_OnStart" not in (sch.stdout or ""):
-        subprocess.run(["schtasks", "/Create", "/TN", "SuiteWatchdog_OnStart", "/SC", "ONSTART", "/DELAY", "0001:00",
-                        "/TR", f'"{self_exe}" "{self_script}" --once', "/F", "/RL", "LIMITED"], check=True)
-        tasks.append("onstart")
-    sch2 = subprocess.run(["schtasks", "/Query", "/TN", "SuiteWatchdog_5min"], capture_output=True, text=True)
-    if "SuiteWatchdog_5min" not in (sch2.stdout or ""):
-        subprocess.run(["schtasks", "/Create", "/TN", "SuiteWatchdog_5min", "/SC", "MINUTE", "/MO", "5",
-                        "/TR", f'"{self_exe}" "{self_script}" --once', "/F", "/RL", "LIMITED"], check=True)
-        tasks.append("5min")
-    print("INSTALLED:", tasks or ["already present"])
-    log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "action": "install", "detail": tasks, "alert": False})
+    """已停用（2026-10-01，用户要求）：不再注册任何计划任务。
+
+    背景：原实现会注册 SuiteWatchdog_OnStart（开机）与 SuiteWatchdog_5min（每 5 分钟）
+    两个计划任务，导致未打开本项目时服务仍会被后台反复拉起。用户明确要求改为
+    「只在本人主动做这个项目时才启动」，故保留函数签名但直接拒绝执行，
+    避免任何脚本/别名/旧文档误触发重新注册。
+
+    需要巡检时请前台显式运行：--once（单次）或默认模式（前台守护）。
+    """
+    print("REFUSED: 自动注册已停用，不会创建计划任务。\n"
+          "  如需巡检请前台手动运行：--once（单次）或直接运行（前台守护）。\n"
+          "  如需清理历史任务请运行：--uninstall")
+    log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "action": "install",
+         "detail": "refused: auto-registration disabled", "alert": False})
 
 def uninstall() -> None:
     for tn in ("SuiteWatchdog_OnStart", "SuiteWatchdog_5min"):
@@ -193,7 +195,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--watch", action="store_true")
     ap.add_argument("--once", action="store_true")
-    ap.add_argument("--install", action="store_true")
+    ap.add_argument("--install", action="store_true",
+                    help="已停用：不会注册计划任务（防止后台自动拉起）")
     ap.add_argument("--uninstall", action="store_true")
     a = ap.parse_args()
     if a.install:

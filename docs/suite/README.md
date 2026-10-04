@@ -23,10 +23,11 @@ PY = D:\projects\prompt-master\.venv\Scripts\python.exe
 %PY% releases\lobster\app.py --port 8791  # 龙虾站
 %PY% releases\taskboard\app.py --port 8792 # 任务台账
 
-# 看门狗（推荐）：崩溃/缺失自动拉起
-%PY% releases\suite\watchdog_suite.py --once     # 单次巡检+拉起
+# 看门狗（按需）：崩溃/缺失自动拉起
+%PY% releases\suite\watchdog_suite.py --once     # 单次巡检+拉起（手动触发）
 %PY% releases\suite\watchdog_suite.py            # 前台守护
-%PY% releases\suite\watchdog_suite.py --install  # 注册计划任务（开机自启+5min 巡检）【已注册】
+# 注意：--install 已停用（2026-10-01）。本项目不注册计划任务，不做后台自动拉起，
+#       只有上面两条手动命令会触发巡检；历史任务可用 --uninstall 清理。
 ```
 
 三服务当前健康：以 `/api/health` 实测为准；历史巡检证据 `releases/suite/monitor_log.jsonl`、
