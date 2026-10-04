@@ -314,7 +314,26 @@ def _calibrate_aggregate(ns: argparse.Namespace) -> int:
             _calib_error(ns, msg)
             return EXIT_CONFIG
     eff_mode = ns.scoring_mode or scoring_mode()
-    agg = _calib.aggregate_history(ledger, mode=eff_mode, judge=ns.judge)
+    # --aggregate 的语义是"刻画当前仪表"（零调用纯账本重算）：按当前实际解析到的
+    # 评委模型过滤（2026-10-04 换型纪元），换型后旧尺轮次不再混进读数。模型解析
+    # 失败退回不过滤（旧行为）——聚合缺席比报错好，配置问题另有 preflight 管。
+    try:
+        from ..llm import build_config
+
+        current_model: str | None = build_config(ns.judge).model
+    except Exception:  # noqa: BLE001 - 与 _judge_health 同款
+        current_model = None
+    try:
+        from ..prompts import checklist_rubric_stamp, rubric_stamp
+
+        current_rubric: str | None = (
+            checklist_rubric_stamp() if eff_mode == "checklist" else rubric_stamp()
+        )
+    except Exception:  # noqa: BLE001
+        current_rubric = None
+    agg = _calib.aggregate_history(
+        ledger, mode=eff_mode, judge=ns.judge, model=current_model, rubric=current_rubric
+    )
     if agg is None:
         _calib_error(
             ns,
@@ -381,7 +400,11 @@ def _calibrate_run(ns: argparse.Namespace) -> int:
     # 合并成带 CI 的读数。单轮校准把锚点取样波动 + 评委逐轮抖动都抹进一个数——这是对
     # README §三 "这些读数本身不稳，单次读数不能当尺子的精度"的正面回应：
     # CI 管两次比较的分辨率，轮间极差管单轮读数能信多宽，两个数不收敛就都别当结论。
-    agg = calib.aggregate_history(history, mode=mode, judge=ns.judge)
+    # model=now_model（2026-10-04 换型纪元）：聚合只合并同评委模型的轮次，
+    # 换型后旧尺的轮次不再混进新尺的读数。
+    agg = calib.aggregate_history(
+        history, mode=mode, judge=ns.judge, model=now_model, rubric=now_rubric
+    )
     _print_calibrate_result(ns, mode, analysis, drift, agg, pending, history)
     return 0
 

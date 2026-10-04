@@ -722,6 +722,8 @@ def aggregate_history(
     *,
     mode: str = "impression",
     judge: str = "evaluator",
+    model: str | None = None,
+    rubric: str | None = None,
     last: int = AGGREGATE_LAST_ROUNDS,
     bootstrap: int = AGGREGATE_BOOTSTRAP,
     seed: int = 20260925,
@@ -740,6 +742,20 @@ def aggregate_history(
     与漂移对比（_comparable）刻意的不同：漂移只认"指纹完全一致"的轮，因为它是
     信号检测；聚合刻意放宽到同 judge+mode 即可，因为它是**量具刻画**——考卷不同
     时照常合并（对锚点总体的估计依然成立），但会显式声明，不给读数的人埋雷。
+
+    `model`（2026-10-04 评委换型落地）：聚合的"量具"不只是考卷，还有**评委本身**
+    ——bias 是"这把尺子相对人工分的系统性偏移"，换评委模型等于换尺子。flash-lite
+    时代的 +3.09 与 deepseek-v4-flash 的 +0.03 混进同一份聚合，披露行刻画的就是
+    "两把尺的平均"，对当前仪表是错的数。传 model 时只合并账本轮记录 `model` 字段
+    匹配的轮次（该字段自换型前的记录起就有，见 _save_entry）；None = 不过滤
+    （旧行为，历史读数复现路径保持不变）。换型后新模型尚无轮次时返回 None——
+    披露行缺席，等第一次新校准入账。
+
+    `rubric`（同日落地的第二层）：model 过滤后仍可能混进**旧 rubric 时代的同模型
+    轮次**（实测：deepseek-v4-flash 在 2026-09-27 旧 rubric 下 bias +4.2、在现行
+    rubric 下 +0.29——评分标准变了，同模型也不是同一把尺）。传 rubric 时要求轮
+    记录的 `rubric` 指纹一致；模型×rubric 二元组才是"当前仪表"的完整刻画。锚点集
+    刻意不进过滤——锚点不同的同代考卷照常合并是 §十四 立过的先例。
     """
     rounds = [
         r
@@ -749,6 +765,8 @@ def aggregate_history(
         # 空 items 列表 = 这轮没落明细（与"没有 items 字段"同罪），不算有明细的轮
         and isinstance(r.get("items"), list)
         and r.get("items")
+        and (model is None or r.get("model") == model)
+        and (rubric is None or r.get("rubric") == rubric)
     ]
     if not rounds:
         return None
@@ -859,13 +877,19 @@ def aggregate_history(
     }
 
 
-def latest_pooled(judge: str = "evaluator") -> dict[str, Any] | None:
+def latest_pooled(
+    judge: str = "evaluator", model: str | None = None, rubric: str | None = None
+) -> dict[str, Any] | None:
     """当前评分口径下，校准账本的跨轮聚合读数（None=没有可聚合的账本）。
 
     给交付报告的校准披露行用：报告渲染不自己翻账本算 bootstrap——量具
     刻画全部收口在 aggregate_history，这里只负责"找到账本、对上口径"。
     读不到账本不是错误（新检出没有校准历史时报告不披露即可）；文件坏了
     也返回 None，披露行缺席总比渲染崩掉好。
+
+    `model`（2026-10-04 换型纪元）：调用方应传**本轮实际解析到的评委模型**
+    （llm.build_config(judge).model），聚合只合并同模型的轮次——换型后旧
+    模型轮次不再污染新仪表的披露行。None = 不过滤（旧行为）。
     """
     from .cli.support import log_dir  # 局部 import：晚绑定 PM_LOG_DIR，不顶层拉 CLI 层
     from .scoring import scoring_mode
@@ -878,7 +902,9 @@ def latest_pooled(judge: str = "evaluator") -> dict[str, Any] | None:
     if not isinstance(history, list):
         return None
     # aggregate_history 返回 {pooled, rounds, ...} 外层结构；披露行只消费 pooled。
-    result = aggregate_history(history, judge=judge, mode=scoring_mode())
+    result = aggregate_history(
+        history, judge=judge, mode=scoring_mode(), model=model, rubric=rubric
+    )
     return result.get("pooled") if result else None
 
 

@@ -145,12 +145,29 @@ def test_unstable_cases_and_judge_bias_are_surfaced():
 
 
 def _write_ledger(tmp_path, items: list[dict]) -> None:
-    """往被密封的产物目录里写一份只含一轮的校准账本。"""
+    """往被密封的产物目录里写一份只含一轮的校准账本。
+
+    轮记录带当前环境实际解析到的评委模型（2026-10-04 换型纪元）：披露行聚合
+    按模型过滤，fixture 与被测代码同源（build_config）才不会被自己的门禁拦下。
+    """
     import json
+
+    from pm.llm import build_config
+    from pm.prompts import rubric_stamp
 
     ledger = tmp_path / "judge_calibration_history.json"
     ledger.write_text(
-        json.dumps([{"ts": "2026-09-29 10:00:00", "judge": "evaluator", "items": items}]),
+        json.dumps(
+            [
+                {
+                    "ts": "2026-09-29 10:00:00",
+                    "judge": "evaluator",
+                    "model": build_config("evaluator").model,
+                    "rubric": rubric_stamp(),
+                    "items": items,
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 

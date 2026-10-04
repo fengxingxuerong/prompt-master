@@ -150,10 +150,26 @@ def _calibration_disclosure(agg: ReportState) -> str | None:
 
     偏差在告警线（±1.0，calibration.BIAS_ALERT）内时降为弱措辞，否则未来换了
     校准合格的评委，报告还在喊狼来了。
-    """
-    from .calibration import BIAS_ALERT, latest_pooled
 
-    cal = latest_pooled()
+    2026-10-04 换型纪元：聚合按**本轮实际解析到的评委模型**过滤（账本轮记录
+    自带 model 字段）——换型后旧模型的 +3.09 不再混进新仪表的披露行。模型
+    解析失败时退回不过滤（旧行为）：披露行有比没有好，配置错误另有体检管。
+    """
+    from . import llm as _llm
+    from .calibration import BIAS_ALERT, latest_pooled
+    from .prompts import checklist_rubric_stamp, rubric_stamp
+    from .scoring import scoring_mode
+
+    try:
+        current_model = _llm.build_config("evaluator").model
+        current_rubric = (
+            checklist_rubric_stamp() if scoring_mode() == "checklist" else rubric_stamp()
+        )
+    except Exception:  # noqa: BLE001 - 与 _judge_health 同款：配置读取失败不影响主流程
+        current_model = None
+        current_rubric = None
+
+    cal = latest_pooled(model=current_model, rubric=current_rubric)
     if not cal:
         return None
     bias = cal.get("bias")

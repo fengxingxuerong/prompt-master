@@ -45,6 +45,8 @@ def _it(sid: str, human: float, judge: float) -> dict[str, Any]:
 
 # 两轮已知解：轮1 Δ = [+1, -1]（MAE 1.0）；轮2 Δ = [+1, -1, 0]（MAE 2/3）。
 # 合并 5 对：MAE = 4/5 = 0.8，bias = 0。判定线两侧人工/评委各 2/3 → 全一致。
+# 不带 model 字段：直接调 aggregate_history 的用例都不传 model（不过滤），
+# 需要分代的 CLI/报告路径在各自测试里于运行时补 model/rubric（与解析同源）。
 _TWO_ROUNDS = [
     _rec("2026-09-24 10:00:00", items=[_it("a", 8.0, 9.0), _it("b", 6.0, 5.0)], mae=1.0, bias=0.0),
     _rec(
@@ -185,9 +187,17 @@ def test_cli_aggregate_flag_reads_ledger_offline(
 ) -> None:
     """--aggregate 是零调用的离线入口：不装 Key、不碰样本文件也能把账本读明白。"""
     from pm.cli.calibrate import _calibrate_command
+    from pm.llm import build_config
 
+    # 轮记录的 model/rubric 必须在**测试运行时**与 --aggregate 的解析同源（不能在
+    # 模块导入时求值——conftest 密封 env 发生在导入之后，两个时点的解析可以不同）。
+    from pm.prompts import rubric_stamp
+
+    cur_model = build_config("evaluator").model
+    cur_rubric = rubric_stamp()
+    rounds = [dict(r, model=cur_model, rubric=cur_rubric) for r in _TWO_ROUNDS]
     ledger = tmp_path / "judge_calibration_history.json"
-    ledger.write_text(json.dumps(_TWO_ROUNDS, ensure_ascii=False), encoding="utf-8")
+    ledger.write_text(json.dumps(rounds, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr("pm.cli.calibrate._calib_history", lambda: ledger)
 
     rc = _calibrate_command(["--aggregate", "--scoring-mode", "impression", "--json"])
@@ -288,3 +298,87 @@ def test_cli_full_flow_appends_aggregate_after_saving(
     rc2 = _calibrate_command(["--samples", "unused.json", "--scoring-mode", "impression"])
     assert rc2 == 0
     assert "跨轮聚合" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# 模型纪元过滤（2026-10-04 evaluator 换型落地）：聚合按评委模型分代
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_filters_by_judge_model_for_epoch_switching() -> None:
+    """换型纪元：flash-lite 旧尺与 deepseek 新尺不能混进同一把聚合读数。
+
+    bias +3.09 的旧仪表轮次混入新仪表轮次，披露行刻画的就是「两把尺的平均」
+    而不是当前仪表——聚合必须能按账本轮记录自带的 model 字段分代。
+    """
+    flash = _rec("2026-09-27 19:38:25", model="sensenova-6.8-flash-lite")
+    flash["items"] = [_it("a", 5.0, 8.0)]
+    flash["model"] = "sensenova-6.8-flash-lite"
+    flash2 = _rec("2026-09-29 18:51:36")
+    flash2["items"] = [_it("b", 6.0, 9.0)]
+    flash2["model"] = "sensenova-6.8-flash-lite"
+    ds = _rec("2026-10-04 20:00:00")
+    ds["items"] = [_it("c", 7.0, 7.1)]
+    ds["model"] = "deepseek-v4-flash"
+
+    out = aggregate_history([flash, flash2, ds], judge="evaluator", model="deepseek-v4-flash")
+    assert out is not None
+    assert out["rounds_used"] == 1
+    assert out["pooled"]["n_pairs"] == 1
+    assert abs(out["pooled"]["bias"] - 0.1) < 1e-9
+
+    # 旧行为回归：不传 model 时三轮全合并（历史读数复现路径不受影响）
+    legacy = aggregate_history([flash, flash2, ds], judge="evaluator")
+    assert legacy is not None
+    assert legacy["rounds_used"] == 3
+
+
+def test_aggregate_model_none_matching_rounds_returns_none() -> None:
+    """换型后第一次校准之前，新模型在账本里还没有轮次 ⇒ 返回 None（不报错）。"""
+    flash = _rec("2026-09-27 19:38:25")
+    flash["items"] = [_it("a", 5.0, 8.0)]
+    flash["model"] = "sensenova-6.8-flash-lite"
+    assert aggregate_history([flash], judge="evaluator", model="deepseek-v4-flash") is None
+
+
+def test_aggregate_filters_by_rubric_epoch_same_model() -> None:
+    """model 过滤还不够：同模型在旧 rubric 下的轮次也不是同一把尺。
+
+    实测依据（2026-10-04 换型落地）：deepseek-v4-flash 在 2026-09-27 旧 rubric
+    下 bias +4.2、在现行 rubric 下 +0.29——只按模型过滤会把两代评分标准混进
+    一份 bias。模型 × rubric 二元组才是"当前仪表"的完整刻画。
+    """
+    old_rubric = _rec("2026-09-27 16:00:12", rubric="706313c656")
+    old_rubric["items"] = [_it("a", 2.0, 6.2)]
+    old_rubric["model"] = "deepseek-v4-flash"
+    old_rubric2 = _rec("2026-09-27 17:07:20", rubric="2d638417ee")
+    old_rubric2["items"] = [_it("b", 1.0, 5.1)]
+    old_rubric2["model"] = "deepseek-v4-flash"
+    current = _rec("2026-10-04 21:04:01", rubric="38802252ee")
+    current["items"] = [_it("c", 7.0, 7.2)]
+    current["model"] = "deepseek-v4-flash"
+
+    out = aggregate_history(
+        [old_rubric, old_rubric2, current],
+        judge="evaluator",
+        model="deepseek-v4-flash",
+        rubric="38802252ee",
+    )
+    assert out is not None
+    assert out["rounds_used"] == 1
+    assert out["pooled"]["n_pairs"] == 1
+    assert abs(out["pooled"]["bias"] - 0.2) < 1e-9
+
+    # 锚点集不同但 rubric 相同的同代考卷照常合并（§十四 先例）：
+    # rubric 过滤不要求 anchors 指纹一致。
+    other_anchors = _rec("2026-10-05 10:00:00", rubric="38802252ee")
+    other_anchors["items"] = [_it("d", 5.0, 5.5)]
+    other_anchors["model"] = "deepseek-v4-flash"
+    out2 = aggregate_history(
+        [current, other_anchors],
+        judge="evaluator",
+        model="deepseek-v4-flash",
+        rubric="38802252ee",
+    )
+    assert out2 is not None
+    assert out2["rounds_used"] == 2

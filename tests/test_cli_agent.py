@@ -1626,6 +1626,13 @@ def test_aggregate_renders_text_with_real_ledger_shape(
             {"id": "a3", "human": 7.0, "judge": 10.0},
         ],
     }
+    # --aggregate 按当前解析到的评委模型过滤（2026-10-04 换型纪元）：fixture 的
+    # 轮记录必须在运行时带上同一个 model，否则会被自己的门禁按"别家的尺"排除。
+    from pm.llm import build_config
+    from pm.prompts import rubric_stamp
+
+    rec["model"] = build_config("evaluator").model
+    rec["rubric"] = rubric_stamp()
     (tmp_path / "judge_calibration_history.json").write_text(
         json.dumps([rec], ensure_ascii=False), encoding="utf-8"
     )
