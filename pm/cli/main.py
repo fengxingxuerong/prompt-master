@@ -14,6 +14,8 @@ from pm.state import initial_state
 from .agent_mode import agent_subcommand
 from .calibrate import _calibrate_command
 from .check import check_command
+from .diffcmd import diff_command
+from .gatecmd import gate_command
 from .history import _history_command
 from .library import _library_command
 from .support import (
@@ -44,6 +46,10 @@ _SUBCOMMAND_HELP = """
   calibrate   评委校准：评委分 vs 锚点人工分，--repeat N 测评委自我复现性
   library     达标提示词资产库（--recommend --task-text 找参考 / --export 导出）
   check       零调用静态体检：拿规则闸当场量你已有的那一版提示词（--prompt-file / --json）
+  diff        零调用差分：两版提示词（或两个 run）之间改了什么、修好几条、又新引入几条
+              —— 退出码 1 = 有新引入的规则问题，可直接当 CI 回归门禁
+  gate        提示词改动的 CI 回归门禁：自动从 git 取基线，只拦本次「新引入」的规则问题
+              —— 退出码 1 = 有新引入（CI 该红）；2 = 门禁自己没跑起来；默认对象 pm/prompts.py
 
 本地无 Key 路径：
   {prog} --selftest                               图拓扑与控制流自检（秒级）
@@ -52,7 +58,18 @@ _SUBCOMMAND_HELP = """
 退出码协议（--json / 子命令共用）：0=达标交付 1=未达标但已交付 2=参数或配置错误 3=运行失败
 """
 
-_SUBCOMMANDS = ("submit", "status", "report", "wait", "history", "calibrate", "library", "check")
+_SUBCOMMANDS = (
+    "submit",
+    "status",
+    "report",
+    "wait",
+    "history",
+    "calibrate",
+    "library",
+    "check",
+    "diff",
+    "gate",
+)
 
 
 def _self_prog() -> str:
@@ -79,6 +96,10 @@ def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
         return _calibrate_command(argv)
     if cmd == "check":
         return check_command(argv)
+    if cmd == "diff":
+        return diff_command(argv)
+    if cmd == "gate":
+        return gate_command(argv)
     return _library_command(argv)
 
 
@@ -312,24 +333,53 @@ def main() -> int:
             base + (n * k + n * k * judges + n if baseline_on else 0) + (n if pairwise_on else 0)
         )
         est_max = est_min + args.max_iter * per_iter
-        print(
-            json.dumps(
-                {
-                    "mode": "dry_run",
-                    "cases": n,
-                    "samples": k,
-                    "judges": judges,
-                    "max_iterations": args.max_iter,
-                    "baseline_enabled": baseline_on,
-                    "pairwise_enabled": pairwise_on,
-                    "estimated_llm_calls": {"min": est_min, "max": est_max},
-                    "notes": "下界=首轮即达标；上界=跑满 max_iter 轮修订。"
-                    "质量门重试与双评委仲裁会向上浮动；缓存命中会向下浮动",
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        payload: dict[str, Any] = {
+            "mode": "dry_run",
+            "cases": n,
+            "samples": k,
+            "judges": judges,
+            "max_iterations": args.max_iter,
+            "baseline_enabled": baseline_on,
+            "pairwise_enabled": pairwise_on,
+            "estimated_llm_calls": {"min": est_min, "max": est_max},
+            "notes": "下界=首轮即达标；上界=跑满 max_iter 轮修订。"
+            "质量门重试与双评委仲裁会向上浮动；缓存命中会向下浮动",
+        }
+        # 金额外推：只在配了单价时出现。口径是"本次运行实测的逐角色均价"，
+        # 比任何内置价目表准（价目表会过期，均价来自刚跑完的那一轮）。
+        from pm.cost import compute_cost, global_prices, project_cost
+
+        gi, go = global_prices()
+        unit: float | None = None
+        if gi is not None and go is not None:
+            # 无历史台账时退化为"忽略 token 的调用数外推"，只给价目表口径下的粗略区间
+            unit = None
+        last_usage = None
+        try:
+            from pm.cli.history import _load_run_history
+
+            rows = _load_run_history(1, include_demo=False)
+            if rows:
+                from pm.cli.support import log_dir
+
+                f = log_dir() / f"run_{rows[0]['run_id']}.json"
+                if f.exists():
+                    last_usage = json.loads(f.read_text(encoding="utf-8")).get("llm_usage")
+        except Exception:  # noqa: BLE001 - 外推是增强信息，拿不到就不给，绝不因此报错
+            last_usage = None
+        if last_usage:
+            cost = compute_cost(last_usage)
+            if cost:
+                calls = sum(int(v.get("calls", 0) or 0) for v in last_usage.values())
+                if calls:
+                    unit = cost["total"] / calls
+                    proj = project_cost(unit, {"min": est_min, "max": est_max})
+                    if proj:
+                        payload["estimated_cost"] = proj
+                        payload["estimated_cost"]["basis"] = (
+                            f"按最近一次运行（{rows[0]['run_id']}）的实测逐角色均价外推"
+                        )
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     if not os.getenv("PM_API_KEY") and not os.getenv("PM_TARGET_API_KEY"):

@@ -99,6 +99,30 @@ def prompt_check(prompt: str) -> str:
 
 
 @mcp.tool()
+def prompt_diff(before: str, after: str) -> str:
+    """零调用差分两份提示词：这次改动改了什么、修好几条规则问题、又新引入几条。
+
+    Args:
+        before: 改动前的提示词正文
+        after: 改动后的提示词正文
+
+    与 prompt_check 互补：check 回答"这一版哪儿不行"（单时点），
+    diff 回答"相对上一版改了什么"（版本对比）。`regressed=true` 表示
+    新引入了已知事故模式——这是 CI 回归门禁该拦的那一半，
+    也是"我觉得这版读起来更好"唯一能被证伪的地方。
+    """
+    import tempfile
+    from pathlib import Path as _P
+
+    with tempfile.TemporaryDirectory() as d:
+        a, b = _P(d) / "a.md", _P(d) / "b.md"
+        a.write_text(before, encoding="utf-8")
+        b.write_text(after, encoding="utf-8")
+        result = _run_cli_json(["diff", str(a), str(b), "--json"])
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def estimate_cost(task: str, cases: int = 3, max_iter: int = 3, fast: bool = False) -> str:
     """预估一次优化任务的 LLM 调用次数区间。不联网、不需要 Key，提交前的预算闸门。
 
@@ -280,5 +304,12 @@ def main() -> None:
     mcp.run()  # stdio 传输；MCP 客户端负责进程生命周期
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - 由子进程探针执行（见 tests/test_mcp_server.py）
+    # ⚠️ 不统计覆盖是**工具限制**，不是"没人测"：
+    # `tests/test_mcp_server.py::test_module_entry_actually_starts_the_server`
+    # 会在子进程里真启动 `python -m pm.mcp_server`、发一条真实的 MCP `initialize`
+    # 请求并校验响应 —— 它确实走到了这一行。
+    # 之所以必须放子进程：FastMCP 起 stdio 时会接管/关闭 stdout，
+    # 进程内执行会把测试进程的 stdout 弄坏（实测 I/O operation on closed file）。
+    # 与 `pm/cli/console.py` 的入口同一处理方式（那里由 [project.scripts] 使用）。
     main()

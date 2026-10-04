@@ -16,6 +16,7 @@ Starlette 变成 Internal Server Error —— 最该说话的那句话被吞掉�
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -487,3 +488,271 @@ def test_health_endpoint_is_open_and_reports_ok(gateway: TestClient) -> None:
     r = gateway.get("/api/health")
     assert r.status_code == 200
     assert r.json().get("status") in ("ok", "healthy"), r.json()
+
+
+# ---------------------------------------------------------------- 对话面鉴权
+# 2026-10-02 补：下面这几条走的是「先试对话鉴权、失败再降级到管理鉴权」那条兜底
+# （`server.py` 187-195 与 636-639）。既有用例都是**直接**打运维路由
+# （纯 `_admin_auth`），从没走过这条降级路 —— 而它是"同一把管理员口令
+# 既能管运维、也能走对话路由"的实现方式。
+def test_bearer_admin_token_reaches_chat_auth_path(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """管理员口令走 `Authorization: Bearer` 打 `/v1/models`：先过 `_chat_auth`（失败）再降级。
+
+    `_chat_auth` 对非 vk- 的口令只在等于 `PMH_GATEWAY_TOKEN` 时返回 "admin"，
+    否则抛 401 —— 而 `/v1/models` 捕获它并降级到 `_admin_auth`。
+    这条路径此前零覆盖。
+    """
+    monkeypatch.setenv("PMH_GATEWAY_TOKEN", "sekret")
+    r = gateway.get("/v1/models", headers={"Authorization": "Bearer sekret"})
+    assert r.status_code == 200, r.text
+    assert "data" in r.json()
+
+
+def test_bearer_admin_token_reaches_agent_listing_fallback(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同一条降级路在 `/v1/agents` 上（列表克隆自 /v1/models 的写法）。"""
+    monkeypatch.setenv("PMH_GATEWAY_TOKEN", "sekret")
+    r = gateway.get("/v1/agents", headers={"Authorization": "Bearer sekret"})
+    assert r.status_code == 200, r.text
+    assert "agents" in r.json()
+
+
+def test_chat_auth_open_mode_allows_models_without_any_credential(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """未设 `PMH_GATEWAY_TOKEN` = 本地开放模式：`/v1/models` 不带任何凭据也要能读。
+
+    `_chat_auth` 在无口令时返回 `(None, "open")` —— 这条也此前未覆盖。
+    开放模式是本地开发的主用法，读不到模型清单就什么都做不了。
+    """
+    monkeypatch.delenv("PMH_GATEWAY_TOKEN", raising=False)
+    r = gateway.get("/v1/models")
+    assert r.status_code == 200, r.text
+    assert isinstance(r.json().get("data"), list)
+
+
+def test_models_route_reports_config_error_as_503(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """池配置坏掉时 `/v1/models` 必须是 503（不是 500）。
+
+    503 = "服务暂时不可用，配置问题"，500 = "网关自己崩了" ——
+    运维看这两个码采取的下一步动作不同：前者去查配置，后者去查代码。
+    """
+    from pm.modelhub.pool import ConfigError
+
+    monkeypatch.setenv("PMH_GATEWAY_TOKEN", "sekret")
+
+    def boom() -> Any:
+        raise ConfigError("池配置坏了")
+
+    monkeypatch.setattr(S, "_hub_instance", boom)
+    r = gateway.get("/v1/models", headers=_admin("sekret"))
+    assert r.status_code == 503, r.text
+    assert "池配置坏了" in r.json()["detail"]
+
+
+def test_models_route_falls_back_when_chat_auth_rejects_a_vk(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`/v1/models` 的降级兜底：`_chat_auth` 因**无效 vk-** 抛 401 时，仍试 `_admin_auth`。
+
+    这条覆盖 `189-190` 那个 except 体。正常配置下它不容易走到
+    （管理员口令在 `_chat_auth` 里就直接通过了，不会抛），
+    但**开放模式（未设 PMH_GATEWAY_TOKEN）**下：无效 vk- 会让 `_chat_auth` 抛 401，
+    而 `_admin_auth` 在无口令时直接放行 —— 于是这条降级路真的会被走到。
+
+    它存在的意义：模型清单是只读的、也是客户端起手第一件事，
+    不该因为调用方手里那把 key 不对就整个 401 掉（对话路由才该 401）。
+    """
+    monkeypatch.delenv("PMH_GATEWAY_TOKEN", raising=False)
+    r = gateway.get("/v1/models", headers={"X-API-Key": "vk-does-not-exist"})
+    assert r.status_code == 200, f"降级兜底没生效：{r.status_code} {r.text}"
+    assert isinstance(r.json().get("data"), list)
+
+
+def test_agents_route_falls_back_when_chat_auth_rejects_a_vk(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同一条降级路在 `/v1/agents` 上（覆盖 `638-639`）。"""
+    monkeypatch.delenv("PMH_GATEWAY_TOKEN", raising=False)
+    r = gateway.get("/v1/agents", headers={"X-API-Key": "vk-does-not-exist"})
+    assert r.status_code == 200, f"降级兜底没生效：{r.status_code} {r.text}"
+    assert "agents" in r.json()
+
+
+# ---------------------------------------------------------------- 对话路由（非流式）
+# 2026-10-02 补：`chat_completions` 里的 vk 归属覆盖（220-225）与非流式成功路径
+# （234-258）此前零覆盖。用同一套 `gateway` 夹具 + 桩 `_hub_instance`：
+# 既有测试都在测运维面，对话面的**成功**路径一直没被走过。
+class _StubHub:
+    """只实现对话路由用到的 `chat`。"""
+
+    def __init__(self, result: dict[str, Any] | None = None) -> None:
+        self._result = result
+        self.calls: list[dict[str, Any]] = []
+
+    def chat(self, messages: list[dict[str, Any]], **kw: Any) -> dict[str, Any]:
+        self.calls.append({"messages": messages, **kw})
+        if self._result is None:
+            from pm.modelhub.pool import ModelPoolExhaustedError
+
+            raise ModelPoolExhaustedError("stub: 池耗尽")
+        return self._result
+
+
+def _ok_result(content: str = "回答", model: str = "m1") -> dict[str, Any]:
+    # `request_id` 是 pool 生成的（server 侧直接索引它，缺了会 KeyError —— 我第一版就漏了）
+    return {
+        "model": model,
+        "endpoint": "http://127.0.0.1:9/v1",
+        "content": content,
+        "latency_ms": 7,
+        "failovers": 0,
+        "request_id": "stub-rid-1",
+        "usage": {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8},
+    }
+
+
+def _chat_body(**over: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {"messages": [{"role": "user", "content": "hi"}]}
+    body.update(over)
+    return body
+
+
+def test_non_stream_chat_success_returns_openai_shape(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """非流式成功路径：返回体必须是标准 `chat.completion` 形状。
+
+    `234-258` 此前零覆盖 —— 而这是**每一次非流式调用的常规路径**：
+    客户端（OpenAI SDK / LangChain）按 `choices[0].message.content` 取值，
+    形状错了它们的解析会直接失败。
+    """
+    hub = _StubHub(_ok_result("华东 120 万"))
+    monkeypatch.setattr(S, "_hub_instance", lambda: hub)
+    r = gateway.post("/v1/chat/completions", json=_chat_body())
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload["object"] == "chat.completion"
+    assert payload["model"] == "m1"
+    assert payload["choices"][0]["message"] == {"role": "assistant", "content": "华东 120 万"}
+    assert payload["choices"][0]["finish_reason"] == "stop"
+    assert payload["usage"]["total_tokens"] == 8, "usage 没有透传"
+    assert hub.calls and hub.calls[0]["stream"] is False
+
+
+def test_non_stream_chat_records_a_successful_call(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """成功路径必须落台账（`record_call`），`content_chars` = 正文长度。
+
+    不记的话，非流式调用在 `/v1/usage` 与 `/v1/metrics` 里完全不存在 ——
+    运维看到的成功率只覆盖流式那半边，而两者混在一起看才是全局。
+    """
+    hub = _StubHub(_ok_result("四个字"))
+    monkeypatch.setattr(S, "_hub_instance", lambda: hub)
+    assert gateway.post("/v1/chat/completions", json=_chat_body()).status_code == 200
+
+    # ⚠️ `record_call` 写的是**用量库**（当日聚合，`usage_store.py`），不是台账 ledger ——
+    # 我第一版去 `/v1/ledger` 找，什么也找不到。出口是 `/v1/usage`。
+    usage = gateway.get("/v1/usage").json()
+    assert usage.get("totals") or usage.get("days"), f"非流式成功没有进用量库：{usage}"
+    blob = json.dumps(usage, ensure_ascii=False)
+    assert "四个字" not in blob, "用量库不该记正文"
+    assert "3" in blob, f"正文字数没进用量：{usage}"
+
+
+def test_non_stream_chat_pool_exhausted_is_502(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """池耗尽 → 502（非流式路径的错误映射）。"""
+    monkeypatch.setattr(S, "_hub_instance", lambda: _StubHub(None))
+    r = gateway.post("/v1/chat/completions", json=_chat_body())
+    assert r.status_code == 502, r.text
+
+
+def test_virtual_key_agent_overrides_request_agent(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """用 `vk-` 时 agent 以**密钥归属为准**，覆盖请求体里声明的 agent（防伪造归属）。
+
+    这条覆盖 `225`：不覆盖的话，任何持有一把低权限密钥的调用方
+    都能在请求体里自称是别的智能体，用量归属与限额约束一起失效。
+    """
+    monkeypatch.setenv("PMH_GATEWAY_TOKEN", "sekret")
+    vk = gateway.post("/v1/keys", json={"agent": "real-owner"}, headers=_admin("sekret")).json()[
+        "key"
+    ]["key"]
+    hub = _StubHub(_ok_result())
+    monkeypatch.setattr(S, "_hub_instance", lambda: hub)
+
+    r = gateway.post(
+        "/v1/chat/completions",
+        json=_chat_body(agent="claimed-someone-else"),
+        headers={"X-API-Key": vk},
+    )
+    assert r.status_code == 200, r.text
+    assert hub.calls[0]["agent"] == "real-owner", (
+        f"密钥归属没有覆盖请求体里的 agent：{hub.calls[0]['agent']}"
+    )
+
+
+def test_chat_auth_failure_propagates_as_401_not_500(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """鉴权失败必须原样抛 401（覆盖 `220-221` 的重抛）。
+
+    这两行看着多余（`except: raise`），但它**不是空操作**：
+    没有它，`_chat_auth` 的 401 会被外层异常处理器吞成 500 ——
+    调用方拿到"网关崩了"而不是"你的密钥不对"，连 401 都无法触发换钥逻辑。
+    """
+    monkeypatch.setenv("PMH_GATEWAY_TOKEN", "sekret")
+    r = gateway.post("/v1/chat/completions", json=_chat_body(), headers={"X-API-Key": "wrong"})
+    assert r.status_code == 401, f"鉴权失败被吞成了 {r.status_code}"
+    assert "鉴权" in r.json()["detail"]
+
+
+def test_non_stream_chat_config_error_is_503(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """非流式路径上池配置坏掉 → 503（覆盖 `238-239`）。
+
+    503 = "服务暂时不可用（配置问题）"，与 502（上游全失败）分开 ——
+    运维据此决定去查配置还是去查上游。
+    """
+    from pm.modelhub.pool import ConfigError
+
+    class _Boom:
+        def chat(self, *a: Any, **k: Any) -> Any:
+            raise ConfigError("池配置坏了")
+
+    monkeypatch.setattr(S, "_hub_instance", lambda: _Boom())
+    r = gateway.post("/v1/chat/completions", json=_chat_body())
+    assert r.status_code == 503, r.text
+    assert "池配置坏了" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("status,expect", [(429, 429), (None, 502)])
+def test_non_stream_chat_gateway_error_maps_status(
+    gateway: TestClient, monkeypatch: pytest.MonkeyPatch, status: int | None, expect: int
+) -> None:
+    """上游 `GatewayError` 的状态码映射（覆盖 `242-246`）：>=400 用它，否则 502。
+
+    保留上游 4xx 是让调用方能区分"我的请求有问题"与"网关/上游坏了" ——
+    一律 502 会把可自纠的错误也说成网关故障。
+    """
+    from pm.modelhub.pool import GatewayError
+
+    err = GatewayError("上游报错", http_status=status) if status else GatewayError("说不清")
+
+    class _Boom:
+        def chat(self, *a: Any, **k: Any) -> Any:
+            raise err
+
+    monkeypatch.setattr(S, "_hub_instance", lambda: _Boom())
+    r = gateway.post("/v1/chat/completions", json=_chat_body())
+    assert r.status_code == expect, f"http_status={status} 应映射成 {expect}，实得 {r.status_code}"

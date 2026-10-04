@@ -825,9 +825,11 @@ def test_non_length_error_produces_no_budget_warning(caplog):
 def test_channel_b_rate_limit_raises_without_consuming_retries(monkeypatch):
     """限流预算耗尽：立即上抛原始 429，不把 3 次解析重试名额烧完。"""
     calls = {"invoke": 0}
+    seen_budget: list[Any] = []
 
-    def fake_rate_limited(role, fn, overrides=None, deadline=None, counter=None):
+    def fake_rate_limited(role, fn, overrides=None, deadline=None, counter=None, budget=None):
         calls["invoke"] += 1
+        seen_budget.append(budget)
         raise RuntimeError("Error code: 429 - rate limit exceeded")
 
     monkeypatch.setattr(L, "_invoke_with_rate_limit_retry", fake_rate_limited)
@@ -836,6 +838,8 @@ def test_channel_b_rate_limit_raises_without_consuming_retries(monkeypatch):
         L.structured_call("mockgen", cls, "sys", "user", max_retries=3)
     # 通道 A 1 次 + 通道 B 第 1 次即终止；旧行为会烧满 A1 + B3 = 4 次
     assert calls["invoke"] == 2
+    # 墙钟预算必须真的透传到两个通道（没接上就是"以为设了上限"）
+    assert all(isinstance(b, L.WallBudget) for b in seen_budget), seen_budget
 
 
 def test_rate_limit_deadline_trims_wait(monkeypatch):

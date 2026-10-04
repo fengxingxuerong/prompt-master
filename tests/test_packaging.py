@@ -119,6 +119,10 @@ def test_precommit_hooks_cover_the_same_scope_as_ci():
     而这正是 CI 注释里自己警告过的"第三种口径"。另外钩子默认会把 staged 文件追加到 args
     后面，等于**门禁范围随你这次改了哪些文件而变**。
     所以这里比两件事：三条命令的作用路径集合相等 + 每条钩子都 `pass_filenames: false`。
+
+    ⚠️ 只比"两边相等"是不够的（2026-10-02 补）：**两边同时删掉一个文件也满足相等**，
+    那条路径就会在没人注意的情况下退出所有门禁。所以另外钉住一组"必需在范围内"的文件
+    （见 `test_lint_scope_covers_every_gated_entry_script`）。
     """
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     cfg_path = ROOT / ".pre-commit-config.yaml"
@@ -151,6 +155,80 @@ def test_precommit_hooks_cover_the_same_scope_as_ci():
         assert "pass_filenames: false" in body, (
             f"钩子 {hook_id} 没设 pass_filenames: false —— "
             "staged 文件会被追加进 args，门禁范围就随提交内容变化"
+        )
+
+
+# 必须在 lint/type 检查范围内的顶层入口脚本。
+# 加入条件：它是**被 CI 依赖的独立入口**（不是被 import 的模块，那些在 pm/ 里已被覆盖）。
+# 这条清单是"防两边同时删"的锚——只比 CI 与 pre-commit 相等，删两处就看不出来了。
+_REQUIRED_LINT_SCOPE = ("eval_prompts.py",)
+
+
+def test_lint_scope_covers_every_gated_entry_script():
+    """被 CI 依赖的入口脚本必须在 lint/type 范围内。
+
+    2026-10-02：`eval_prompts.py` 成了 CI 的一步（节点提示词结构契约），
+    但它当时**碰巧**通过 ruff/mypy —— 没有任何东西防它漂。
+    "CI 绿"里有一块没人查，比不跑那一步更危险：它看起来是绿的。
+
+    这条与 `test_precommit_hooks_cover_the_same_scope_as_ci` 互补：
+    那条比"两处相等"，这条钉"必需在内" —— 只比相等的话，
+    从 CI 与 pre-commit 里**同时**删掉一个文件也满足相等。
+    """
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    cfg = (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    def ci_scope(sub: str) -> set[str]:
+        m = re.search(rf"run:\s*{re.escape(sub)}\s+(.+)", ci)
+        assert m, f"CI 里找不到 `{sub}`"
+        return set(m.group(1).split())
+
+    mypy_files = re.search(r"^files = \[(.+?)\]", pyproject, re.M)
+    assert mypy_files, "pyproject 里找不到 [tool.mypy] files"
+    mypy_scope = {t.strip().strip('"') for t in mypy_files.group(1).split(",")}
+
+    for f in _REQUIRED_LINT_SCOPE:
+        assert f in ci_scope("ruff check"), f"{f} 不在 CI 的 ruff check 范围内"
+        assert f in ci_scope("ruff format --check"), f"{f} 不在 CI 的 ruff format 范围内"
+        assert f in ci_scope("mypy"), f"{f} 不在 CI 的 mypy 范围内"
+        assert f in mypy_scope, f"{f} 不在 pyproject 的 [tool.mypy] files 里"
+        # pre-commit 侧由 test_precommit_hooks_cover_the_same_scope_as_ci 保证与 CI 相等
+        assert f in cfg, f"{f} 完全没出现在 .pre-commit-config.yaml 里"
+
+
+def test_gated_scripts_exist_on_disk():
+    """`_REQUIRED_LINT_SCOPE` 里的文件必须真的存在 —— 否则是空喊。"""
+    for f in _REQUIRED_LINT_SCOPE:
+        assert (ROOT / f).is_file(), f"{f} 不存在，清单该更新了"
+
+
+def test_docs_gate_block_matches_ci_lint_scope():
+    """`docs/operations.md` 的门禁块自称"与 ci.yml 逐条同口径"，就必须真的逐条同口径。
+
+    它此前**不被任何测试守着**（2026-10-02 前）：文档里的范围与 CI 漂开时，
+    照文档跑本地门禁的人会拿到一份比 CI 松或紧的检查，而两边的输出都叫"绿"。
+    这个仓库已经为同类漂移吃过两次亏（覆盖率地板抄件、用例数抄件），
+    所以这里把第三条路径清单也钉上。
+    """
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    docs = (ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+
+    def ci_scope(sub: str) -> set[str]:
+        m = re.search(rf"run:\s*{re.escape(sub)}\s+(.+)", ci)
+        assert m, f"CI 里找不到 `{sub}`"
+        return set(m.group(1).split())
+
+    def doc_scope(sub: str) -> set[str]:
+        m = re.search(rf"^{re.escape(sub)}\s+(.+)$", docs, re.M)
+        assert m, f"docs/operations.md 里找不到 `{sub}` 那行"
+        return set(m.group(1).split())
+
+    for sub in ("ruff check", "ruff format --check", "mypy"):
+        assert doc_scope(sub) == ci_scope(sub), (
+            f"`{sub}` 的作用范围在文档与 CI 之间漂了："
+            f"CI 多 {sorted(ci_scope(sub) - doc_scope(sub))}，"
+            f"文档多 {sorted(doc_scope(sub) - ci_scope(sub))}"
         )
 
 
@@ -389,3 +467,50 @@ def test_ci_and_docs_run_every_release_suite() -> None:
         f"'运营数据没被写脏'守卫应在每个跑完 releases 套件的 job 里各出现一次："
         f"CI 读到 {ci.count(guard)} 次 / job {len(groups)} 个"
     )
+
+
+def test_operations_lists_the_known_coverage_gaps():
+    """`docs/operations.md` 必须持久保留「已知薄弱点清单」，且写清它怎么测出来的。
+
+    为什么需要这条（2026-10-02）：这份清单是"下一轮该补哪儿"的唯一入口。
+    它一旦被删掉或改成没有依据的口号，下一个人就得从头重测一遍覆盖率分布 ——
+    而这个仓库已经有过"文档写的数与门禁不是一个数"的记录。
+    """
+    docs = (ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+    assert "已知薄弱点清单" in docs, "薄弱点清单被删了（它是下一轮的入口）"
+    # 清单必须点名两个真实存在的文件
+    assert "pm/modelhub/server.py" in docs
+    assert "pm/modelhub/pool.py" in docs
+    # 必须给出复现命令，否则读者只能相信数字
+    assert "--cov-report=term-missing" in docs
+    # 必须说清"补它的前提是什么" —— 否则下一个人会把能补的也一起跳过。
+    # ⚠️ 判据不绑定具体措辞：`modelhub/server.py` 于 2026-10-02 补到 100% 后，
+    # 正文里的"纯逻辑 / 真上游"分类已被收敛后的表述取代 ——
+    # 固守措辞会让护栏在**内容更准确**时误红（我第一版就这么写的）。
+    # 现在只要求"给出了补的前提/成本"这件事仍然在场。
+    assert ("前提" in docs) and ("活 socket" in docs or "上游桩" in docs), (
+        "清单没有说明补各项的前提/成本"
+    )
+
+
+def test_coverage_gap_doc_lines_still_look_like_a_real_file():
+    """清单里点名的行号，必须仍落在对应文件的真实范围里。
+
+    行号是实测快照，会随代码移动而失效。这条不检查"行号还准不准"
+    （那要重跑覆盖率，代价高且本机有间歇性假红），只检查**没有离谱到
+    指向不存在的行** —— 真漂了会红，提醒重测而不是让人照着一份废清单去补。
+    """
+    docs = (ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+    for rel in ("pm/modelhub/server.py", "pm/modelhub/pool.py"):
+        f = ROOT / rel
+        assert f.is_file(), f"清单点名的 {rel} 不存在了"
+        n_lines = len(f.read_text(encoding="utf-8").splitlines())
+        # 抽出形如 `123-456`、`123`、`123/124`、`123-125`、`126` 的代码区间
+        mentioned: list[int] = []
+        for m in re.finditer(r"`(\d+)(?:\s*[-/]\s*(\d+))?`", docs):
+            mentioned.append(int(m.group(1)))
+            if m.group(2):
+                mentioned.append(int(m.group(2)))
+        # 只检查属于该文件的那些（粗粒度：大于文件行数的直接算离谱）
+        bad = [n for n in mentioned if n > max(n_lines, 1000)]
+        assert not bad, f"{rel} 的清单里出现了离谱行号（文件共 {n_lines} 行）：{bad}"

@@ -320,6 +320,13 @@ def _is_rate_limit_error(e: Exception) -> bool:
 # 429 是配额，换 Key 有意义；连接故障换 Key 无用，但**短退避原地重试往往就能过**。
 # 2026-09-13 第 6 轮实测：一次 48 分钟运行里 4 次盲评全灭 + 多次评估失败，
 # 错误签名全是 OpenAIConnectionError: Connection error. —— 只重试 429 的策略白丢了一整轮。
+#
+# 2026-10-03 本地装死端点实测出真实文本形态，纠正两处"看着覆盖、其实永不命中"：
+#   读超时   → `OpenAITimeoutError: Request timed out.`（不含 "read timeout" ⇒ 旧表判 False，
+#              超时从来没被我方重试过；那 3× 是 SDK 隐式重试贡献的，见 SDK_RETRIES）
+#   5xx 网关 → `OpenAIAPIError: Error code: 503 - {'error': …}`（不含 "503 service" ⇒ 漏判；
+#              502 只是因为响应体里恰好有 "502 Bad Gateway" 字样才蒙对）
+# 结论：**能拿到状态码就按状态码判**，文本只作为拿不到码时的兜底。
 _TRANSIENT_CONN_HINTS = (
     "connection error",
     "connection reset",
@@ -332,9 +339,86 @@ _TRANSIENT_CONN_HINTS = (
     "502 bad gateway",
     "503 service",
     "504 gateway",
+    # 实测的真实超时形态（openai/langchain 包一层后不带 "read timeout" 字样）
+    "timeouterror",
+    "timed out",
 )
+# 状态码形态的瞬时故障：网关 5xx 与 408 请求超时。429 明确排除（它走限流通道：退避 + 换 Key）。
+_TRANSIENT_STATUS_CODES = frozenset({408, 500, 502, 503, 504})
 TRANSIENT_CONN_RETRIES = max(0, _int_env("PM_CONN_RETRIES", 2))
 TRANSIENT_CONN_BASE_SLEEP = _float_env("PM_CONN_BASE_SLEEP", 1.5)
+
+# 第 0 层重试：openai SDK 自己会重试（`DEFAULT_MAX_RETRIES = 2`），而且是**隐式**的——
+# 不看代码想不到，日志里也不留痕。2026-10-03 本地装死端点实测：`timeout=1s` 的端点挂 5s 时
+# 一次 `invoke()` 真实打到端点 **3 次**（我方重试计数只有 1）。按生产 `PM_TIMEOUT=300` 折算
+# 就是 900s，正是 2026-10-02 真端点轮里那段 15 分钟日志空洞。
+# 现在显式钉成 0：重试决策只留 `_invoke_with_conn_retry`（短退避）与限流层（换 Key）两处，
+# 它们都在墙钟预算的管辖范围内。确需恢复 SDK 层时设 `PM_SDK_RETRIES`，但要清楚那等于
+# 把每发的时长乘以 (1+N) 且不受本模块预算约束。
+SDK_RETRIES = max(0, _int_env("PM_SDK_RETRIES", 0))
+
+# 一次调用（含全部通道、全部重试、全部退避）的墙钟上限。0 = 不设上限（旧行为）。
+# 默认值来自实测分布而不是拍的：历史 trace 里 24 条 >60s 的单调用中最慢 **122.2s**
+# （revise 的 plain 调用），600s 放得下 3~4 次这种正常尝试，只砍"每发吃满 timeout 再叠三层"
+# 的病态形态——那种形态在修复前的上界约 1 小时（3 通道 × 3 SDK × 300s）。
+CALL_BUDGET = max(0.0, _float_env("PM_CALL_BUDGET", 600.0))
+
+
+class CallBudgetExceeded(RuntimeError):
+    """一次调用的墙钟预算用尽。继承 RuntimeError：调用方现有的兜底路径不用改就能接住。
+
+    刻意不叫 "TimeoutError"：那会被 `_TRANSIENT_CONN_HINTS` 一类文本判据再认成一次
+    可重试故障，预算反而变成重试的燃料。
+    """
+
+    def __init__(self, role: str, budget_s: float, wall_s: float, requests: int, last_err: str):
+        super().__init__(
+            f"[{role}] 墙钟预算 {budget_s:.0f}s 用尽（实际 {wall_s:.0f}s，已发 {requests} 次真实请求）。"
+            f"最后一次错误：{last_err}"
+        )
+        self.role = role
+        self.details: dict[str, Any] = {
+            "role": role,
+            "budget_s": round(budget_s),
+            "wall_s": round(wall_s),
+            "requests": requests,
+            "last_error": last_err,
+        }
+
+
+class WallBudget:
+    """一次调用的墙钟预算句柄：只在**每次真实发起之前**检查。
+
+    旧版也有 `deadline`，但它只约束"还要不要睡这一觉"（`_invoke_with_rate_limit_retry`
+    在 sleep 前比一次）——一次挂住的调用完全不受它约束，所以那条线管不住卡死。
+    这里两件事都管：①发起前看还剩多少，不够就停；②把这一发的客户端 timeout 夹到剩余量，
+    免得最后一发冲破预算（预算外最多溢出**一发**，见 test_worst_case_is_bounded_by_the_declared_budget）。
+    """
+
+    def __init__(self, role: str, seconds: float):
+        self.role = role
+        self.seconds = seconds
+        self.start = time.monotonic()
+
+    def remaining(self) -> float:
+        return self.seconds - (time.monotonic() - self.start)
+
+    def elapsed(self) -> float:
+        return time.monotonic() - self.start
+
+    def expired(self) -> bool:
+        return self.remaining() <= 0
+
+    def clamp(self, timeout: float) -> float:
+        """这一发最多允许用掉的秒数：不超过剩余预算，也不低于 1s（0 会被 httpx 当"无限等"）。"""
+        return max(1.0, min(float(timeout), self.remaining()))
+
+    def exceeded(self, requests: int, last_err: str) -> CallBudgetExceeded:
+        return CallBudgetExceeded(self.role, self.seconds, self.elapsed(), requests, last_err)
+
+
+_BUDGET_MIN_REMAINING = 5.0  # 剩余不足 5s 就别再发起：那一发几乎必挂
+
 
 # 解析/校验失败时的温度**附加调整量**（默认 0 = 沿用降温 TEMPERATURE_DECAY）。
 #
@@ -351,37 +435,91 @@ TEMPERATURE_BOOST_ON_PARSE = _float_env("PM_TEMP_BOOST_ON_PARSE", 0.0)
 
 
 def _is_transient_conn_error(e: Exception) -> bool:
-    """连接类瞬时故障（可原地重试），与限流、与"请求本身有问题"都区分开。"""
+    """连接类瞬时故障（可原地重试），与限流、与"请求本身有问题"都区分开。
+
+    有状态码就按状态码判（5xx 与 408 可重试，其余不可），拿不到码才回退文本匹配——
+    文本匹配是按"响应体里恰好有什么字样"蒙的，实测会漏掉 503 这种带 JSON 错误体的形态。
+    """
+    code = getattr(e, "status_code", None) or getattr(
+        getattr(e, "response", None), "status_code", None
+    )
+    if isinstance(code, int):
+        return code in _TRANSIENT_STATUS_CODES
     text = f"{type(e).__name__}: {e}".lower()
     return any(k in text for k in _TRANSIENT_CONN_HINTS)
 
 
-def _invoke_with_conn_retry(role: str, call: Any, counter: list[int] | None = None) -> Any:
+def _invoke_with_conn_retry(
+    role: str,
+    call: Any,
+    counter: list[int] | None = None,
+    budget: WallBudget | None = None,
+    attempt_s: float = 0.0,
+) -> Any:
     """执行一次调用；瞬时连接故障按 1.5s/3s 短退避重试（默认 2 次），其余异常直接上抛。
 
     `counter`（单元素 list，可选）：每次**真实发起网络请求**（含连接重试）就 +1。
     放在最内层是为了让计数覆盖所有实际打到端点的调用——外层 429 重试/Key 轮换
     每次都会重新走进这里，连接故障的内部重试也在这里发生，语义最准确。
+
+    `budget`（可选）：整次调用的墙钟预算。旧版这里**没有任何时间约束**，
+    一次"端点挂住到 timeout"会连着重试到 `PM_CONN_RETRIES` 用完，最坏 (1+N)×timeout；
+    现在每发之前查预算，退避睡一觉之前也查，不够就带着现场（发了几发、用了多久）上抛。
+
+    `attempt_s`：这一发的客户端 timeout（由 `_llm_within_budget` 夹过）。第一发照例放行
+    （它刚被夹进剩余预算里），**后续重试要求剩余预算装得下完整一发**——否则会出现
+    "剩 50s 却发出一个 100s timeout 的请求"这种注定冲破预算的子弹。
     """
+    last_exc: Exception | None = None
     for i in range(TRANSIENT_CONN_RETRIES + 1):
+        # 首发只要求"还剩预算"（timeout 已被 `_llm_within_budget` 夹进剩余量）；
+        # 后续重试额外要求装得下一整个 timeout——否则会出现"剩 50s 却发出 100s 的请求"。
+        floor = 0.0 if i == 0 else max(_BUDGET_MIN_REMAINING, attempt_s)
+        if budget is not None and budget.remaining() <= floor:
+            raise budget.exceeded(
+                counter[0] if counter else i, str(last_exc or f"剩余预算 {budget.remaining():.0f}s")
+            )
         try:
             if counter is not None:
                 counter[0] += 1
             return call()
         except Exception as e:
+            last_exc = e
             if not _is_transient_conn_error(e) or i >= TRANSIENT_CONN_RETRIES:
                 raise
             sleep_s = TRANSIENT_CONN_BASE_SLEEP * (2**i)
+            if budget is not None and budget.remaining() - sleep_s < _BUDGET_MIN_REMAINING:
+                raise budget.exceeded(
+                    counter[0] if counter else i, f"{type(e).__name__}: {e}"
+                ) from e
             logger.warning(
-                "[%s] 瞬时连接故障（%s），%.1fs 后重试 %d/%d",
+                "[%s] 瞬时连接故障（%s），%.1fs 后重试 %d/%d（墙钟已用 %.0fs）",
                 role,
                 type(e).__name__,
                 sleep_s,
                 i + 1,
                 TRANSIENT_CONN_RETRIES,
+                budget.elapsed() if budget else 0.0,
             )
             time.sleep(sleep_s)
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _llm_within_budget(
+    role: str, overrides: dict[str, Any] | None, budget: WallBudget | None
+) -> tuple[Any, float]:
+    """构造这一发要用的客户端，返回 `(llm, 这发的秒数预算)`。
+
+    有墙钟预算时把 timeout 夹进剩余量——不夹的话：预算剩 6s 而 `PM_TIMEOUT=300`，
+    这一发仍可挂满 300s，预算就只是"发与发之间"的软约束。
+    返回夹出来的秒数给连接重试层，让它在"剩余预算连一发都装不下"时直接收手。
+    """
+    if budget is None:
+        return get_llm(role, overrides), 0.0
+    base = build_config(role, overrides).timeout
+    clamped = int(budget.clamp(base))
+    merged = {**(overrides or {}), "timeout": clamped}
+    return get_llm(role, merged), float(clamped)
 
 
 def _invoke_with_rate_limit_retry(
@@ -390,6 +528,7 @@ def _invoke_with_rate_limit_retry(
     overrides: dict[str, Any] | None = None,
     deadline: float | None = None,
     counter: list[int] | None = None,
+    budget: WallBudget | None = None,
 ) -> Any:
     """带 429 退避与 Key 轮换的调用封装。
 
@@ -403,6 +542,11 @@ def _invoke_with_rate_limit_retry(
     `deadline`（monotonic 绝对时刻）是可选的外层共享预算：结构化调用在通道 A/B 之间
     共享一个总限流预算（③ 解耦），取两者更早者生效；不传时行为与旧版完全一致。
 
+    `budget`（`WallBudget`）是**墙钟**预算，与 `deadline`（只管退避睡多久）不是一回事：
+    - 每发之前查剩余量，不够 `_BUDGET_MIN_REMAINING` 就不再发起；
+    - 把这一发的客户端 timeout 夹到剩余量内，避免最后一发冲破预算。
+    没有这一层时 `deadline` 挡不住"挂住不返回"的调用（实测就是这么挂了 900s）。
+
     `counter`（单元素 list）可选：每发起一次**真实网络请求**就 +1（含 429 退避重试、
     Key 轮换后的重试与连接类内部重试），供调用方在 meta 里如实记录请求次数。
     计数实际发生在最内层 `_invoke_with_conn_retry`（所有重试路径最终都会重新走进它），
@@ -413,6 +557,11 @@ def _invoke_with_rate_limit_retry(
     if deadline is not None:
         wait_deadline = min(wait_deadline, deadline)
     for attempt in range(RATE_LIMIT_RETRIES + 1):
+        # 首发只要求还剩预算（timeout 会在 `_llm_within_budget` 里夹进剩余量）；
+        # 退避后的重试还要多留一点，免得"睡完觉只剩 1s"再发一发注定失败的请求。
+        floor = 0.0 if attempt == 0 else _BUDGET_MIN_REMAINING
+        if budget is not None and budget.remaining() <= floor:
+            raise budget.exceeded(counter[0] if counter else attempt, str(last_exc or "未发起请求"))
         if attempt > 0:
             sleep_s = RATE_LIMIT_BASE_SLEEP * (2 ** (attempt - 1))
             pool = _key_pool(role)
@@ -426,6 +575,8 @@ def _invoke_with_rate_limit_retry(
                     sleep_s,
                 )
                 break
+            if budget is not None and budget.remaining() - sleep_s < _BUDGET_MIN_REMAINING:
+                raise budget.exceeded(counter[0] if counter else attempt, str(last_exc))
             logger.warning(
                 "[%s] 疑似限流，第 %d/%d 次退避 %.0fs 后重试（Key 池大小 %d）",
                 role,
@@ -442,13 +593,17 @@ def _invoke_with_rate_limit_retry(
                     api_key = pool[_KEY_CURSOR % len(pool)]
                     _KEY_CURSOR += 1
                 logger.info("[%s] 轮换到 Key 池第 %d 个 Key 重试", role, _KEY_CURSOR % len(pool))
-            llm = get_llm(role, {"api_key": api_key} if api_key else None)
+            llm, attempt_s = _llm_within_budget(
+                role, {"api_key": api_key} if api_key else None, budget
+            )
         else:
-            llm = get_llm(role, overrides)
+            llm, attempt_s = _llm_within_budget(role, overrides, budget)
         try:
             t0 = time.time()
             # 默认参数绑定当前轮的 llm，避免闭包捕获循环变量（B023）
-            resp = _invoke_with_conn_retry(role, lambda _llm=llm: invoke_fn(_llm), counter)
+            resp = _invoke_with_conn_retry(
+                role, lambda _llm=llm: invoke_fn(_llm), counter, budget, attempt_s
+            )
             # 记账只记真实成功的调用（429 退避后的重试、双通道各自的真实请求都覆盖；
             # 演示/测试钩子在 structured_call/plain_call 入口就返回，不会到这里）
             _record_usage(role, resp, int((time.time() - t0) * 1000))
@@ -562,6 +717,7 @@ def get_llm(role: str, overrides: dict[str, Any] | None = None) -> BaseChatModel
             temperature=cfg.temperature,
             max_tokens=cfg.max_tokens,
             timeout=cfg.timeout,
+            max_retries=SDK_RETRIES,  # 不传就是 SDK 缺省的 2 次隐式重试（见 SDK_RETRIES 注释）
         )
 
     from langchain_openai import ChatOpenAI
@@ -572,6 +728,7 @@ def get_llm(role: str, overrides: dict[str, Any] | None = None) -> BaseChatModel
         "temperature": cfg.temperature,
         "max_tokens": cfg.max_tokens,
         "timeout": cfg.timeout,
+        "max_retries": SDK_RETRIES,
     }
     if cfg.base_url:
         kwargs["base_url"] = cfg.base_url
@@ -969,6 +1126,9 @@ def structured_call(
     # except 大兜底当成"解析失败"消耗一次重试名额。现在解析重试次数（质量层）与
     # 限流等待（传输层）独立计数，总阻塞时长有硬上限。
     limit_deadline = time.monotonic() + max(0.0, RATE_LIMIT_TOTAL_WAIT)
+    # 墙钟预算（`PM_CALL_BUDGET`）：那条 `limit_deadline` 只约束"还要不要睡这一觉"，
+    # 一次挂住不返回的调用它管不到。这里才是"一次调用最多占多久"的那条线。
+    budget = WallBudget(role, CALL_BUDGET) if CALL_BUDGET > 0 else None
 
     # ---- 通道 A ----
     # method 只有在显式配置时才传：不同 provider 的 with_structured_output
@@ -990,6 +1150,7 @@ def structured_call(
             overrides,
             deadline=limit_deadline,
             counter=requests_counter,
+            budget=budget,
         )
         if isinstance(result, model_cls):
             meta.update(
@@ -1018,6 +1179,10 @@ def structured_call(
     except _ChannelASkipped as e:
         last_err = f"跳过原生结构化输出：{e}"
         logger.debug("[%s] %s", role, last_err)
+    except CallBudgetExceeded:
+        # 预算用尽不是"这个通道不支持"，不能记进能力缓存（那会让后续调用永久跳过通道 A），
+        # 也不必再进通道 B——同一个预算已经见底了。直接上抛，保留现场。
+        raise
     except Exception as e:  # noqa: BLE001
         last_err = f"{type(e).__name__}: {e}"
         logger.warning("[%s] 原生结构化输出不可用，降级为 JSON 文本解析：%s", role, last_err)
@@ -1033,6 +1198,9 @@ def structured_call(
     temp = cfg.temperature
 
     for attempt in range(1, max_retries + 1):
+        if budget is not None and budget.remaining() <= 0:
+            # 名额还剩、预算没了 ⇒ 停。旧版这里会把剩下的解析重试名额各再烧一个 timeout
+            raise budget.exceeded(requests_counter[0], last_err or "通道 A 未拿到结果")
         retry_hint = ""
         if last_err:
             retry_hint = (
@@ -1057,6 +1225,7 @@ def structured_call(
                 overrides,
                 deadline=limit_deadline,
                 counter=requests_counter,
+                budget=budget,
             )
             raw = resp.content if isinstance(resp.content, str) else str(resp.content)
             data = extract_json_object(raw)
@@ -1110,6 +1279,15 @@ def structured_call(
             # 也不把「RateLimitError」写进 retry_hint 去误导下一次提示。
             if _is_rate_limit_error(e):
                 raise
+            if isinstance(e, CallBudgetExceeded):
+                raise
+            if _is_transient_conn_error(e):
+                # 传输层已经在我方重试里试过满 (1+PM_CONN_RETRIES) 发，解析重试名额救不了网络。
+                # 预算同时见底时报预算（那条更可执行），否则原样上抛——旧版这里是
+                # "再烧两次、每次再吃满一整条重试链"，那是 45 分钟的另一半来源。
+                if budget is not None and budget.expired():
+                    raise budget.exceeded(requests_counter[0], f"{type(e).__name__}: {e}") from e
+                raise
             last_err = f"{type(e).__name__}: {e}"
             logger.warning("[%s] 第 %d/%d 次调用异常：%s", role, attempt, max_retries, last_err)
             # 端点/网络类异常沿用降温：这类失败与采样随机性无关，保守重试即可
@@ -1135,11 +1313,13 @@ def plain_call(
     cfg = build_config(role, overrides)
     requests_counter: list[int] = [0]
     t0 = time.time()
+    budget = WallBudget(role, CALL_BUDGET) if CALL_BUDGET > 0 else None
     resp = _invoke_with_rate_limit_retry(
         role,
         lambda llm: llm.invoke([SystemMessage(content=system), HumanMessage(content=user)]),
         overrides,
         counter=requests_counter,
+        budget=budget,
     )
     text = resp.content if isinstance(resp.content, str) else str(resp.content)
     meta = {

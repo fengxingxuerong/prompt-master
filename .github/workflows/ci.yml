@@ -13,7 +13,12 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
+      # fetch-depth: 0 是「提示词改动回归门禁」的前提：默认浅克隆（depth=1）里
+      # 没有基线的历史对象，`git rev-parse <base>` 会失败 → 门禁报"自己没跑起来"（退出码 2）。
+      # 那种红是 CI 配置问题，不是提示词问题，日志里两者分得很清楚，但不如一开始就给对。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -26,12 +31,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Lint (ruff check)
-        run: ruff check pm/ tests/ run.py run_server.py examples/
+        run: ruff check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
       - name: Format check (ruff format)
-        run: ruff format --check pm/ tests/ run.py run_server.py examples/
+        run: ruff format --check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
       - name: Type check (mypy)
         # 与 pyproject 的 [tool.mypy] files 保持一致，别出现"本地查、CI 不查"的第三种口径
-        run: mypy pm/ run.py run_server.py
+        run: mypy pm/ run.py run_server.py eval_prompts.py
       - name: Tests (pytest) —— 无 Key、且禁止任何真实出网
         # 死端点 + 假 Key 是有意的：只要有一条调用漏到真端点（C5 那类缺陷），
         # 这里就会 Connection error 立刻变红，而不是在开发机上静默烧额度。
@@ -44,6 +49,57 @@ jobs:
           PM_ARBITER_BASE_URL: http://127.0.0.1:9/v1
           PM_API_KEY: sk-ci-has-no-real-key
         run: python -m pytest tests/ -q --cov=pm --cov-report=term-missing
+      - name: 提示词改动回归门禁 —— 只拦本次「新引入」的规则失败模式
+        # 为什么门禁判据是「增量」而不是「绝对」：`pm/quality.py` 的规则是给
+        # 「交付给目标模型的提示词」设计的，而 `pm/prompts.py` 里 17 个节点提示词
+        # 有 16 个天然命中规则（它们是模板，本身就含 <<占位符>> 与 <标签>）。
+        # 绝对判据会让这一步从第一天起永久红 —— 而永远红的门禁等于没有门禁，
+        # 它会被绕过、被无视，最后变成"本地跑过、CI 也绿"的错觉。
+        #
+        # 判据与 `run.py diff` 同源（都用 pm/promptdiff），同时覆盖两个通道：
+        #   ① code 级新引入（干净模板变脏）；
+        #   ② 已命中规则上的命中项新增（模板本来就脏、这次又加重）。
+        # ② 是实测补上的盲区：`OPTIMIZER_SYSTEM` 本来就含抑制式措辞（引号内的
+        # "禁止示例列举"），只比 code 集合时，「再塞一条真抑制条款」完全看不出来。
+        #
+        # 退出码：0=放行 / 1=有新引入（该红）/ 2=门禁自己没跑起来（与回归分开报）。
+        # 零调用、不出网，所以放在 pytest 之后、不需要任何 Key。
+        #
+        # ⚠️ `fetch-depth: 0` 是这步的前提：默认浅克隆里没有基线的历史对象，
+        #    `git rev-parse <base>` 会失败 → 门禁报"自己没跑起来"（退出码 2）。
+        #    那种红是配置问题，不是提示词问题；两者在日志里分得很清楚。
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PR：与目标分支的合并基点比（github.event.pull_request.base.sha 已经 fetch 到了）
+            python run.py gate --base "${{ github.event.pull_request.base.sha }}" --json
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            # push：与推送前的那个提交比
+            python run.py gate --base "${{ github.event.before }}" --json
+          else
+            # 新分支首次推送（before 是全零 SHA）：客观上没有基线可对比。
+            # **必须显式把全零 SHA 传进去**，不能裸跑 `run.py gate`：
+            # 裸跑会走自动探测，而自动探测拒绝把 HEAD 自己当基线（那是防静默失效的护栏），
+            # 在"只有一个提交"的检出里会报"门禁自己没跑起来"（退出码 2）→ CI 红。
+            # 显式传全零 SHA 才会走"首次推送"分支：打印跳过并说明"这不等于没回归"。
+            python run.py gate --base "0000000000000000000000000000000000000000"
+          fi
+      - name: 节点提示词结构契约（eval_prompts 离线 / 零调用）
+        # 与上一步「提示词改动门禁」是**互补**的两层，别互相替代：
+        #   · gate（增量）：这次改动有没有**新引入**已知事故模式 —— 拦"变坏"；
+        #   · eval_prompts（绝对）：模板渲染后结构契约是否完好
+        #     （占位符全渲染 / <安全约束> 块 / 各节点专项块）—— 判"是否残破"。
+        # 为什么两条都要：gate 的绝对判据对模板天然命中（16/17）所以只能比增量，
+        # 而"删掉 <安全约束> 块"这类**结构缺失**不会新增规则命中 —— gate 看不见它。
+        #
+        # 为什么还要单独跑一次 CLI（`tests/test_prompt_eval.py` 已经在 pytest 里
+        # 调过 check_structure）：pytest 覆盖的是**函数级判据**，而入口的
+        # **退出码与参数行为**此前没有任何东西守着 —— 2026-10-02 变异测试实测：
+        # 把 `return 1 if failed else 0` 改成 `return 0`、把 `--node` 过滤注释掉，
+        # pytest 依然全绿。CI 里人看的是这一步的退出码，它必须真的会红。
+        #
+        # --live 永远不进 CI：它打真实端点、花真钱，只能手动跑（见文件头说明）。
+        run: python eval_prompts.py
       - name: Coverage ratchet —— pm/modelhub/* 单独一条更紧的线
         # 全量线会把结构问题抹平，而恰恰是这块网关出过"流式通道没有 return、stream=true
         # 返回 None、全套测试全绿"的事故（见 tests/test_modelhub_stream_contract.py）——
@@ -86,7 +142,12 @@ jobs:
     # 覆盖 Windows 侧脚本（run_e2e_stub.ps1 的 UTF-8 / 端口避让 / 任务清理只在 Windows 上成立）
     runs-on: windows-latest
     steps:
+      # 同 linux job：提示词门禁要取历史基线，浅克隆里取不到（fetch-depth 说明见上面）。
+      # Windows 侧额外覆盖**路径归一化**：反斜杠、大小写不敏感、CRLF 检出都会让
+      # "按仓库相对路径取基线"走出与 linux 不同的分支 —— 那条路出过静默放行的缺陷。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -108,6 +169,26 @@ jobs:
       - name: 运营数据没被测试写脏（Windows 侧同样要查）
         # 本机就是 Windows：triage 那次污染是在 Windows 上量到的，别只查 linux。
         run: git diff --exit-code -- "releases/*/data/*"
+      - name: 提示词改动回归门禁（Windows 侧同口径）
+        # 与 linux job 同一条命令、同一判据。Windows 上额外覆盖的是**路径归一化**：
+        # 反斜杠路径、大小写不敏感的文件系统、CRLF 检出都会让"按仓库相对路径取基线"
+        # 走出与 linux 不同的分支 —— 那条路出过"绝对路径导致静默放行"的缺陷。
+        # ⚠️ 分支逻辑与 linux 侧逐字同口径（含"首次推送必须显式传全零 SHA"那条注释），
+        #    两边写法漂了就会出现"一条线红、一条线绿"的假象。
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "pull_request") {
+            python run.py gate --base "${{ github.event.pull_request.base.sha }}"
+          } elseif ("${{ github.event.before }}" -and "${{ github.event.before }}" -ne "0000000000000000000000000000000000000000") {
+            python run.py gate --base "${{ github.event.before }}"
+          } else {
+            python run.py gate --base "0000000000000000000000000000000000000000"
+          }
+      - name: 节点提示词结构契约（Windows 侧同口径）
+        # 与 linux 侧同一命令。Windows 额外覆盖的是**编码与换行**：
+        # 模板里含中文与 <<占位符>>，GBK 码页/CRLF 检出会走 emb 与 linux 不同的
+        # 渲染与读取路径（本仓库出过入口编码兜底类缺陷，故两侧都跑）。
+        run: python eval_prompts.py
       - name: Stub e2e (PowerShell)
         shell: pwsh
         run: ./examples/run_e2e_stub.ps1

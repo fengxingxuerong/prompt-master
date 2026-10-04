@@ -48,7 +48,130 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_SAMPLES = _REPO_ROOT / "judge_calibration" / "samples.json"
 EXAMPLE_SAMPLES = _REPO_ROOT / "judge_calibration" / "samples.example.json"
+ANCHOR_DIR = _REPO_ROOT / "judge_calibration"
 JUDGE_ROLES = ("evaluator", "evaluator_b", "arbiter")
+
+# ---- 人工分的**出处**（2026-10-03 补）----
+# 48 条候选里有 25 条不是产品所有者打的，是 AI 按所有者已确认判例外推的（GLM-5.3，
+# 与评委 B glm-5.2 同族）。这件事此前只写在提交说明和 score_form.csv 的备注栏里，
+# 锚点 JSON 里**没有机读位** ⇒ 报告那句"64 条人工锚点、bias +3.09"拆不出严格人工那一半。
+# 同源披露本来就是这个项目的习惯（评委同源要检测要报警），锚点侧同源却是口头承认——补平。
+HUMAN_SOURCE_OWNER = "owner"
+HUMAN_SOURCE_AI_PROXY = "ai_proxy"
+HUMAN_SOURCE_UNKNOWN = "unknown"
+
+
+def classify_human_source(item: dict[str, Any]) -> str:
+    """单条锚点的人工分出处。缺字段一律 `unknown`，**不当成 owner**——
+    把"没标注"读成"人打的"正好把这个洞重新盖回去。"""
+    prov = item.get("provenance")
+    raw = ""
+    if isinstance(prov, dict):
+        raw = str(prov.get("human_score_source") or "")
+    elif isinstance(prov, str):
+        raw = prov
+    if not raw:
+        return HUMAN_SOURCE_UNKNOWN
+    low = raw.lower()
+    if HUMAN_SOURCE_OWNER in low or low.startswith("owner"):
+        return HUMAN_SOURCE_OWNER
+    if HUMAN_SOURCE_AI_PROXY in low or "代判" in raw:
+        return HUMAN_SOURCE_AI_PROXY
+    return HUMAN_SOURCE_UNKNOWN
+
+
+def render_human_source_split(pooled: dict[str, Any]) -> list[str]:
+    """把合并读数按人工分出处拆开写。只有一组有数据时不啰嗦（那说明没得拆）。"""
+    groups = pooled.get("by_human_source") or {}
+    known = {k: v for k, v in groups.items() if v.get("n_pairs")}
+    if len(known) < 2:
+        return []
+    label = {
+        HUMAN_SOURCE_OWNER: "所有者亲判",
+        HUMAN_SOURCE_AI_PROXY: "AI 代判（与评委 B 同族）",
+        HUMAN_SOURCE_UNKNOWN: "未标注出处",
+    }
+    out = ["", "- 人工分出处拆分（同一批配对重算，零调用）："]
+    for src in (HUMAN_SOURCE_OWNER, HUMAN_SOURCE_AI_PROXY, HUMAN_SOURCE_UNKNOWN):
+        g = known.get(src)
+        if not g:
+            continue
+        bias = g.get("bias")
+        bias_s = f"{bias:+.2f}" if isinstance(bias, (int, float)) else "-"
+        out.append(
+            f"  - {label.get(src, src)}：{g['n_anchors']} 条锚点 / {g['n_pairs']} 条配对，bias {bias_s}"
+        )
+    ai = known.get(HUMAN_SOURCE_AI_PROXY, {}).get("n_anchors", 0)
+    tot = sum(g.get("n_anchors", 0) for g in known.values())
+    if ai and tot and ai / tot >= 0.5:
+        out.append(
+            f"  - ⚠️ 合并 bias 里 {ai}/{tot} 条锚点的人工分来自 AI 代判 —— 那一部分量的是"
+            "**家族一致性**，不是与人一致性；引用整句 bias 时必须带上这一句。"
+        )
+    return out
+
+
+def load_human_sources(anchor_dir: Path | None = None) -> dict[str, str]:
+    """扫锚点目录，返回 `{锚点 id: owner|ai_proxy|unknown}`。
+
+    跨轮聚合只消费账本里的 id，所以这里要把所有样本文件并起来看；
+    同一 id 在多个文件里出现时以**先出现的非 unknown** 为准（确定性顺序，不靠 dict 迭代随机）。
+    """
+    base = anchor_dir or ANCHOR_DIR
+    out: dict[str, str] = {}
+    try:
+        paths = sorted(p for p in base.glob("samples*.json"))
+    except OSError:
+        return out
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        rows = (
+            data
+            if isinstance(data, list)
+            else (data.get("samples") if isinstance(data, dict) else None)
+        )
+        if not isinstance(rows, list):
+            continue
+        for item in rows:
+            if not isinstance(item, dict) or item.get("id") is None:
+                continue
+            sid = str(item["id"])
+            src = classify_human_source(item)
+            if out.get(sid, HUMAN_SOURCE_UNKNOWN) == HUMAN_SOURCE_UNKNOWN:
+                out[sid] = src
+    return out
+
+
+def split_by_human_source(
+    pairs: list[dict[str, Any]], sources: dict[str, str]
+) -> dict[str, dict[str, Any]]:
+    """把逐锚点配对按人工分出处分组，各算 bias/MAE。纯算术，零调用。"""
+    groups: dict[str, dict[str, Any]] = {}
+    for p in pairs:
+        src = sources.get(str(p.get("id")), HUMAN_SOURCE_UNKNOWN)
+        g = groups.setdefault(src, {"pairs": [], "anchors": set()})
+        try:
+            human = float(p["human"])
+            judge = float(p["judge"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        g["pairs"].append(judge - human)
+        g["anchors"].add(str(p.get("id")))
+    out: dict[str, dict[str, Any]] = {}
+    for src, g in sorted(groups.items()):
+        deltas = g["pairs"]
+        n = len(deltas)
+        out[src] = {
+            "n_anchors": len(g["anchors"]),
+            "n_pairs": n,
+            "bias": round(sum(deltas) / n, 3) if n else None,
+            "mae": round(sum(abs(d) for d in deltas) / n, 3) if n else None,
+        }
+    return out
+
 
 # 一致性判定阈值（与 schemas.JUDGE_BIAS_ALERT 的默认告警线对齐）
 BIAS_ALERT = 1.0  # |平均偏差| 超过该值 → 系统性偏松/偏严
@@ -657,6 +780,16 @@ def aggregate_history(
         "decision": _decision_stats(humans, judges, PASS_THRESHOLD),
     }
 
+    # 人工分出处拆分：把"bias +3.09"这一句拆成"严格人工 / AI 代判 / 没标注"三份读。
+    # 纯账本重算，零调用；读不到锚点文件就是 unknown 一组，不编数。
+    sources = load_human_sources()
+    pooled["by_human_source"] = split_by_human_source(pairs, sources)
+    _ai = (pooled["by_human_source"].get(HUMAN_SOURCE_AI_PROXY) or {}).get("n_anchors", 0)
+    pooled["ai_proxy_anchors"] = _ai
+    pooled["owner_anchors"] = (pooled["by_human_source"].get(HUMAN_SOURCE_OWNER) or {}).get(
+        "n_anchors", 0
+    )
+
     # 聚类自助法 CI：锚点为重抽单位（见 docstring）。锚点 <2 时重抽是常数，CI 退化为
     # 一个点——报出来就是"看起来很精确的零信息"，宁可声明跳过。
     clusters: dict[str, list[tuple[float, float]]] = {}
@@ -789,6 +922,7 @@ def render_aggregate(agg: dict[str, Any] | None) -> str:
     )
     if pooled.get("ci_skipped"):
         lines.append(f"- ⚠️ {pooled['ci_skipped']}")
+    lines.extend(render_human_source_split(pooled))
     disp = agg.get("dispersion") or {}
     spans = []
     if agg.get("rounds_used", 0) >= 2:  # 单轮没有"轮间"可言，极差 0.0 是噪声不是信息

@@ -147,7 +147,9 @@ def _style_stats(text: str) -> dict[str, int]:
 
 
 def _conflict_attribution(
-    base: dict[int, dict[str, Any]], cur: dict[int, dict[str, Any]]
+    base: dict[int, dict[str, Any]],
+    cur: dict[int, dict[str, Any]],
+    base_word: str = "基线",
 ) -> dict[str, Any]:
     """对冲突双方的代表输出做风格统计，并给出归因假设（供人工裁定参考，不自动裁定）。"""
     b_txt = "\n".join(str(r.get("output", "")) for r in base.values())
@@ -156,7 +158,7 @@ def _conflict_attribution(
 
     if c["conservative_markers"] > b["conservative_markers"]:
         hypothesis = (
-            "优化版比基线**更保守**（枚举缺失标记更多）——冲突可能是真实质量回退的信号，"
+            f"优化版比{base_word}**更保守**（枚举缺失标记更多）——冲突可能是真实质量回退的信号，"
             "建议优先人工核查优化版输出是否过度回避任务"
         )
     elif (
@@ -164,7 +166,7 @@ def _conflict_attribution(
         and c["data_points"] >= b["data_points"]
     ):
         hypothesis = (
-            "与「评委偏好保守逐项枚举」假设一致：基线更保守（枚举缺失多），"
+            f"与「评委偏好保守逐项枚举」假设一致：{base_word}更保守（枚举缺失多），"
             "优化版更具体（数值引用多）——盲评偏好前者不代表优化版更差，"
             "建议人工以产出价值优先裁定"
         )
@@ -289,16 +291,18 @@ def compare_node(state: State) -> dict[str, Any]:
         verdict = "tie"
 
     agg = state.get("aggregate") or {}
+    # 原稿改进模式下对手臂的称呼：叫"基线"会被读成"不优化更好"，而它其实是用户自己的版本
+    bw = "你的原稿" if str(state.get("seed_prompt") or "").strip() else "基线"
     conflict = ""
     if agg.get("passed") and verdict == "worse":
-        conflict = "pointwise 判达标，但成对盲评多数倾向基线更好 —— 结论存疑，建议人工复核"
+        conflict = f"pointwise 判达标，但成对盲评多数倾向{bw}更好 —— 结论存疑，建议人工复核"
     elif not agg.get("passed") and verdict == "better":
         conflict = "pointwise 未达标，但成对盲评多数认为优化版更好 —— 可能是阈值/噪声问题而非无提升"
 
     # 冲突自动归因（确定性统计，不经评委）：历史真实运行发现 comparator 偏好
     # 「保守、逐项枚举缺失」的输出，而优化版按目标产出具体结论——两个信号打架时
     # 先用风格统计验证这个假设，给人工裁定一个起点而不是一句"自己比吧"。
-    attribution = _conflict_attribution(base, cur) if conflict else None
+    attribution = _conflict_attribution(base, cur, bw) if conflict else None
 
     logger.info(
         "成对盲评：优化版胜 %d / 基线胜 %d / 持平 %d → %s%s",

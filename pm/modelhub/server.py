@@ -484,7 +484,11 @@ def _stream_response(
         import threading
 
         q: queue.Queue[bytes | str | None] = queue.Queue()
-        HEARTBEAT = 15.0
+        # 心跳间隔可配：默认 15s（实测上游慢时 15s 无数据会触发中间层读超时断流）。
+        # 之所以做成可配而不是写死常量（2026-10-02）：写死时这条心跳路径**无法被测试触发**
+        # —— 15s 的等待让任何单测都不可接受，于是它长期是覆盖缺口。
+        # 与 PMH_TIMEOUT / PMH_BREAK_THRESHOLD 等同族，走同一个 env 惯例。
+        HEARTBEAT = float(os.getenv("PMH_HEARTBEAT_SECONDS", "15") or 15)
 
         def pump() -> None:
             try:
@@ -507,8 +511,6 @@ def _stream_response(
                 except queue.Empty:
                     yield hb_comment()
                     continue
-                if chunk is None:
-                    break
                 if chunk is None:
                     break
                 if isinstance(chunk, str):

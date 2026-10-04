@@ -447,3 +447,30 @@ def test_report_stays_silent_about_jitter_when_it_was_never_measured() -> None:
     """没测过抖动就不许凭空造一个数出来（默认 0 = 与旧口径逐字一致）。"""
     text, _ = render_report(_state(aggregate=_agg(noise=0.5)))
     assert "评委复现性抖动" not in text and "仲裁有效触发线" not in text
+
+
+# --------------------------------------------------------------------------
+# 成本折算：报告里"跑了多少钱"此前完全缺席（有 token、有次数、有耗时，没有金额）
+# --------------------------------------------------------------------------
+def test_report_cost_section_absent_without_prices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没配单价时整段不出现 —— 本系统不内置价目表，没有数比假数安全。"""
+    for k in list(__import__("os").environ):
+        if k.startswith("PM_PRICE_"):
+            monkeypatch.delenv(k, raising=False)
+    st = _state(llm_usage={"target": {"calls": 1, "input_tokens": 1000, "output_tokens": 500}})
+    text, _ = render_report(st)
+    assert "模型用量与耗时" in text
+    assert "成本折算" not in text
+
+
+def test_report_cost_section_renders_with_prices(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PM_PRICE_INPUT_PER_M", "1")
+    monkeypatch.setenv("PM_PRICE_OUTPUT_PER_M", "2")
+    st = _state(llm_usage={"target": {"calls": 1, "input_tokens": 1_000_000, "output_tokens": 0}})
+    text, _ = render_report(st)
+    assert "## 成本折算" in text
+    assert "**合计**" in text
+    # 金额口径必须自曝来源，否则会被当成权威读数
+    assert "不内置价目表" in text

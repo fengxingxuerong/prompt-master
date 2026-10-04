@@ -324,3 +324,215 @@ def test_all_tools_return_json_strings(capture_cli, capture_http):
         out = fn(**kw)  # type: ignore[operator]
         assert isinstance(out, str)
         json.loads(out)
+
+
+# --------------------------------------------------------------------------
+# prompt_check / prompt_diff：两个零调用工具（2026-10-02 补，此前无覆盖）
+# --------------------------------------------------------------------------
+def test_prompt_check_passes_prompt_through(capture_cli):
+    """`prompt_check` 把正文原样交给 `run.py check --prompt ... --json`。
+
+    注意它是**把正文当参数传**（不落临时文件）—— `--prompt` 显式在前，
+    所以正文以 `-` 开头也不会被 argparse 当选项吃掉。
+    """
+    out = M.prompt_check(prompt="- 看起来像选项的正文")
+    # capture_cli 记的是**完整命令行**：[python, run.py, <子命令>, ...]
+    cmd = capture_cli[0]
+    assert "check" in cmd, cmd
+    i = cmd.index("--prompt")
+    assert cmd[i + 1] == "- 看起来像选项的正文", "正文没被原样传下去（或被当成选项吃掉了）"
+    assert cmd[-1] == "--json"
+    assert json.loads(out) == {}
+
+
+def test_prompt_diff_writes_both_sides_to_separate_temp_files(capture_cli):
+    """`prompt_diff` 必须把两侧正文落成**两个不同**的文件再调 `run.py diff`。
+
+    `diff` 的接口是文件路径（不是正文），中转不可避免。要钉住：
+    ① 两侧分别写进不同文件、内容不串；② 用 `tempfile`（用完即删）而不是往仓库里写。
+    """
+    out = M.prompt_diff(before="旧正文 AAA", after="新正文 BBB")
+    cmd = capture_cli[0]
+    assert "diff" in cmd and cmd[-1] == "--json"
+    d = cmd.index("diff")
+    path_a, path_b = cmd[d + 1], cmd[d + 2]
+    assert path_a != path_b, "两侧写进了同一个文件，内容会互相覆盖"
+
+    import os
+    import tempfile
+
+    # 临时目录在 with 块结束后已删：证明用的是 tempfile 而不是仓库内路径
+    assert not os.path.exists(path_a), "临时文件没被清理 —— 可能写进了仓库"
+    assert not os.path.exists(path_b)
+    # `TemporaryDirectory()` 会在系统临时目录下建一个**子目录**，所以判据是"在其下"，
+    # 不是"等于它"（写成相等会把正确实现判红 —— 我第一版就这么写的）。
+    assert os.path.dirname(path_a).startswith(tempfile.gettempdir()), "没落在系统临时目录下"
+    assert json.loads(out) == {}
+
+
+def test_prompt_diff_content_order_is_not_swapped(monkeypatch):
+    """真跑一次（打桩 subprocess 层）：写进文件的内容必须与入参**同序**。
+
+    只验参数拼装的话，"a/b 写反了"会被漏掉 —— 而它会让 diff 的结论整个反向
+    （把"引入回归"报成"修好了"）。
+    """
+    seen: dict[str, str] = {}
+
+    def fake_run(cmd: list[str], **kw: Any) -> Any:
+        diff_idx = cmd.index("diff")
+        from pathlib import Path
+
+        seen["a"] = Path(cmd[diff_idx + 1]).read_text(encoding="utf-8")
+        seen["b"] = Path(cmd[diff_idx + 2]).read_text(encoding="utf-8")
+        return _fake_proc("{}")
+
+    monkeypatch.setattr(M.subprocess, "run", fake_run)
+    M.prompt_diff(before="左侧原始正文", after="右侧修改后正文")
+    assert seen["a"] == "左侧原始正文", "before 没有落到第一个文件（或顺序反了）"
+    assert seen["b"] == "右侧修改后正文", "after 没有落到第二个文件（或顺序反了）"
+
+
+def test_prompt_diff_roundtrips_unicode(monkeypatch):
+    """中文/emoji 正文必须原样往返（显式 UTF-8 写读）。
+
+    Windows 默认码页是 GBK：漏了 `encoding="utf-8"` 会让中文正文抛
+    UnicodeEncodeError 或被**静默替换**成问号 —— 后者更坏，
+    同一份正文会被 diff 报成"有改动"。
+    """
+    seen: dict[str, str] = {}
+
+    def fake_run(cmd: list[str], **kw: Any) -> Any:
+        from pathlib import Path
+
+        diff_idx = cmd.index("diff")
+        seen["a"] = Path(cmd[diff_idx + 1]).read_text(encoding="utf-8")
+        return _fake_proc("{}")
+
+    monkeypatch.setattr(M.subprocess, "run", fake_run)
+    text = "【角色】分析师 🎯\n【约束】1. 不得编造。"
+    M.prompt_diff(before=text, after=text)
+    assert seen["a"] == text, "中文/emoji 在落盘往返中被改动了"
+
+
+def test_main_starts_stdio_server(monkeypatch):
+    """`main()` 必须调用 `mcp.run()`（stdio 传输）。
+
+    MCP 客户端按 `{"command":"python","args":["-m","pm.mcp_server"]}` 拉起它；
+    若 `main()` 是空实现或走错传输方式，挂载后会一直连不上，
+    而"连不上"在服务端看起来只是"客户端没来"。
+    """
+    called: list[int] = []
+    monkeypatch.setattr(M.mcp, "run", lambda: called.append(1))
+    M.main()
+    assert called == [1], "main() 没有调用 mcp.run()，stdio 服务不会起来"
+
+
+# --------------------------------------------------------------------------
+# optimize_wait 的超时分支（此前零覆盖）
+# --------------------------------------------------------------------------
+def _http_seq(monkeypatch, payloads: list[dict[str, Any]], calls: list[Any]) -> None:
+    """让 `_http_json` 依次返回 payloads（用尽后重复最后一个）。"""
+    seq = list(payloads)
+
+    def fake_http(method: str, url: str, timeout: float = 0) -> dict[str, Any]:
+        calls.append((method, url))
+        return seq.pop(0) if len(seq) > 1 else seq[0]
+
+    monkeypatch.setattr(M, "_http_json", fake_http)
+
+
+def test_optimize_wait_reports_timeout_without_pretending_success(capture_http, monkeypatch):
+    """超时不是"完成"：必须带 `error` 说明，且**不带** report。
+
+    危险在于：若把超时静默当终态返回，调用方会拿到一个 `report: ""` 的
+    "成功"响应 —— 看起来像"跑完了但报告是空的"，实际是"还没跑完"。
+    两者的下一步动作完全不同（一个去查报告，一个应该继续等或去查服务）。
+    """
+    calls: list[Any] = []
+    _http_seq(monkeypatch, [{"status": "running", "iteration": 1, "llm_calls": 7}], calls)
+    # 时钟推快 + sleep 打桩：不真等，但仍走真实的超时判定
+    ticks = iter([0.0, 0.0, 10_000.0, 10_000.0, 10_000.0])
+    monkeypatch.setattr(M.time, "monotonic", lambda: next(ticks, 10_000.0))
+    monkeypatch.setattr(M.time, "sleep", lambda _s: None)
+
+    out = json.loads(M.optimize_wait(run_id="abc123", timeout_seconds=30, interval_seconds=5))
+    assert out["run_id"] == "abc123"
+    assert out["error"] == "等待超时", "超时必须显式说明，不能静默当完成"
+    assert "report" not in out, "超时时不该带 report —— 会被读成「跑完了但报告为空」"
+    assert out["status"] == "running", "应如实回报当前状态"
+
+
+def test_optimize_wait_returns_report_on_terminal_status(monkeypatch):
+    """终态时取回报告（与上面配对，防止"永远报超时"也算通过）。"""
+    calls: list[Any] = []
+    _http_seq(
+        monkeypatch,
+        [{"status": "passed", "iteration": 2, "llm_calls": 9}, {"report": "# 交付报告"}],
+        calls,
+    )
+    out = json.loads(M.optimize_wait(run_id="ok123", timeout_seconds=30, interval_seconds=5))
+    assert out["status"] == "passed"
+    assert out["report"] == "# 交付报告"
+    assert not out.get("error")
+    # 两次调用分别是 status 与 report 两个端点
+    urls = [u for _m, u in calls]
+    assert any("/api/status/ok123" in u for u in urls)
+    assert any("/api/report/ok123" in u for u in urls)
+
+
+def test_module_entry_actually_starts_the_server(tmp_path):
+    """`python -m pm.mcp_server` 这条命令必须真的起 stdio 服务。
+
+    这是 MCP 客户端的**真实挂载方式**（`{"command":"python","args":["-m","pm.mcp_server"]}`），
+    而 `if __name__ == "__main__": main()` 这一行此前零覆盖 ——
+    也就是说"客户端照文档配置能不能连上"从没被验证过。
+
+    怎么验的：在子进程里**真启动**它，然后发一个真实的 MCP `initialize` 请求，
+    看它是否按协议回一个带 `serverInfo` 的 JSON-RPC 响应。
+    这比"断言 main() 被调用"强 —— 它同时证明了传输方式（stdio）、
+    JSON-RPC 帧格式与服务名都对得上；任何一环错，客户端就是连不上。
+
+    ⚠️ 不要在进程内 `runpy` 该模块：FastMCP 起 stdio 时会接管/关闭 stdout，
+    进程内执行会把测试进程的 stdout 弄坏（实测 `ValueError: I/O operation on closed file`）。
+    子进程隔离是这里唯一安全的做法。
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    # 一条标准的 MCP initialize 请求（换行分隔的 JSON-RPC）
+    req = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "probe", "version": "0"},
+            },
+        }
+    )
+    proc = subprocess.run(
+        [sys.executable, "-m", "pm.mcp_server"],
+        cwd=str(root),
+        input=req + "\n",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert proc.returncode == 0, (proc.stdout[-500:], proc.stderr[-500:])
+    # 响应可能含通知行，挑出带 result 的那条
+    payloads = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                payloads.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    assert payloads, f"没有回出任何 JSON-RPC 帧：{proc.stdout[-300:]!r}"
+    init = next((p for p in payloads if "result" in p), None)
+    assert init, f"没有 initialize 响应：{payloads}"
+    assert init["result"]["serverInfo"]["name"], "响应里没有服务名，客户端无法确认挂载成功"

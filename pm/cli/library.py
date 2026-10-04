@@ -48,6 +48,30 @@ def _task_sim_grams(text: str) -> set[str]:
     return _text_bigrams(cleaned)
 
 
+def _load_run_file(path: Path) -> dict[str, Any] | None:
+    """读一个 `run_*.json`；读不了或**结构不是对象**时返回 None（调用方跳过）。
+
+    为什么把三种坏法收在一个函数里（真实缺陷，2026-10-02 实测）：
+    原先三处扫描点各自写 `except (OSError, json.JSONDecodeError): continue`，
+    只防住了"文件读不了"与"JSON 不合法"——**没防"JSON 合法但结构不对"**。
+    实测 `["数组不是对象"]` 这种文件会让 `library` 直接崩在
+    `AttributeError: 'list' object has no attribute 'get'`，
+    而仓库文档对这类扫描的纪律是明确的："不能让一颗坏牙毁掉整份体检"
+    （`pm/cli/history.py` 同款场景）。
+
+    写成一个函数而不是三处各补一句：同一段"怎么算坏文件"的判断抄三遍，
+    下次有人加第四种坏法必然只改一处 —— 这正是本仓库反复处理过的那类漂移。
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    # JSON 合法但顶层不是对象（数组/字符串/数字）：后续所有 `.get()` 都会崩
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
 def _library_recommend(ns: argparse.Namespace) -> int:
     """记忆层·写侧入口：新任务 → 历史相似资产 top-3。
 
@@ -59,9 +83,8 @@ def _library_recommend(ns: argparse.Namespace) -> int:
     new_grams = _task_sim_grams(ns.task_text or "")
     scored: list[tuple[float, dict[str, Any]]] = []
     for f in sorted(log_dir().glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
-        try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        d = _load_run_file(f)
+        if d is None:
             continue
         if d.get("status") != "passed":
             continue
@@ -152,9 +175,8 @@ def _library_command(argv: list[str]) -> int:
         for f in sorted(
             log_dir().glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True
         ):
-            try:
-                d = json.loads(f.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            d = _load_run_file(f)
+            if d is None:
                 continue
             if d.get("run_id") == ns.export:
                 channels = {str(e.get("channel")) for e in (d.get("trace") or [])}
@@ -187,9 +209,8 @@ def _library_command(argv: list[str]) -> int:
 
     entries: list[dict[str, Any]] = []
     for f in sorted(log_dir().glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
-        try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        d = _load_run_file(f)
+        if d is None:
             continue
         status = d.get("status")
         prompt = str(d.get("prompt") or "")

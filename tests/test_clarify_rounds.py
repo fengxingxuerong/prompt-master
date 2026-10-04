@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from langgraph.types import Command
 from pm import testing
 from pm.graph import build_app, route_after_clarify
@@ -182,3 +183,109 @@ def _fake_structured_always_unclear(role, model_cls, system, user, max_retries=3
             suggested_next_step="ask_user",
         ), {"role": role, "model": "fake-model", "channel": "fake", "attempts": 1, "latency_ms": 1}
     return _fake_structured(role, model_cls, system, user, max_retries, overrides)
+
+
+def test_route_needs_reanalysis_goes_back_to_clarify():
+    """收到用户回答后必须重回 clarify 重分析，而不是直接 optimize。
+
+    这是 `ask_user` → `clarify` 那条回边的路由依据：漏了它，
+    用户答完就被当成"已分析过"直接进入优化 —— 答案永远进不了优化器
+    （`docs/design-notes.md` §二.1/§二.3 记的就是这类事故）。
+    """
+    s = _state_for_route(needs_reanalysis=True)
+    assert route_after_clarify(s) == "clarify"
+
+
+def test_route_needs_reanalysis_wins_over_clarity():
+    """`needs_reanalysis` 优先级高于"看起来已经清晰"。
+
+    重分析期间 `clarification` 可能还留着上一轮的 `is_clear=True`，
+    若先判清晰就会跳过重分析、把用户的回答丢掉 —— 顺序是行为的一部分。
+    """
+    s = _state_for_route(
+        needs_reanalysis=True,
+        clarification={
+            "is_clear": True,
+            "task_summary": "上一轮的结论",
+            "inferred_context": {},
+            "clarifying_questions": [],
+            "suggested_next_step": "optimize",
+        },
+    )
+    assert route_after_clarify(s) == "clarify"
+
+
+def test_route_failed_status_short_circuits_to_report():
+    """失败态必须直通 report（否则会带着空 prompt 继续烧调用）。"""
+    assert route_after_clarify(_state_for_route(status="failed")) == "report"
+
+
+def test_route_none_clarification_reenters_clarify():
+    """clarification 还没产出时不能放行去 optimize。"""
+    assert route_after_clarify(_state_for_route(clarification=None)) == "clarify"
+
+
+# --------------------------------------------------------------------------
+# build_app(sqlite_path=...)：文档承诺的「跨进程恢复」此前零覆盖
+# --------------------------------------------------------------------------
+def test_build_app_with_sqlite_checkpoint_persists_state(tmp_path):
+    """`--checkpoint` 的语义是**状态落到 SQLite**，可被另一个实例读回。
+
+    这是 `docs/agent-cli-guide.md` 明确承诺的能力（"带 --checkpoint 可跨进程断点续跑"），
+    而 `build_app` 的 sqlite 分支此前从未被执行过 —— 承诺从没被验证。
+    这里用**新建一个 app 实例**读取上一实例写下的状态来证明持久化真的发生，
+    而不是只断言"函数没抛异常"（后者对"能不能续跑"毫无信息量）。
+    """
+    from pm.graph import build_app as _build_app
+    from pm.state import initial_state as _init
+
+    db = tmp_path / "ckpt.db"
+    init = _init(task="让 AI 分析销售数据", target_model="fake-target", n_test_cases=2)
+    cfg = {"configurable": {"thread_id": "persist-probe"}, "recursion_limit": 40}
+
+    with testing.fake_backend(scenario="progress"):
+        app1 = _build_app(sqlite_path=str(db))
+        app1.invoke(init, cfg)
+        seen_by_first = app1.get_state(cfg).values
+
+        # 关键：换一个**全新的 app 实例**（模拟另一次进程启动）读同一份 SQLite
+        app2 = _build_app(sqlite_path=str(db))
+        seen_by_second = app2.get_state(cfg).values
+
+    assert db.exists() and db.stat().st_size > 0, "SQLite 检查点文件没被写出来"
+    assert seen_by_first.get("run_id") == init["run_id"]
+    # 跨实例读回同一线程的状态 = 持久化生效（若走 MemorySaver，第二个实例读不到）
+    assert seen_by_second.get("run_id") == init["run_id"]
+    assert seen_by_second.get("task") == "让 AI 分析销售数据"
+    assert seen_by_second.get("final_report"), "续跑依赖的交付内容没落进检查点"
+
+
+def test_build_app_without_sqlite_uses_in_memory_saver(tmp_path):
+    """不传路径时用内存检查点：同样是"能跑"，但**不落盘**（别指望跨进程）。"""
+    from pm.graph import build_app as _build_app
+    from pm.state import initial_state as _init
+
+    before = set(tmp_path.iterdir())
+    app = _build_app()
+    cfg = {"configurable": {"thread_id": "mem-probe"}, "recursion_limit": 40}
+    with testing.fake_backend(scenario="progress"):
+        app.invoke(
+            _init(task="让 AI 分析销售数据", target_model="fake-target", n_test_cases=2), cfg
+        )
+    assert app.get_state(cfg).values.get("final_report")
+    assert set(tmp_path.iterdir()) == before, "内存模式不该产生任何文件"
+
+
+def test_build_app_sqlite_rejects_unwritable_path(tmp_path):
+    """路径不可写时必须**报错**，不许静默退化成内存检查点。
+
+    静默退化比报错危险得多：调用方以为开了跨进程恢复，实际没有，
+    等真要续跑时才发现状态是空的 —— 而那时已经花掉了一整轮的调用。
+    """
+    import sqlite3
+
+    bad = tmp_path / "不存在的目录" / "x" / "ckpt.db"
+    # 断言**具体**异常类型而不是裸 Exception（实测就是 sqlite3.OperationalError）：
+    # 若将来这里被改成"捕获后静默退化"，类型就变了 —— 那个改动必须让这条红。
+    with pytest.raises(sqlite3.OperationalError):
+        build_app(sqlite_path=str(bad))

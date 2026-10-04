@@ -191,6 +191,13 @@ def _apply_score_form(samples_path: Path, form_path: Path) -> int:
         if sid in filled:
             item["human_score"] = filled[sid]
             item["confirmed"] = True
+            # 回填通道只有"人真的填了分"才会走到这里 ⇒ 出处必须一起落，否则下次代判/亲判
+            # 又混成一锅（provenance 位是 2026-10-03 补的，缺它 bias 就拆不出严格人工那一半）。
+            prov = item.get("provenance")
+            if not isinstance(prov, dict):
+                prov = {}
+                item["provenance"] = prov
+            prov["human_score_source"] = "owner"
             known += 1
     unknown = sorted(set(filled) - {str(i.get("id")) for i in raw if isinstance(i, dict)})
     if not known:

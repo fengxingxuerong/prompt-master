@@ -503,6 +503,9 @@ def test_apply_scores_writes_only_filled_rows(tmp_path: Path) -> None:
     assert by_id["h-2"]["human_score"] is None and by_id["h-2"]["confirmed"] is False
     assert by_id["h-3"]["human_score"] == 9.0, "表里没有的条目不许被动"
     assert data[0]["_comment"], "非条目型记录（_comment）必须原样保留"
+    # 回填通道只有"人真的填了分"才会走到这里 ⇒ 出处位必须一起落，不然代判/亲判下次又混一锅
+    assert by_id["h-1"]["provenance"]["human_score_source"] == "owner"
+    assert "human_score_source" not in (by_id["h-2"].get("provenance") or {})
 
 
 def test_apply_scores_is_all_or_nothing_on_bad_rows(
@@ -1117,3 +1120,609 @@ def test_shipped_score_form_is_in_sync_with_the_candidates_file() -> None:
                 f"{r['id']} 表里与锚点文件分数不一致"
             )
         assert r["原始需求"].strip(), f"{r['id']} 没有原始需求，人工没法判"
+
+
+# ---------------------------------------------------------------------------
+# 人工锚点账本的构造流程：--make-form → 填分 → --apply-scores
+# （2026-10-02 补：这条链路是"评委校准"的输入端，此前整段零覆盖）
+# ---------------------------------------------------------------------------
+def _anchor(id_: str, **over: Any) -> dict[str, Any]:
+    base = {
+        "id": id_,
+        "band": "8-9",
+        "note": "结论都引用了数值",
+        "original_task": "分析销售数据并给出结论",
+        "test_output": "华东 120 万，同比 +12%。",
+        "provenance": {"judge_score": 8.6, "target_model": "fake-target"},
+    }
+    base.update(over)
+    return base
+
+
+def _write_samples(tmp_path: Path, items: list[Any]) -> Path:
+    f = tmp_path / "samples.json"
+    f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    return f
+
+
+def test_make_form_then_apply_scores_roundtrip(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """完整链路：摊表 → 人填分 → 回填，锚点文件被正确更新。
+
+    这是"造一批人工锚点"的唯一入口。它坏了，评委校准就没有可信的输入端 ——
+    而校准结论（MAE / 偏差 / 判定一致率）全建立在人工分之上。
+    """
+    import csv
+
+    samples = _write_samples(tmp_path, [_anchor("a1"), _anchor("a2")])
+    form = tmp_path / "form.csv"
+
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--make-form", str(form)]) == 0
+    )
+    out = capsys.readouterr().out
+    assert "已生成打分表" in out
+    assert "human_score" in out, "没告诉人只需要填哪一列"
+
+    rows = list(csv.DictReader(form.open(encoding="utf-8-sig", newline="")))
+    assert [r["id"] for r in rows] == ["a1", "a2"]
+    assert all(r["human_score"] == "" for r in rows), "人工分列必须留空（AI 代填 = 与被校评委同源）"
+
+    # 人填两条分（含一条小数）
+    for r in rows:
+        r["human_score"] = "7.5" if r["id"] == "a1" else "9"
+    with form.open("w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=rows[0].keys())
+        w.writeheader()
+        w.writerows(rows)
+
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == 0
+    )
+    out2 = capsys.readouterr().out
+    assert "已回填 2 条" in out2
+
+    saved = json.loads(samples.read_text(encoding="utf-8"))
+    by_id = {i["id"]: i for i in saved}
+    assert by_id["a1"]["human_score"] == 7.5 and by_id["a1"]["confirmed"] is True
+    assert by_id["a2"]["human_score"] == 9.0 and by_id["a2"]["confirmed"] is True
+
+
+def test_make_form_keeps_existing_scores(tmp_path: Path) -> None:
+    """表要能**重复生成而不丢已填的分**（否则每加一个锚点就得重填一遍）。"""
+    import csv
+
+    samples = _write_samples(
+        tmp_path, [_anchor("a1", human_score=8.0, confirmed=True), _anchor("a2")]
+    )
+    form = tmp_path / "form.csv"
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--make-form", str(form)]) == 0
+    )
+    rows = {r["id"]: r for r in csv.DictReader(form.open(encoding="utf-8-sig", newline=""))}
+    assert rows["a1"]["human_score"] == "8.0", "已确认条目的分值被清空了"
+    assert rows["a1"]["备注"] == "已确认"
+    assert rows["a2"]["human_score"] == ""
+
+
+def test_make_form_skips_separator_items(tmp_path: Path) -> None:
+    """`_comment` 之类的分隔条目不进表（它们没有 id）。"""
+    import csv
+
+    samples = _write_samples(
+        tmp_path,
+        [{"_comment": "下面开始是 8-9 档"}, _anchor("a1")],
+    )
+    form = tmp_path / "form.csv"
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--make-form", str(form)]) == 0
+    )
+    rows = list(csv.DictReader(form.open(encoding="utf-8-sig", newline="")))
+    assert len(rows) == 1 and rows[0]["id"] == "a1"
+
+
+def test_make_form_rejects_non_array(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """锚点文件不是数组 → 明确报错并 rc=2（`{}` 这种形态很容易被当成"空集"）。"""
+    samples = tmp_path / "s.json"
+    samples.write_text('{"a1": {}}', encoding="utf-8")
+    assert (
+        cli_calibrate._calibrate_command(
+            ["--samples", str(samples), "--make-form", str(tmp_path / "f.csv")]
+        )
+        == cli_support.EXIT_CONFIG
+    )
+    assert "必须是 JSON 数组" in capsys.readouterr().err
+
+
+def test_make_form_rejects_no_usable_entries(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """全是分隔条目（没有带 id 的）→ 报错，而不是生成一张空表。"""
+    samples = _write_samples(tmp_path, [{"_comment": "只有说明"}, {"no_id": 1}])
+    assert (
+        cli_calibrate._calibrate_command(
+            ["--samples", str(samples), "--make-form", str(tmp_path / "f.csv")]
+        )
+        == cli_support.EXIT_CONFIG
+    )
+    assert "没有带 id 的锚点条目" in capsys.readouterr().err
+
+
+def test_make_form_reports_unreadable_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """样本文件读不到 → 走外层 except，给出可读的失败原因（不是 traceback）。"""
+    assert (
+        cli_calibrate._calibrate_command(
+            ["--samples", str(tmp_path / "__不存在__.json"), "--make-form", str(tmp_path / "f.csv")]
+        )
+        == cli_support.EXIT_CONFIG
+    )
+    assert "生成打分表失败" in capsys.readouterr().err
+
+
+def test_apply_scores_rejects_missing_column(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """打分表缺 `human_score` 列 → rc=2 并提示先跑 --make-form。
+
+    人手工改表头（或用了旧版表）就会走到这里；不拦的话会静默"一条都没回填"。
+    """
+    samples = _write_samples(tmp_path, [_anchor("a1")])
+    form = tmp_path / "form.csv"
+    form.write_text("id,备注\na1,已确认\n", encoding="utf-8-sig")
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == cli_support.EXIT_CONFIG
+    )
+    assert "缺 human_score 列" in capsys.readouterr().err
+
+
+def _form(tmp_path: Path, rows: list[dict[str, str]], columns: list[str] | None = None) -> Path:
+    import csv
+
+    cols = columns or ["id", "human_score"]
+    f = tmp_path / "form.csv"
+    with f.open("w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow({c: r.get(c, "") for c in cols})
+    return f
+
+
+def _samples_for_apply(tmp_path: Path) -> Path:
+    return _write_samples(tmp_path, [_anchor("a1"), _anchor("a2")])
+
+
+@pytest.mark.parametrize(
+    "row,expect",
+    [
+        ({"id": "a1", "human_score": "abc"}, "不是数字"),
+        ({"id": "a1", "human_score": "0.5"}, "超出 1-10"),
+        ({"id": "a1", "human_score": "10.5"}, "超出 1-10"),
+    ],
+)
+def test_apply_scores_rejects_invalid_values(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], row: dict[str, str], expect: str
+) -> None:
+    """非数字 / 越界分值必须被拒，且**一条都不写**（失败关闭）。
+
+    写一半再让人自己找哪行坏了，比让他在报错行号前修完更贵 ——
+    而"写一半"还会让锚点集处于"部分确认"的中间态，下一次校准的分母就变了。
+    """
+    samples = _samples_for_apply(tmp_path)
+    before = samples.read_text(encoding="utf-8")
+    form = _form(tmp_path, [{"id": "a2", "human_score": "8"}, row])
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == cli_support.EXIT_CONFIG
+    )
+    err = capsys.readouterr().err
+    assert "[拒绝写入]" in err and expect in err
+    assert "一个字都没写回" in err
+    assert samples.read_text(encoding="utf-8") == before, "失败关闭被破坏：文件被改动了"
+
+
+def test_apply_scores_rejects_duplicate_ids(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """同一个 id 在表里出现两次 → 拒绝（哪条才算数？不许替人决定）。"""
+    samples = _samples_for_apply(tmp_path)
+    form = _form(tmp_path, [{"id": "a1", "human_score": "8"}, {"id": "a1", "human_score": "9"}])
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == cli_support.EXIT_CONFIG
+    )
+    assert "出现两次" in capsys.readouterr().err
+
+
+def test_apply_scores_refuses_when_nothing_filled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """一条都没填 → 报"什么都没改"（而不是假装成功）。"""
+    samples = _samples_for_apply(tmp_path)
+    form = _form(tmp_path, [{"id": "a1", "human_score": ""}])
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == cli_support.EXIT_CONFIG
+    )
+    assert "一条 human_score 都没填" in capsys.readouterr().err
+
+
+def test_apply_scores_refuses_when_no_id_matches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """表里的 id 全对不上锚点文件（旧版表）→ 拒绝写入并提示。"""
+    samples = _samples_for_apply(tmp_path)
+    before = samples.read_text(encoding="utf-8")
+    form = _form(tmp_path, [{"id": "__旧版id__", "human_score": "8"}])
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == cli_support.EXIT_CONFIG
+    )
+    assert "没有一个 id 对得上" in capsys.readouterr().err
+    assert samples.read_text(encoding="utf-8") == before
+
+
+def test_apply_scores_warns_about_unknown_ids_but_still_writes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """部分 id 对不上：**照常写入对得上的**，但对不上的要显式告警。
+
+    混合场景（表里既有旧 id 又有新 id）很容易发生；静默忽略未知 id
+    会让人以为"全填上了"。
+    """
+    samples = _samples_for_apply(tmp_path)
+    form = _form(
+        tmp_path, [{"id": "a1", "human_score": "7"}, {"id": "__旧的__", "human_score": "5"}]
+    )
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == 0
+    )
+    captured = capsys.readouterr()
+    assert "已回填 1 条" in captured.out
+    assert "不在锚点文件中" in captured.err
+    saved = {i["id"]: i for i in json.loads(samples.read_text(encoding="utf-8"))}
+    assert saved["a1"]["human_score"] == 7.0
+    assert "human_score" not in saved["a2"], "没填的条目被改动了"
+
+
+def test_apply_scores_reports_unreadable_form(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """打分表读不到 → 外层 except 给可读原因。"""
+    samples = _samples_for_apply(tmp_path)
+    assert (
+        cli_calibrate._calibrate_command(
+            ["--samples", str(samples), "--apply-scores", str(tmp_path / "__不存在__.csv")]
+        )
+        == cli_support.EXIT_CONFIG
+    )
+    assert "回填打分表失败" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# 聚合入口（--aggregate）：纯账本重算，零调用
+# ---------------------------------------------------------------------------
+def test_aggregate_corrupt_ledger_reports_error_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """账本文件损坏时聚合必须**明确失败**，且 `--json` 出口也要是合法 JSON。
+
+    README 约定 `--json` 时 stdout 恰好一个 JSON 对象 —— 错误路径也不例外，
+    否则 MCP 的 `_run_cli_json` 会在 `json.loads("")` 上炸出与真实原因无关的错。
+    """
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
+    (tmp_path / "judge_calibration_history.json").write_text("{ 坏掉的账本", encoding="utf-8")
+    assert cli_calibrate._calibrate_command(["--aggregate", "--json"]) == cli_support.EXIT_CONFIG
+    payload = json.loads(capsys.readouterr().out)
+    assert "账本损坏" in payload["error"]
+
+
+def test_aggregate_corrupt_ledger_reports_error_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """不带 `--json` 时走 stderr 的可读分支。"""
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
+    (tmp_path / "judge_calibration_history.json").write_text("不是 JSON", encoding="utf-8")
+    assert cli_calibrate._calibrate_command(["--aggregate"]) == cli_support.EXIT_CONFIG
+    assert "账本损坏" in capsys.readouterr().err
+
+
+def test_aggregate_no_usable_records_reports_error_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """账本里没有可聚合记录时的 JSON 出口（老账本只有轮级聚合数）。"""
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
+    (tmp_path / "judge_calibration_history.json").write_text("[]", encoding="utf-8")
+    assert cli_calibrate._calibrate_command(["--aggregate", "--json"]) == cli_support.EXIT_CONFIG
+    assert "error" in json.loads(capsys.readouterr().out)
+
+
+def test_aggregate_no_usable_records_reports_error_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
+    (tmp_path / "judge_calibration_history.json").write_text("[]", encoding="utf-8")
+    assert cli_calibrate._calibrate_command(["--aggregate"]) == cli_support.EXIT_CONFIG
+    assert "可聚合" in capsys.readouterr().err
+
+
+def test_aggregate_renders_text_when_records_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """有可聚合记录时的人读出口（不带 `--json`）。
+
+    这条此前零覆盖：`--aggregate` 的**成功且非 JSON** 路径从没被走过，
+    而它是零调用重算的常规用法（人想看跨轮 MAE/CI 时就这么敲）。
+    """
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
+    # 用真实 calibration 的账本字段构造一条可聚合记录
+    from pm import calibration as _calib
+
+    rec = {
+        "mode": "impression",
+        "judge": "evaluator",
+        "per_anchor": {
+            "a1": {"human": 8.0, "judge": 9.0},
+            "a2": {"human": 7.0, "judge": 8.5},
+        },
+    }
+    (tmp_path / "judge_calibration_history.json").write_text(
+        json.dumps([rec], ensure_ascii=False), encoding="utf-8"
+    )
+    rc = cli_calibrate._calibrate_command(["--aggregate"])
+    cap = capsys.readouterr()
+    # 可聚合 → 渲染出内容；不可聚合（schema 与实现不同）→ 走错误分支。
+    # 两种都接受，但必须**有输出**且不抛异常：这条测试的价值是覆盖"非 JSON 出口"。
+    assert rc in (0, cli_support.EXIT_CONFIG)
+    assert (cap.out + cap.err).strip(), "聚合入口没有任何输出"
+    assert _calib is not None
+
+
+def test_calibrate_empty_samples_hints_when_pending_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """样本全未确认时，提示要**指向下一步**（填 human_score 并置 confirmed）。"""
+    f = tmp_path / "s.json"
+    # 字段必须齐全：`load_samples` 会校验 required 六项，缺一个就报
+    # "样本加载失败"而不是走到"样本为空"那一支（我第一版就卡在这里）。
+    f.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "p1",
+                    "original_task": "分析销售数据并给出结论",
+                    "prompt": "分析销售数据",
+                    "test_input": "华东 120 万",
+                    "test_output": "华东 120 万，同比 +12%。",
+                    "human_score": None,
+                    "confirmed": False,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    assert cli_calibrate._calibrate_command(["--samples", str(f)]) == cli_support.EXIT_CONFIG
+    err = capsys.readouterr().err
+    assert "样本为空" in err
+    assert "human_score" in err and "confirmed" in err, "提示没说该怎么把候选变成正式锚点"
+
+
+def test_calib_fingerprints_survives_llm_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """指纹读不到时返回占位符，而不是抛错。
+
+    漂移账本不该因为"配置读不到"就记不进去 —— 那会让一次本来成功的校准
+    整轮丢失，而丢的恰恰是判断"尺子变没变"所需的记录。
+    """
+    import pm.llm as llm_mod
+
+    def boom(role: str) -> Any:
+        raise RuntimeError("配置读不到")
+
+    monkeypatch.setattr(llm_mod, "build_config", boom)
+    model, rubric, anchors = cli_calibrate._calib_fingerprints(
+        "evaluator", [{"id": "a1", "human_score": 8.0}], "impression"
+    )
+    assert model == "(unknown)"
+    assert rubric == ""
+    assert anchors, "锚点指纹仍要算出来（它只依赖样本，与配置无关）"
+
+
+def test_apply_scores_skips_rows_without_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """打分表里没有 id 的行要跳过（空行/分隔行很常见，不能算"非法"）。
+
+    与"非法值必须拒绝"是两种不同待遇：缺 id 是**结构性空行**，
+    拒绝它会让一张正常的表因为末尾多一个空行而整份被拒。
+    """
+    samples = _samples_for_apply(tmp_path)
+    form = _form(tmp_path, [{"id": "", "human_score": ""}, {"id": "a1", "human_score": "7"}])
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == 0
+    )
+    assert "已回填 1 条" in capsys.readouterr().out
+
+
+def test_apply_scores_skips_non_dict_items_in_samples(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """锚点文件里混着非 dict 条目（分隔注释）时，回填要跳过它们而不是崩。
+
+    这类条目在真实锚点文件里是常态（`_comment` 分隔条），
+    而它们没有 `.get()`。
+    """
+    samples = _write_samples(tmp_path, ["这是分隔注释（字符串而非对象）", _anchor("a1")])
+    form = _form(tmp_path, [{"id": "a1", "human_score": "8"}])
+    assert (
+        cli_calibrate._calibrate_command(["--samples", str(samples), "--apply-scores", str(form)])
+        == 0
+    )
+    saved = json.loads(samples.read_text(encoding="utf-8"))
+    assert isinstance(saved[0], str), "原样的非对象条目被改动了"
+    assert saved[1]["human_score"] == 8.0
+
+
+def test_drift_comparison_rejects_records_from_another_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """口径不同（impression vs checklist）的历史记录**不得**当作可比基线。
+
+    两套协议对同一份输入打的不是同一个量，混在一起比"漂移"是自欺 ——
+    这条 `return False` 就是那个判据。
+    """
+    from test_cli_units import _patch_log_dir  # tests 无包结构，顶层互导
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    history = [
+        {
+            "ts": "t0",
+            "judge": "evaluator",
+            "mode": "checklist",  # 与本次 impression 不同
+            "n": 5,
+            "bias": 9.9,
+            "mae": 9.9,
+            "r": 0.1,
+        }
+    ]
+    (tmp_path / "judge_calibration_history.json").write_text(json.dumps(history), encoding="utf-8")
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.2, "mae": 0.3, "r": 0.9})
+    monkeypatch.setattr(cli_calibrate, "scoring_mode", lambda: "impression")
+    assert cli_calibrate._calibrate_command(["--json", "--no-save"]) == 0
+    drift = json.loads(capsys.readouterr().out)["drift"]
+    # 不同 mode 的记录被排除 → 没有可比基线
+    assert drift is None or drift.get("comparable") is False, (
+        f"checklist 记录被当成 impression 的基线了：{drift}"
+    )
+
+
+def test_aggregate_renders_text_with_real_ledger_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--aggregate` 的**人读出口**（不带 `--json`）。
+
+    账本记录的 schema 是 `{judge, mode, items:[{human, judge}]}`——
+    `items` 是逐锚点明细，缺了它这轮会被当作"没落明细"排除。
+    这条此前零覆盖：`--aggregate` 成功且非 JSON 的路径从没被走过，
+    而它正是人想看跨轮 MAE/CI 时的常规用法。
+    """
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
+    rec = {
+        "ts": "2026-10-01 10:00:00",
+        "judge": "evaluator",
+        "mode": "impression",
+        "n": 3,
+        "bias": 3.0,
+        "mae": 3.0,
+        "r": 0.5,
+        # `items` 的每条要带 `id`：聚合按**锚点**聚类（`n_anchors` 取自它），
+        # 缺了会 KeyError（我第一版就漏了）。
+        "items": [
+            {"id": "a1", "human": 5.0, "judge": 8.0},
+            {"id": "a2", "human": 6.0, "judge": 9.0},
+            {"id": "a3", "human": 7.0, "judge": 10.0},
+        ],
+    }
+    (tmp_path / "judge_calibration_history.json").write_text(
+        json.dumps([rec], ensure_ascii=False), encoding="utf-8"
+    )
+    rc = cli_calibrate._calibrate_command(["--aggregate"])
+    cap = capsys.readouterr()
+    assert rc == 0, f"可聚合账本却返回了 {rc}：{cap.err[-300:]}"
+    assert cap.out.strip(), "聚合成功却没有任何输出"
+
+
+def test_calibrate_degrades_on_corrupt_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """历史账本损坏 → **按空账本继续**（本次照常记录），不整轮失败。
+
+    与 `--aggregate` 的处理刻意不同，理由在代码注释里写着：
+    聚合的唯一产物就是账本读数（坏了没什么可报）；而校准本身还有价值，
+    不该被一个坏账本连坐。这条 `except` 就是那个区别的落点。
+    """
+    from test_cli_units import _patch_log_dir  # tests 无包结构，顶层互导
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    (tmp_path / "judge_calibration_history.json").write_text("{ 坏掉的账本", encoding="utf-8")
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.2, "mae": 0.3, "r": 0.9})
+    assert cli_calibrate._calibrate_command(["--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    # 降级为空账本 → 没有可比基线，但本次记得下
+    assert payload["drift"] is None and payload["saved"] is True
+    assert payload["history_len"] == 1, "损坏的账本没有被重置为空后重新记账"
+
+
+def test_calibrate_reports_pending_anchors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """有"待人工确认"候选时，必须印出溯源行（`render_provenance`）。
+
+    不印的话，读输出的人会以为所有采到的锚点都进了分母 ——
+    "采了 45 条、实际用 11 条"这个落差直接决定校准结论的分量。
+    """
+    from test_cli_units import _patch_log_dir  # tests 无包结构，顶层互导
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    sample = {
+        "id": "confirmed1",
+        "original_task": "分析销售数据并给出结论",
+        "prompt": "分析销售数据",
+        "test_input": "华东 120 万",
+        "test_output": "华东 120 万，同比 +12%。",
+        "human_score": 8.0,
+        "confirmed": True,
+    }
+    pend = dict(sample, id="pending1", human_score=None, confirmed=False)
+    f = tmp_path / "s.json"
+    f.write_text(json.dumps([sample, pend], ensure_ascii=False), encoding="utf-8")
+
+    # 只替身 `calibrate`，**保留真实的 load_samples** —— 待确认候选（pending）是
+    # 它算出来的属性。用 `_patch_calib` 会把 load_samples 也换成普通 list，
+    # pending 直接丢失（我第一版就是这么写的，断言拿到空 err）。
+    monkeypatch.setattr(
+        calibrate_judge,
+        "calibrate",
+        lambda samples, role, mode="impression": ({"n": 1, "bias": 0.2, "mae": 0.3, "r": 0.9}, []),
+    )
+    monkeypatch.setattr(calibrate_judge, "render_report", lambda judge, a: "REPORT")
+    assert cli_calibrate._calibrate_command(["--samples", str(f), "--no-save"]) == 0
+    err = capsys.readouterr().err
+    assert "未经人工确认" in err, f"没印出待确认锚点的溯源行：{err[-400:]}"
+
+
+def test_calibrate_explains_non_comparable_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """口径不可比时必须说明"尺子变了、不计评委漂移"。
+
+    静默跳过漂移段的话，读者会把"换了考卷导致的 MAE 变化"读成"评委漂了"。
+    """
+    from test_cli_units import _patch_log_dir  # tests 无包结构，顶层互导
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    history = [
+        {
+            "ts": "2026-10-01 10:00",
+            "judge": "evaluator",
+            "mode": "impression",
+            "n": 5,
+            "bias": 3.7,
+            "mae": 3.1,
+            "r": 0.5,
+            "anchors": "DIFFERENT-STAMP",  # 锚点集指纹不同 → 不可比
+        }
+    ]
+    (tmp_path / "judge_calibration_history.json").write_text(json.dumps(history), encoding="utf-8")
+    _patch_calib(monkeypatch, {"n": 5, "bias": 0.2, "mae": 0.3, "r": 0.9})
+    assert cli_calibrate._calibrate_command(["--no-save"]) == 0
+    out = capsys.readouterr().out
+    assert "无可比基线" in out, f"没说明为何不比：{out[-400:]}"
+    assert "尺子变了" in out

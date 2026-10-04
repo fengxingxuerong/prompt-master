@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -57,6 +58,23 @@ from pm.schemas import (  # noqa: E402
 
 CASES_PATH = Path(__file__).parent / "prompt_eval" / "cases.json"
 
+
+def cases_path() -> Path:
+    """用例集路径：`PM_EVAL_CASES` 可覆盖（默认仓内 `prompt_eval/cases.json`）。
+
+    与 `pm.cli.support.log_dir()` / `PM_MEMORY_SCAN_LIMIT` 同一惯例：路径一律可覆盖。
+    这里晚绑定（每次调用现读 env）而不是冻结成模块常量，原因与那两处相同——
+    import 期算出来的值必然与运行期不一致（测试的 env 覆盖、CI 的用例集切换
+    都发生在 import 之后）。
+
+    为什么需要它（2026-10-02）：入口的**退出码**此前没有任何东西守着。
+    要验证"确有失败时 rc=1"，必须能塞进一个必然失败的用例集；
+    而用例集路径硬编码时无法注入，于是变异测试里"退出码反转"能一路绿过去。
+    """
+    raw = os.getenv("PM_EVAL_CASES", "").strip()
+    return Path(raw) if raw else CASES_PATH
+
+
 # Reviser 净增量阈值（--live 首轮验证的教训）：纯相对阈值 30% 对短基准过严
 # （65 字基准只有约 20 字余量，模型补全合法结构就必然超），加绝对下限兜底
 REVISER_GROWTH_RATIO = 0.3
@@ -79,7 +97,21 @@ NODE_SCHEMAS: dict[str, type] = {
 
 
 def load_cases() -> dict[str, list[dict[str, Any]]]:
-    return json.loads(CASES_PATH.read_text(encoding="utf-8"))
+    p = cases_path()
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except FileNotFoundError as e:
+        # 静默回退到默认会掩盖"PM_EVAL_CASES 指错了"：宁可当场报清楚
+        raise SystemExit(f"用例集读不到：{p}（PM_EVAL_CASES 指向的路径不存在）") from e
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"用例集不是合法 JSON：{p}（{e.msg}，第 {e.lineno} 行）") from e
+    if not isinstance(raw, dict):
+        raise SystemExit(
+            f"用例集顶层必须是对象（{{节点: [用例]}}），实得 {type(raw).__name__}：{p}"
+        )
+    # `_comment` 是给读用例集的人看的说明，不是节点名 —— 直接按节点遍历
+    # 会把它当成"节点"并报出难以理解的失败（用例集里确实有这条键）
+    return {k: v for k, v in raw.items() if not k.startswith("_")}
 
 
 # --------------------------------------------------------------------------
@@ -105,9 +137,14 @@ def check_structure(node: str, case: dict[str, Any]) -> list[str]:
         if leaked:
             issues.append(f"{label} 段有未渲染占位符：{leaked}")
 
-    # 2) 安全约束块：所有节点的 system 都必须声明数据/指令边界
-    if "安全约束" not in system:
-        issues.append("system 缺少 <安全约束> 块（注入防御声明）")
+    # 2) 安全约束块：所有节点的 system 都必须声明数据/指令边界。
+    # ⚠️ 判据必须是**成对标签**，不能只查"安全约束"这个子串 ——
+    # 2026-10-02 实测漏洞：删掉开标签 `</安全约束>` 仍余下闭合标签，
+    # 子串判据照样通过（`"安全约束" in "</安全约束>"` 为真），
+    # 于是一个"只有闭合标签、没有起始标记"的残破模板被判为合格。
+    # 那种模板在真实调用里根本起不到边界声明作用，却一路绿过去。
+    if not ("<安全约束>" in system and "</安全约束>" in system):
+        issues.append("system 缺少成对的 <安全约束>...</安全约束> 块（注入防御声明）")
 
     # 3) 节点专项结构
     if node == "optimizer":
@@ -169,6 +206,12 @@ def check_live(node: str, case: dict[str, Any]) -> list[str]:
         return issues
 
     schema = NODE_SCHEMAS[node]
+    # `result` 显式标 Any：schema 由运行时字典 NODE_SCHEMAS 按 node 选定，
+    # 静态层面无法把"node → 对应 BaseModel 子类"的对应关系表达出来
+    # （要在下面按 node 分支各自调一次 structured_call 才能收窄，代价是重复四遍
+    # 调用逻辑）。这里的 Any 是类型系统的真实边界，不是偷懒 ——
+    # 下方每个分支都在访问该 node 对应的具体字段，写错了运行时会立刻 AttributeError。
+    result: Any
     result, _meta = structured_call(node, schema, system, user)
 
     if node == "clarifier":

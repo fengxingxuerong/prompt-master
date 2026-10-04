@@ -8,7 +8,7 @@
 #    换一台机器 clone 要重装一次：钩子不在仓库里，在 `.git/hooks/` 里。
 #
 # 代价实测（本机，2026-09-25）：`pre-commit run --all-files` 全程 **109 秒**，
-# 其中 pytest 一条就占大头（955 条用例）。要快：
+# 其中 pytest 一条就占大头（1246 条用例）。要快：
 #     SKIP=pytest-quick git commit ...        # 只跑静态三条（约 20 秒）
 # 但那一趟**不算门禁过了** —— 跳过的那部分必须在别处补跑，别把它记成绿。
 # 同理 `--no-verify`：它是关掉门禁的开关，不是"门禁慢"的解药。
@@ -28,19 +28,19 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check（与 CI 同路径）
-        entry: .venv/Scripts/python.exe -m ruff check pm/ tests/ run.py run_server.py examples/
+        entry: .venv/Scripts/python.exe -m ruff check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
         language: system
         pass_filenames: false
 
       - id: ruff-format-check
         name: ruff format --check（与 CI 同路径）
-        entry: .venv/Scripts/python.exe -m ruff format --check pm/ tests/ run.py run_server.py examples/
+        entry: .venv/Scripts/python.exe -m ruff format --check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
         language: system
         pass_filenames: false
 
       - id: mypy
         name: mypy --strict（与 CI 同路径）
-        entry: .venv/Scripts/python.exe -m mypy pm/ run.py run_server.py
+        entry: .venv/Scripts/python.exe -m mypy pm/ run.py run_server.py eval_prompts.py
         language: system
         pass_filenames: false
 

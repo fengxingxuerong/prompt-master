@@ -55,8 +55,13 @@ examples/sample_report.md
 .idea/
 .vscode/
 .trae/
+# 本机会话目录（智能体会话产物，同 .trae/ 先例，不该进版本库）
+.box-agent/
 .DS_Store
 Thumbs.db
+
+# 一次性诊断输出（同 /.cov*.txt 先例）
+/mcp_cov.txt
 
 # 打包产物
 *.egg-info/

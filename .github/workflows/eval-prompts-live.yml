@@ -1,0 +1,165 @@
+name: 节点提示词真实评测（手动触发）
+
+# 为什么单独一个 workflow 而不是加进 ci.yml：
+# `eval_prompts.py --live` 会**打真实端点、花真钱**，而且结果取决于外部端点当时的
+# 状态（限流、抖动、模型版本漂移）。把它放进每次提交的 CI 会有两个后果：
+#   ① 绿不绿不再只取决于我们的代码 —— 端点抖一下就红，红久了就没人看；
+#   ② 每次 push 都在烧额度，账单这事发现得永远比预期晚。
+# 所以它只在**人主动点**的时候跑。这是本仓库对"被依赖的东西必须有人查"与
+# "不能把外部不确定性塞进门禁"的取舍：结构契约（离线）进 CI，
+# 行为评测（真实调用）留手动。
+#
+# ⚠️ 安全边界（读我再用）：
+# 这个 workflow 的日志会包含模型输出。**不要把任何不该公开的内容**喂给它；
+# 密钥一律走 GitHub Secrets，且只在"引用"时注入（见 env 段），
+# 不要 echo 任何 `secrets.*`（哪怕是脱敏后的片段）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      node:
+        description: "要评测的节点（all = 全部 5 个）"
+        required: false
+        default: all
+        type: choice
+        options: [all, clarifier, optimizer, mockgen, evaluator, reviser]
+      dry_run:
+        description: "只做前置检查（密钥/端点/依赖），不调用模型"
+        required: false
+        default: false
+        type: boolean
+
+# 同一时间只允许一个真实评测：并跑会互相抢端点限流，且把额度花两遍
+concurrency:
+  group: eval-prompts-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    # 真实调用是"花钱且需要凭据"的动作，所以挂到一个受保护的 Environment 上：
+    # GitHub 的 required reviewers 是在 **Environment 设置**里配的，`environment:`
+    # 这一行本身**不产生任何审批**。名字必须与网页上建的**完全一致** ——
+    # 拼错的话 GitHub 会静默新建一个同义不同名的 Environment（默认无审批人），
+    # 工作流照样跑通，只是那道闸从未存在。名称一致性由 tests/test_prompt_eval.py 钉住。
+    #
+    # 启用审批（仓库管理员在网页上做一次，见 docs/operations.md「手动跑真实节点评测」）：
+    #   Settings → Environments → 新建 `live-eval` → 勾选
+    #   **Required reviewers** → 选 1~5 个人或团队 → Save protection rules
+    # 配好之后，每次 Run workflow 都会先停在 "Waiting for review"，
+    # 由被选中的人点 Approve 才会真正调用端点。
+    environment: live-eval
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 前置检查独立成步：把"配置缺了"与"评测没过"分开报。
+      # 混在一步里的话，一次因为没配 Secret 的失败会看起来像"提示词有问题"。
+      - name: 前置检查 —— 密钥与端点是否就位（不调用模型）
+        env:
+          PM_API_KEY: ${{ secrets.PM_API_KEY }}
+          PM_BASE_URL: ${{ vars.PM_BASE_URL }}
+          PM_MODEL: ${{ vars.PM_MODEL }}
+          # 角色级覆盖必须一起传（实测：真实部署里 evaluator_b / arbiter / comparator
+          # 往往不是同一个模型，见 .env.example 的角色段）。
+          # 只传全局三件套的话，--preflight 与 --live 会在多角色配置下拿错模型，
+          # 而"拿错模型"不会报错 —— 它会静默地用全局模型评一遍，结果看着像通过。
+          # 未配置的变量传空串，pm.llm 的 `_env(f"PM_{role}_...") or 全局` 会自然回退。
+          PM_EVALUATOR_B_API_KEY: ${{ secrets.PM_EVALUATOR_B_API_KEY }}
+          PM_EVALUATOR_B_BASE_URL: ${{ vars.PM_EVALUATOR_B_BASE_URL }}
+          PM_EVALUATOR_B_MODEL: ${{ vars.PM_EVALUATOR_B_MODEL }}
+          PM_ARBITER_API_KEY: ${{ secrets.PM_ARBITER_API_KEY }}
+          PM_ARBITER_BASE_URL: ${{ vars.PM_ARBITER_BASE_URL }}
+          PM_ARBITER_MODEL: ${{ vars.PM_ARBITER_MODEL }}
+          PM_COMPARATOR_API_KEY: ${{ secrets.PM_COMPARATOR_API_KEY }}
+          PM_COMPARATOR_BASE_URL: ${{ vars.PM_COMPARATOR_BASE_URL }}
+          PM_COMPARATOR_MODEL: ${{ vars.PM_COMPARATOR_MODEL }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${PM_API_KEY:-}" ] || missing="$missing PM_API_KEY(secret)"
+          [ -n "${PM_BASE_URL:-}" ] || missing="$missing PM_BASE_URL(variable)"
+          [ -n "${PM_MODEL:-}" ] || missing="$missing PM_MODEL(variable)"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少配置：$missing"
+            echo "请在仓库 Settings → Secrets and variables → Actions 里配置："
+            echo "  Secret   PM_API_KEY"
+            echo "  Variable PM_BASE_URL（如 https://your-endpoint/v1）"
+            echo "  Variable PM_MODEL   （如 your-model-name）"
+            echo "可选：按角色覆盖用 PM_<ROLE>_API_KEY / _BASE_URL / _MODEL"
+            exit 1
+          fi
+          # 只打印"存在性与形状"，绝不打印密钥本体
+          echo "PM_API_KEY: 已配置（长度 ${#PM_API_KEY}）"
+          echo "PM_BASE_URL: $PM_BASE_URL"
+          echo "PM_MODEL: $PM_MODEL"
+
+      - name: 端点冒烟 —— 逐角色最小调用（花极小钱，先确认端点活着）
+        if: ${{ inputs.dry_run != true }}
+        env:
+          PM_API_KEY: ${{ secrets.PM_API_KEY }}
+          PM_BASE_URL: ${{ vars.PM_BASE_URL }}
+          PM_MODEL: ${{ vars.PM_MODEL }}
+          # 角色级覆盖：与上面那步同口径（三处必须一致，少一处就会出现
+          # "冒烟过了但评测拿错模型"这种前后不一致）
+          PM_EVALUATOR_B_API_KEY: ${{ secrets.PM_EVALUATOR_B_API_KEY }}
+          PM_EVALUATOR_B_BASE_URL: ${{ vars.PM_EVALUATOR_B_BASE_URL }}
+          PM_EVALUATOR_B_MODEL: ${{ vars.PM_EVALUATOR_B_MODEL }}
+          PM_ARBITER_API_KEY: ${{ secrets.PM_ARBITER_API_KEY }}
+          PM_ARBITER_BASE_URL: ${{ vars.PM_ARBITER_BASE_URL }}
+          PM_ARBITER_MODEL: ${{ vars.PM_ARBITER_MODEL }}
+          PM_COMPARATOR_API_KEY: ${{ secrets.PM_COMPARATOR_API_KEY }}
+          PM_COMPARATOR_BASE_URL: ${{ vars.PM_COMPARATOR_BASE_URL }}
+          PM_COMPARATOR_MODEL: ${{ vars.PM_COMPARATOR_MODEL }}
+        run: python run.py --preflight
+
+      - name: 真实评测（eval_prompts --live）
+        if: ${{ inputs.dry_run != true }}
+        env:
+          PM_API_KEY: ${{ secrets.PM_API_KEY }}
+          PM_BASE_URL: ${{ vars.PM_BASE_URL }}
+          PM_MODEL: ${{ vars.PM_MODEL }}
+          # 角色级覆盖：同上
+          PM_EVALUATOR_B_API_KEY: ${{ secrets.PM_EVALUATOR_B_API_KEY }}
+          PM_EVALUATOR_B_BASE_URL: ${{ vars.PM_EVALUATOR_B_BASE_URL }}
+          PM_EVALUATOR_B_MODEL: ${{ vars.PM_EVALUATOR_B_MODEL }}
+          PM_ARBITER_API_KEY: ${{ secrets.PM_ARBITER_API_KEY }}
+          PM_ARBITER_BASE_URL: ${{ vars.PM_ARBITER_BASE_URL }}
+          PM_ARBITER_MODEL: ${{ vars.PM_ARBITER_MODEL }}
+          PM_COMPARATOR_API_KEY: ${{ secrets.PM_COMPARATOR_API_KEY }}
+          PM_COMPARATOR_BASE_URL: ${{ vars.PM_COMPARATOR_BASE_URL }}
+          PM_COMPARATOR_MODEL: ${{ vars.PM_COMPARATOR_MODEL }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.node }}" = "all" ]; then
+            python eval_prompts.py --live
+          else
+            python eval_prompts.py --live --node "${{ inputs.node }}"
+          fi
+
+      - name: 结果摘要
+        if: always()
+        run: |
+          {
+            echo "### 节点提示词真实评测"
+            echo ""
+            echo "- 节点：\`${{ inputs.node }}\`"
+            echo "- 模式：$( [ '${{ inputs.dry_run }}' = 'true' ] && echo '仅前置检查（未调用模型）' || echo '真实调用' )"
+            echo "- 结论：\`${{ job.status }}\`"
+            echo ""
+            echo "> 这一步**不证明**提示词效果好不好 —— 它用确定性代码侧校验"
+            echo "> （质量门 / 场景覆盖 / 提问预算 / 劣质输出压分 / 修订净增量）"
+            echo "> 检查节点提示词**行为**是否符合契约，不信任 LLM 自评。"
+            echo "> 结构契约（离线、零成本）在 ci.yml 里每次提交都跑。"
+          } >> "$GITHUB_STEP_SUMMARY"

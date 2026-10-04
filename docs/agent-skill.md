@@ -11,7 +11,7 @@
 
 ## 两种接入方式（选一）
 
-### 方式 A：MCP（推荐，11 个工具）
+### 方式 A：MCP（推荐，12 个工具）
 
 ```json
 {"command": "python", "args": ["-m", "pm.mcp_server"], "cwd": "<仓库根>"}

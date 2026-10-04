@@ -45,7 +45,8 @@ _ERROR_SIGNATURES: list[tuple[str, str]] = [
     ),
     (
         "timeout",
-        "调用超时：检查网络或调大 PM_TIMEOUT",
+        "调用超时：检查网络或调大 PM_TIMEOUT（一次调用的总墙钟还受 PM_CALL_BUDGET 约束，"
+        "真要长跑两个都得给够）",
     ),
     (
         "401",

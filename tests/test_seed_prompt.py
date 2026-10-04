@@ -17,7 +17,7 @@ import pm.report as report_mod
 import pytest
 from pm.cli.support import read_seed_prompt
 from pm.mcp_server import optimize_submit
-from pm.nodes import baseline_node, optimize_node
+from pm.nodes import baseline_node, compare_node, optimize_node
 from pm.prompts import (
     OPTIMIZER_SYSTEM,
     REFINER_SYSTEM,
@@ -361,3 +361,81 @@ def test_mcp_tool_forwards_seed(monkeypatch):
     seen.clear()
     optimize_submit(task="分析销售数据", seed_prompt="   ")
     assert "seed_prompt" not in seen, "空白原稿不得作为原稿模式提交"
+
+
+# --------------------------------------------------------------------------
+# 盲评与冲突文案的臂感知：原稿模式下的对手不是"未优化"，而是用户自己的版本
+# --------------------------------------------------------------------------
+_PW = {
+    "verdict": "worse",
+    "votes": {"better": 0, "worse": 2, "tie": 0},
+    "n_compared": 2,
+    "position_flips": 0,
+    "conflict": "",
+    "details": [{"test_case_index": 1, "verdict": "worse", "reason": "更贴题"}],
+    "attribution": {
+        "base": {"chars": 100, "conservative_markers": 4, "data_points": 1},
+        "cur": {"chars": 90, "conservative_markers": 1, "data_points": 3},
+        "hypothesis": "归因假设占位",
+    },
+}
+
+
+def _conflict_state(**over):
+    base = {
+        "aggregate": _agg(avg_score=8.2, min_score=8.0),
+        "baseline_aggregate": _agg(avg_score=6.0, min_score=5.0),
+        "pairwise": dict(_PW),
+    }
+    base.update(over)
+    return _rep_state(**base)
+
+
+def test_report_pairwise_calls_the_opponent_the_seed():
+    """Δ 说变好、盲评说原稿更好时，冲突行必须写"你的原稿"而不是"基线"。"""
+    report, _ = render_report(_conflict_state(seed_prompt=DEFECTY_SEED))
+    assert "## 成对盲评（优化版 vs 你的原稿）" in report
+    assert "**你的原稿多数胜出" in report
+    assert "你的原稿胜 2" in report
+    assert "成对盲评多数判**你的原稿胜出**" in report
+    assert "保守枚举标记（数据缺失/未提供等）：你的原稿 4 处" in report
+    assert "具体数值引用：你的原稿 1 处" in report
+
+
+def test_report_pairwise_wording_unchanged_without_seed():
+    """非原稿模式逐字不变：那一套措辞是被既有断言与 e2e 桩钉住的。"""
+    report, _ = render_report(_conflict_state())
+    assert "## 成对盲评（优化版 vs 基线）" in report
+    assert "**基线多数胜出" in report
+    assert "成对盲评多数判**基线胜出**" in report
+    assert "保守枚举标记（数据缺失/未提供等）：基线 4 处" in report
+
+
+def test_compare_node_conflict_names_the_seed(monkeypatch):
+    """归因不止在渲染层：compare_node 写进 state 的那句冲突说明也要带臂称呼，
+    否则它作为 `pw["conflict"]` 原样进报告，读者看到的还是"基线更好"。"""
+    monkeypatch.setenv("PM_PAIRWISE", "1")
+    # 正序 A=优化版 → 判 B 胜；反序 A=原稿 → 判 A 胜：两序一致，才算真负
+    outcomes = iter(["B", "A"])
+
+    def fake_structured(role, schema, system, user, *a, **k):
+        from pm.schemas import PreferenceResult
+
+        return PreferenceResult(winner=next(outcomes), reason="更贴题"), dict(META)
+
+    monkeypatch.setattr("pm.llm.structured_call", fake_structured)
+    st = initial_state(task="分析销售数据", seed_prompt=DEFECTY_SEED)
+    st["aggregate"] = {"passed": True}
+    st["test_runs"] = [
+        {"test_case_index": 1, "test_input": "Q1", "output": "优化版输出", "error": None}
+    ]
+    st["baseline_runs"] = [
+        {"test_case_index": 1, "test_input": "Q1", "output": "原稿输出", "error": None}
+    ]
+
+    out = compare_node(st)  # type: ignore[arg-type]
+
+    pw = out["pairwise"]
+    assert pw["verdict"] == "worse"
+    assert "你的原稿" in pw["conflict"]
+    assert "基线" not in pw["conflict"]

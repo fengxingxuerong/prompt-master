@@ -45,12 +45,17 @@ def _report_safe_int(value: Any) -> int:
         return 0
 
 
-def _verdict_conflict(d_avg: float | None, pw: dict[str, Any]) -> str | None:
+def _verdict_conflict(
+    d_avg: float | None, pw: dict[str, Any], base_word: str = "基线"
+) -> str | None:
     """均分口径（Δ）与成对盲评结论是否打架。
 
     真实运行里出现过：均分 8.67 > 基线 7.54（Δ=+1.13），盲评却是优化版 0 胜 / 基线 4 胜。
     两段结论并排展示、不提示冲突，等于让读者自己猜——与"证明变好了"的设计目标直接矛盾。
     这里只**报告**冲突，不改判定：自动裁定一个自己都说不清的结果比如实说明更危险。
+
+    `base_word` 是对手臂的称呼：原稿改进模式下它不是"未优化的基线"而是**用户自己的版本**，
+    沿用"基线"会让读者把"基线胜出"读成"不优化更好"。默认值保持非原稿模式逐字不变。
     """
     if d_avg is None or not pw:
         return None
@@ -58,7 +63,7 @@ def _verdict_conflict(d_avg: float | None, pw: dict[str, Any]) -> str | None:
     if d_avg > 0 and verdict == "worse":
         return (
             f"均分口径说优化版更好（Δ={d_avg:+.2f}），"
-            "但成对盲评多数判**基线胜出**——相对偏好与绝对评分给出相反结论。"
+            f"但成对盲评多数判**{base_word}胜出**——相对偏好与绝对评分给出相反结论。"
         )
     if d_avg <= 0 and verdict == "better":
         return (
@@ -113,6 +118,29 @@ def pick_best(state: ReportState) -> tuple[dict[str, Any], str]:
     return {"iteration": 0, "prompt": ""}, "无可用版本"
 
 
+def _human_source_note(cal: dict[str, Any]) -> str:
+    """锚点侧的同源披露：合并 bias 里有多少"人工分"其实是 AI 代判的。
+
+    评委同源（A/B 同模型）早有检测和警示，锚点侧的同源此前只在提交说明里承认过一句。
+    代判模型 GLM-5.3 与评委 B glm-5.2 同族 ⇒ 那部分读数量的是**家族一致性**，
+    不写出来，读者会把"+3.09"整句当成"与人的偏差"。
+    """
+    split = cal.get("by_human_source") or {}
+    ai = split.get("ai_proxy") or {}
+    owner = split.get("owner") or {}
+    ai_n = int(ai.get("n_anchors") or 0)
+    owner_n = int(owner.get("n_anchors") or 0)
+    if not ai_n or ai_n < owner_n:
+        return ""
+    bias = owner.get("bias")
+    strict = (
+        f"；严格人工那一半（{owner_n} 条）bias {float(bias):+.2f}"
+        if isinstance(bias, (int, float))
+        else ""
+    )
+    return f"（其中 {ai_n} 条的人工分是 AI 按所有者判例代判、与评委 B 同族{strict}）"
+
+
 def _calibration_disclosure(agg: ReportState) -> str | None:
     """校准披露行：把账本里量得的评委系统性偏差折进报告的读数语境。
 
@@ -139,6 +167,7 @@ def _calibration_disclosure(agg: ReportState) -> str | None:
     )
     src_parts = [str(cal.get(k)) for k in ("n_anchors", "n_rounds") if isinstance(cal.get(k), int)]
     src = f"{src_parts[0]} 条人工锚点、{src_parts[1]} 轮校准的" if len(src_parts) == 2 else ""
+    src += _human_source_note(cal)
     avg = agg.get("avg_score")
     if abs(bias) < BIAS_ALERT:
         return (
@@ -167,6 +196,9 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     agg = state.get("aggregate") or {}
     versions: list[dict[str, Any]] = state.get("prompt_versions") or []
     best, best_note = pick_best(state)
+    # 对手臂的称呼随模式变：原稿模式下"基线"其实是用户自己写的版本，
+    # 继续叫"基线"会让"基线胜出"被读成"不优化更好"
+    bw = "你的原稿" if _seed_arm(state) else "基线"
 
     lines: list[str] = []
     lines.append("# PromptMaster 交付报告")
@@ -422,15 +454,15 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         votes = pw.get("votes") or {}
         verdict_text = {
             "better": "优化版多数胜出",
-            "worse": "**基线多数胜出（优化未带来优势）**",
+            "worse": f"**{bw}多数胜出（优化未带来优势）**",
             "tie": "两份持平",
             "no_signal": "无有效信号（成对比较全部失败）",
         }.get(str(pw.get("verdict")), str(pw.get("verdict")))
-        lines.append("## 成对盲评（优化版 vs 基线）")
+        lines.append(f"## 成对盲评（优化版 vs {bw}）")
         lines.append("")
         lines.append(f"- 结论：{verdict_text}")
         lines.append(
-            f"- 投票：优化版胜 {votes.get('better', 0)} / 基线胜 {votes.get('worse', 0)} "
+            f"- 投票：优化版胜 {votes.get('better', 0)} / {bw}胜 {votes.get('worse', 0)} "
             f"/ 持平 {votes.get('tie', 0)}（共 {pw.get('n_compared', 0)} 例，每例双向评：正序 + 交换 A/B）"
             + (
                 f"\n- ⚠️ 位置偏置：{pw['position_flips']}/{pw.get('n_compared', 0)} 例两序结论相反"
@@ -448,7 +480,7 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
         lines.append("")
 
     # ---- 结论冲突仲裁：两个信号打架时必须说出来，不能让读者自己猜 ----
-    conflict = _verdict_conflict(d_avg, pw)
+    conflict = _verdict_conflict(d_avg, pw, bw)
     if conflict:
         lines.append("## ⚠️ 结论冲突（需人工裁定）")
         lines.append("")
@@ -472,11 +504,11 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             lines.append("")
             lines.append("- 风格归因（自动统计，供裁定参考）：")
             lines.append(
-                f"  - 保守枚举标记（数据缺失/未提供等）：基线 {b.get('conservative_markers', 0)} 处"
+                f"  - 保守枚举标记（数据缺失/未提供等）：{bw} {b.get('conservative_markers', 0)} 处"
                 f" vs 优化版 {c.get('conservative_markers', 0)} 处"
             )
             lines.append(
-                f"  - 具体数值引用：基线 {b.get('data_points', 0)} 处"
+                f"  - 具体数值引用：{bw} {b.get('data_points', 0)} 处"
                 f" vs 优化版 {c.get('data_points', 0)} 处"
             )
             lines.append(f"  - 归因假设：{attr['hypothesis']}")
@@ -540,6 +572,11 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
             lines.append(f"| {role} | {calls} | {inp} | {out} | {ms / 1000:.1f}s |")
         lines.append(f"| **合计** | {tot_calls} | {tot_in} | {tot_out} | {tot_ms / 1000:.1f}s |")
         lines.append("")
+        # 金额折算：有 PM_PRICE_*_PER_M 才出现。本系统不内置价目表（会过期且错得看不出来），
+        # 没配单价时整段不渲染——"没有数"比"看起来很合理的假数"安全。
+        from .cost import render_cost_section
+
+        lines.extend(render_cost_section(usage))
 
     # 事实断言（ground-truth）结果：确定性校验的逐条对错，评委分之外的硬证据
     assert_runs = [

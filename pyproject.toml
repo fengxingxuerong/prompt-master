@@ -122,7 +122,10 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.11"
-files = ["pm", "run.py", "run_server.py"]
+# `eval_prompts.py` 于 2026-10-02 纳入：它是 CI 里的一步（节点提示词结构契约），
+# 但它当时**碰巧**通过 ruff/mypy —— 没有任何东西防它漂。被 CI 依赖的脚本
+# 必须在门禁范围内，否则"CI 绿"里有一块是没人查的。
+files = ["pm", "run.py", "run_server.py", "eval_prompts.py"]
 # LangGraph / LangChain 无完整 stub，忽略缺失 import
 ignore_missing_imports = true
 # 不跟随解析第三方包（numpy 等 stub 在 3.13 下有语法兼容问题，且非本项目代码）

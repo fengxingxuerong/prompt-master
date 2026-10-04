@@ -9,10 +9,12 @@
 
 | 层次 | 命令 | 证明 | **不**证明 |
 |---|---|---|---|
-| 单元测试 | `pytest tests/ -q`（955 项，`--collect-only` 计数 2026-10-02 原稿改进模式轮 +36；这条数由 `test_test_count_copies_match_the_live_collection` 对着活体收集钉，抄在三处就要三处同改） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀 / 约束超载 / 定界符配平）、null 容错、演示模式隔离与产物落盘、**服务层限流**（滑动窗口 / 429+Retry-After / 赛马按任务数计费）、**两轮澄清提问语义**、**MockGen 场景覆盖校验（含注入用例）**、**用量台账**、**入口编码兜底**、**节点提示词结构契约**、**控制台渲染 XSS 防线与安全响应头**、**任务记录存储层**（内存/SQLite 行为一致 + 跨实例可见 + 并发写不丢账）、**REST API 七个路由与 404/422/401 分支**、**CLI 入参护栏与 `--fast` 快速档**、**LLM 限流退避/降级通道/记账分支**、**缓存落盘与淘汰异常分支**、**SqliteCache 多进程共享缓存**、**评委输出形状容错**（对象数组 issues / JSON 字符串 / 缺尾键 / null 数组 / **键名被按 description 同义改写**，都不该作废整条评估）、**取证先于打分的字段序**、**双向盲评与位置偏置计数**、**fixed–broken 逐条得失记账**、**对比切片与高方差用例优先**、**Δ 的基础设施有效性闸**（零有效样本报「不可采信」）、**注入存活按用例计数与代码派生校验码**、**评委同源检测**、**仲裁分数出处披露**（N/M 例出自仲裁者一人时报告必须说不，别让读者以为那是双评委共识）、**自报分与加权分相等时披露探测器失效**、**满分声明告警**（五维全 ≥9.5 却仍列 issue／或零 issue，只提醒不否决）、**评委复现性 `--repeat`**（绕缓存重复打；绕缓存不许整体替换 CallHook，否则自测会打真端点）、**仲裁失败回退仍记全出处账**（`conservative` 也要带 `judge_scores` 与分差）、**仲裁 prompt 的「给看分数」与「要求忽略」必须共生**、**出处字面量跨 judge/report 一致**（改了值不许让那行静默失效）、**评估缓存的 rubric 指纹**、**校准账本的口径指纹**、**净增量对退化基准不失真**、**`releases/*/tests` 里每一套都必须同时出现在 CI 两个 job 与下面的门禁块** | 任何与模型能力相关的结论 |
+| 单元测试 | `pytest tests/ -q`（1246 项，`--collect-only` 计数 2026-10-02 原稿改进模式轮 +36、同日臂感知轮 +3、同日差分/成本轮 +46、同日 CI 门禁轮 +39、同日节点提示词契约轮 +22、同日 lint 范围轮 +3、同日 live 工作流轮 +10、同日 Environment 审批轮 +2、同日测试补强轮 +21、同日 CLI 分发轮 +18、同日 graph 补齐轮 +10、同日 MCP 补齐轮 +8、同日 library 补齐轮 +17、同日 calibrate 补齐轮 +29、同日薄弱点清单轮 +2、同日纯逻辑桩轮 +17、同日降级兜底桩轮 +18、同日 10-03 卡死机修复轮 +19、同日 10-03 锚点出处轮 +11（`tests/test_call_budget.py` / `tests/test_anchor_provenance.py`，活体 1246）；这条数由 `test_test_count_copies_match_the_live_collection` 对着活体收集钉，抄在三处就要三处同改） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀 / 约束超载 / 定界符配平）、null 容错、演示模式隔离与产物落盘、**服务层限流**（滑动窗口 / 429+Retry-After / 赛马按任务数计费）、**两轮澄清提问语义**、**MockGen 场景覆盖校验（含注入用例）**、**用量台账**、**入口编码兜底**、**节点提示词结构契约**、**控制台渲染 XSS 防线与安全响应头**、**任务记录存储层**（内存/SQLite 行为一致 + 跨实例可见 + 并发写不丢账）、**REST API 七个路由与 404/422/401 分支**、**CLI 入参护栏与 `--fast` 快速档**、**LLM 限流退避/降级通道/记账分支**、**缓存落盘与淘汰异常分支**、**SqliteCache 多进程共享缓存**、**评委输出形状容错**（对象数组 issues / JSON 字符串 / 缺尾键 / null 数组 / **键名被按 description 同义改写**，都不该作废整条评估）、**取证先于打分的字段序**、**双向盲评与位置偏置计数**、**fixed–broken 逐条得失记账**、**对比切片与高方差用例优先**、**Δ 的基础设施有效性闸**（零有效样本报「不可采信」）、**注入存活按用例计数与代码派生校验码**、**评委同源检测**、**仲裁分数出处披露**（N/M 例出自仲裁者一人时报告必须说不，别让读者以为那是双评委共识）、**自报分与加权分相等时披露探测器失效**、**满分声明告警**（五维全 ≥9.5 却仍列 issue／或零 issue，只提醒不否决）、**评委复现性 `--repeat`**（绕缓存重复打；绕缓存不许整体替换 CallHook，否则自测会打真端点）、**仲裁失败回退仍记全出处账**（`conservative` 也要带 `judge_scores` 与分差）、**仲裁 prompt 的「给看分数」与「要求忽略」必须共生**、**出处字面量跨 judge/report 一致**（改了值不许让那行静默失效）、**评估缓存的 rubric 指纹**、**校准账本的口径指纹**、**净增量对退化基准不失真**、**`releases/*/tests` 里每一套都必须同时出现在 CI 两个 job 与下面的门禁块**、**重试层叠收敛与墙钟预算**（SDK 隐式重试被钉成 0、超时/5xx 按实测文本与状态码分类、`PM_CALL_BUDGET` 在每次真实发起前检查并把单发 timeout 夹进剩余预算；端点级实证：装死端点收到的请求数 == 我方可见重试数） | 任何与模型能力相关的结论 |
 | 拓扑自检 | `python run.py --selftest` | 图能跑通、状态正确累加、迭代终止与兜底正确、双评委仲裁路径 | 优化效果（用的是假后端） |
 | 真实 HTTP e2e | `bash examples/run_e2e_stub.sh` / `examples/run_e2e_stub.ps1` | 真实客户端 → HTTP → 响应解析 → 校验链路通畅；两条结构化输出通道均可用；**所有角色端点都被锁在桩上** | 优化效果（桩服务返回固定内容） |
-| 提示词回归评测 | `python eval_prompts.py`（离线，零成本）/ `--live`（真实调用） | **节点提示词自身的结构契约**（占位符渲染、安全约束块、专项规则块）随 pytest 常态回归；`--live` 用确定性代码侧校验（质量门 / 场景覆盖 / 提问预算 / 劣质输出压分 / 修订净增量 ≤30%）验证提示词行为 | `--live` 之外的任何效果结论（离线只保证结构，不保证生成质量） |
+| 提示词回归评测 | `python eval_prompts.py`（离线，零成本；CI 两个 job 都跑）/ `--live`（真实调用，**永不进 CI**） | **节点提示词自身的结构契约**：渲染后无占位符残留、`<安全约束>` 块齐全、各节点专项块存在（optimizer 的自检清单、evaluator 的先取证、reviser 的不得弱化）。判据是**绝对**的——"模板是否残破" | 提示词行为与效果（`--live` 才有行为校验，且只证结构不证质量）；也不拦"这次改动新引入了什么"（那是 gate 的事） |
+| 真实节点评测（手动） | GitHub Actions → **「节点提示词真实评测（手动触发）」** → Run workflow（`.github/workflows/eval-prompts-live.yml`） | `--live` 用**确定性代码侧校验**检查提示词**行为**：clarifier 提问预算与 is_clear、optimizer/reviser 过质量门、mockgen 场景覆盖（main_path+boundary）、evaluator 劣质输出是否被压分 | 提示词**效果**（分数高低）；外部端点抖动会直接反映成失败，所以它的红**不等于**代码坏了。**不自动跑**：打真实端点、花真钱、结果依赖外部状态 |
+| 提示词改动门禁 | `python run.py gate`（零调用；CI 两个 job 都跑，见 ci.yml） | **本次改动是否把已知事故模式带回来了**：与 git 基线比 `pm/prompts.py` 的模板，只拦「新引入」的规则失败模式（含"已命中规则上继续加重"这个 code 级看不出的通道） | 提示词是否**更好**；也**看不见结构缺失**（实测：删掉整个 `<安全约束>` 块时它 `introduced` 为空，由上面那条抓）。⚠️ 判据是**增量**不是绝对——17 个模板有 16 个天然命中规则，绝对判据会永久假红 |
 | 评委校准 | `python run.py calibrate`（锚点样本 + 人工分），加 `--repeat N` 测复现性 | **两轴**：与人工分的偏差（MAE/偏松偏严/排序一致性）＋ **评委跟自己的一致性**（同输入绕缓存打 N 次的极差，越过 `PM_JUDGE_DISAGREEMENT` 即告警）| 样本 <5 条时仅方向性参考；都不提升评委能力，只量化偏差；复现性读数不在交付报告里 |
 
 **要验证提示词优化的实际效果，必须配置真实 API Key 运行。**前三层只能保证
@@ -21,9 +23,9 @@
 质量门禁（提交前）：
 ```bash
 # 与 .github/workflows/ci.yml 逐条同口径（路径别删：漏一个文件就是"本地查、CI 不查"的第三种口径）
-ruff check pm/ tests/ run.py run_server.py examples/
-ruff format --check pm/ tests/ run.py run_server.py examples/
-mypy pm/ run.py run_server.py
+ruff check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
+ruff format --check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
+mypy pm/ run.py run_server.py eval_prompts.py
 python -m pytest tests/ -q --cov=pm --cov-report=term-missing     # 覆盖率地板见 pyproject
 python -m coverage report --include="*/modelhub/*" --fail-under=82  # 网关那条分项线
 python -m pytest releases/lobster/tests/ -q
@@ -34,14 +36,16 @@ python -m pytest releases/triage/tests/ -q
 git diff --exit-code -- "releases/*/data/*"
 python run.py --selftest          # CI 里额外清 PM_API_KEY 再跑一次（干净检出无 .env 也必须过）
 bash examples/run_e2e_stub.sh     # 真实 HTTP 链路 + 三条结构化输出通道（桩端点，不出网）
+python run.py gate                # 提示词改动回归门禁（零调用；自动探测基线，比较 pm/prompts.py）
+python eval_prompts.py            # 节点提示词结构契约（零调用；判"模板是否残破"，与上面的增量判据互补）
 ```
 覆盖率的两条线怎么读（地板值取实测下方留余量，不是质量目标）：
 
-| 范围 | 接入门禁前 | 补 modelhub 测试后 | 复测① | 复测②（补运维路由） | 复测③（补切换链） | 复测④（原稿模式轮） | 门禁地板 |
-|---|---|---|---|---|---|---|---|
-| `pm/` 全量 | 84% | 88.5% | 90.43% | 92.44% | 93.49% | **93.37%** | 92 |
-| `pm/` 去掉 modelhub | 95.6% | ~96% | 94.9% | 94.9% | 95.6% | **94.91%** | —（被全量线覆盖） |
-| `pm/modelhub/*` | 33.5% | 58.6% | 69.8% | 81.0% | 87.1% | **86.37%** | 82 |
+| 范围 | 接入门禁前 | 补 modelhub 测试后 | 复测① | 复测②（补运维路由） | 复测③（补切换链） | 复测④（原稿模式轮） | 复测⑤（逐模块补到 100%） | 复测⑥（降级兜底桩） | 门禁地板 |
+|---|---|---|---|---|---|---|---|---|---|
+| `pm/` 全量 | 84% | 88.5% | 90.43% | 92.44% | 93.49% | 93.37% | 95.19% | **95.80%** | 92 |
+| `pm/` 去掉 modelhub | 95.6% | ~96% | 94.9% | 94.9% | 95.6% | 94.91% | 96% | **96%** | —（被全量线覆盖） |
+| `pm/modelhub/*` | 33.5% | 58.6% | 69.8% | 81.0% | 87.1% | 86.37% | 89% | **93%** | 82 |
 
 > ⚠️ 每一列都是**各自时点的实测**（同一条命令、独占、全量 rc=0），不是同一个数被抄来抄去。
 > 表格存在的意义就是让下一个人看见"上一轮 81%、这一轮 87.1%"是真涨了。报数前必须重测：
@@ -50,9 +54,42 @@ bash examples/run_e2e_stub.sh     # 真实 HTTP 链路 + 三条结构化输出�
 > 复测①→②：给运维路由补 21 条用例（`tests/test_modelhub_admin_routes.py`，194 条语句原本 0 覆盖）。
 > 复测②→③：给 `pool.chat()` 的**切换/瞬时重试/断路器记分/台账记账**补 11 条用例
 > （`tests/test_modelhub_pool_chat.py`，假上游、零出网）；pool 61% → 85%。
+> 复测④→⑤：把 `graph.py` / `mcp_server.py` / `cli/library.py` / `cli/calibrate.py`
+> 逐个补到 **100%**，并补 `modelhub/server.py` 的三组纯逻辑分支
+> （鉴权与头解析 / 角色与参数拼装 / SSE 帧解析与心跳，33 行 → 0）；该文件 80% → 88%。
+> 复测⑤→⑥：补 `modelhub/server.py` 的**降级兜底**（流式全失败 → 非流式 + 合成 SSE，
+> 84 行）与对话路由的成功/错误路径；该文件 **88% → 100%**，modelhub 分项 89% → **93%**。
+> 这一轮的桩全部复用既有范式（`_FakeHub` + 桩 `stream_upstream` / `gateway` + 桩 `_hub_instance`）。
 
-- 剩余缺口很集中：`pool.py` 331-367（真 `urllib` 那段，要活 socket 才走得到）与
-  `server.py` 361-444（对话主路由的上游调用体）。`agents.py` 已从"零条直接用例"到 100%。
+- **已知薄弱点清单（2026-10-02 实测并逐块核过，不是估的）**：
+  下面每一条都写明「哪些行 / 属于哪一类 / 补它的前提是什么」。
+  ⚠️ **别把整块笼统当成"要活上游"** —— 实测核过，其中一部分是纯逻辑、
+  假上游就能覆盖；笼统归类会让下一个人直接放弃本可以补的部分。
+
+  **A. `pm/modelhub/server.py`（100%）**
+  > **2026-10-02 已全部补齐**：本轮把降级兜底（84 行）与对话路由的成功/错误路径一并补完，
+  > 该文件 80% → **100%**。modelhub 分项 86% → **93%**、`pm/` 全量 → **95.80%**。
+  > 补法都是**复用既有假上游范式**（`tests/test_modelhub_stream_contract.py` 的 `_FakeHub`
+  > + 桩 `stream_upstream`；`tests/test_modelhub_admin_routes.py` 的 `gateway` 夹具
+  > + 桩 `_hub_instance`），没另起一套。**这块已无缺口。**
+
+  **B. `pm/modelhub/pool.py`（85%，45 条语句未覆盖）**
+  - 缺口是 `331-367` 的**真 `urllib` 请求段**（实测这 37 行全部未覆盖）—— 要活 socket 才走得到；
+    另有 `58-69` / `122-132` / `176-177` / `220-230` / `558` 等零散分支。
+  - 其余（切换 / 瞬时重试 / 断路器记分 / 台账记账）已由 `tests/test_modelhub_pool_chat.py`
+    用假上游覆盖（pool 61% → 85%）。
+
+  **C. 其余 `pm/` 文件**
+  - 无低于 90% 的文件（2026-10-02 逐轮补完 `graph.py` / `mcp_server.py` /
+    `cli/library.py` / `cli/calibrate.py` / `modelhub/server.py` 到 100%）。
+
+  > **结论**：`pm/` 里**只剩 `pm/modelhub/pool.py` 这一处**（45 条语句），
+  > 且它的主体是真 `urllib` 段 —— 要活 socket 或"会按需失败的 socket 桩"。
+  > **不建议为覆盖率数字专门去做**；改到那段代码时顺手补即可。
+
+
+
+
 - 为什么给 modelhub 单独立一条：全量线会把结构问题抹平，而恰恰是这条网关出现过
   "流式通道没有 return、`stream=true` 返回 None、全套测试全绿"的事故（见
   `tests/test_modelhub_stream_contract.py`）。全局线守不住的地方要分项钉。
@@ -139,3 +176,60 @@ python run.py calibrate       # ④ 评委可信度校准 + 漂移对比
 - **max_tokens 预算不能跨端点搬**：第 11 轮「8000=0% 失败」只对 AMD DeepSeek 成立；SenseNova 同模型名 reasoning 吃满 8000——**换端点必须重测预算**
 - **注入防御是模型相关的**：同一 prompt 在 AMD 免疫注入、SenseNova 可能 1/1 被劫持——**目标模型用 SenseNova 时，注入用例务必保留在用例集里**（注入门禁会兜底拦截误判达标）
 - **日志会膨胀**：`logs/` 会积累每次运行产物；定期把 `logs/run_*.json` `report_*.md` 归档到子目录（.gitignore 已忽略，不影响仓库）
+
+### 手动跑真实节点评测（GitHub Actions）
+
+`.github/workflows/eval-prompts-live.yml` 是**手动触发**的工作流（Actions → 「节点提示词真实评测（手动触发）」→ Run workflow）。
+它跑 `eval_prompts.py --live`，用确定性代码侧校验检查节点提示词的**行为**，
+补上 CI 里那条离线结构契约够不到的那一半。
+
+**为什么它不自动跑**：`--live` 打真实端点、花真钱，而且绿不绿取决于端点当时的状态
+（限流、抖动、模型版本漂移）。放进每次提交的 CI 会有两个后果：端点抖一下就红、
+红久了就没人看；以及每次 push 都在烧额度。所以结构契约（离线、零成本）进 CI，
+行为评测留给人主动点。
+
+**首次使用前要配的 Secrets / Variables**（Settings → Secrets and variables → Actions）：
+
+| 类型 | 名称 | 说明 |
+|---|---|---|
+| Secret | `PM_API_KEY` | 必填 |
+| Variable | `PM_BASE_URL` | 必填，如 `https://your-endpoint/v1` |
+| Variable | `PM_MODEL` | 必填，如 `your-model-name` |
+| Secret/Variable | `PM_EVALUATOR_B_*` / `PM_ARBITER_*` / `PM_COMPARATOR_*` | 可选；未配则回退全局三件套 |
+
+⚠️ **角色级覆盖是"静默生效"的**：`pm/llm.py` 读的是 `PM_<ROLE>_BASE_URL` 这类键名，
+写错了（比如多一个 `_B`）不会报错 —— 它会回退到全局模型，于是"冒烟过了、评测也过了"，
+但用的根本不是你以为的那个模型。`tests/test_prompt_eval.py` 里有两条护栏钉这件事
+（三处 env 必须逐字一致 + 角色名必须是 `pm.llm` 真的认识的那些）。
+
+**工作流的输入**：
+- `node`：`all`（默认）或单个节点 —— 选项由测试对着 `eval_prompts.TEMPLATES` 钉住，不会漂
+- `dry_run`：只做前置检查（密钥/端点/依赖），**不调用模型**。首次点这个工作流时先用它
+
+**它证明了什么 / 没证明什么**：
+- 证明：节点提示词**行为**符合契约（提问预算、场景覆盖、劣质输出压分、修订净增量…）
+- 没证明：提示词**效果**好不好。它不信任 LLM 自评，用的是代码侧确定性判据
+- 红 ≠ 代码坏了：外部端点抖动会直接反映成失败，先看是否整批同时红
+
+**建议的跑法**：改过 `pm/prompts.py` 里任一模板后，手动跑一次对应节点（`node` 选那个节点）
+比跑 `all` 更快也更省。`run.py gate` 与离线结构契约会在每次提交时先替你挡掉明显问题。
+
+#### 启用人工审批（仓库管理员做一次）
+
+工作流里已经声明 `environment: live-eval`，但**这一行本身不产生任何审批** ——
+审批来自该 Environment 上的 required reviewers 配置：
+
+1. 打开仓库 `Settings` → 左侧 `Environments` → `New environment`
+2. 名称填 **`live-eval`**（**必须逐字一致**，包括连字符）
+3. 勾选 **`Required reviewers`**，选 1~5 个人或团队
+4. （可选）勾 `Wait timer` 做延迟、`Deployment branches` 限制只能在 `main` 上触发
+5. `Save protection rules`
+
+配好后的行为：每次 Run workflow 会先停在 **"Waiting for review"**，
+被选中的人点 Approve 才真正调用端点；Reject 则整次运行取消。
+
+⚠️ **名字拼错会静默失效**：GitHub 会为拼错的名字**新建一个 Environment**（默认没有审批人），
+工作流照样跑通 —— 只是你以为存在的审批闸从未存在。
+`tests/test_prompt_eval.py::test_live_workflow_uses_the_documented_environment_name`
+钉住"工作流里的名字 == 本文写的名字"，改一边就会红。
+

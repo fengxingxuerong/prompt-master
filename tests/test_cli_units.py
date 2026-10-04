@@ -605,3 +605,660 @@ def test_library_export_empty_prompt(
     _write_run(tmp_path, "noprompt", status="passed", prompt="   ")
     assert cli_library._library_command(["--export", "noprompt"]) == cli_support.EXIT_FAILED
     assert "没有可导出" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# 子命令分发（2026-10-02 补：diff / gate 接入后，分发表变长但没人逐个走过）
+# ---------------------------------------------------------------------------
+def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> None:
+    """分发函数必须把**每一个** `_SUBCOMMANDS` 成员路由到一个真实实现。
+
+    这张表在长（10 个），而"新加一个子命令却忘了接上分发"是本项目真出过的形态
+    （`_SUBCOMMANDS` 是 help 与分发的唯一事实源）。这里用替身记录调用，
+    不真跑任何子命令 —— 真跑那些会联网/耗时。
+    """
+    import pm.cli.agent_mode as am
+    import pm.cli.calibrate as cal
+    import pm.cli.check as chk
+    import pm.cli.diffcmd as dcmd
+    import pm.cli.gatecmd as gcmd
+    import pm.cli.history as hist
+    import pm.cli.library as lib
+
+    seen: list[str] = []
+
+    def spy(name: str) -> Any:
+        # 真实签名是 (argv) 或 (cmd, argv)，所以用 *args 兜住两种形态
+        def _f(*args: Any, **kwargs: Any) -> int:
+            seen.append(name)
+            return 0
+
+        return _f
+
+    monkeypatch.setattr(am, "agent_subcommand", spy("agent"))
+    monkeypatch.setattr(hist, "_history_command", spy("history"))
+    monkeypatch.setattr(cal, "_calibrate_command", spy("calibrate"))
+    monkeypatch.setattr(chk, "check_command", spy("check"))
+    monkeypatch.setattr(dcmd, "diff_command", spy("diff"))
+    monkeypatch.setattr(gcmd, "gate_command", spy("gate"))
+    monkeypatch.setattr(lib, "_library_command", spy("library"))
+
+    # 分发函数用的是模块级名字，替换后要重新加载才生效
+    import importlib
+
+    fresh = importlib.reload(cli_main)
+    try:
+        assert fresh._dispatch_subcommand("submit", []) == 0
+        assert fresh._dispatch_subcommand("status", []) == 0
+        assert fresh._dispatch_subcommand("report", []) == 0
+        assert fresh._dispatch_subcommand("wait", []) == 0
+        for cmd in ("history", "calibrate", "check", "diff", "gate", "library"):
+            assert fresh._dispatch_subcommand(cmd, []) == 0
+    finally:
+        importlib.reload(cli_main)
+
+    assert sorted(set(seen)) == [
+        "agent",
+        "calibrate",
+        "check",
+        "diff",
+        "gate",
+        "history",
+        "library",
+    ], f"有子命令没走到实现：{seen}"
+    # submit/status/report/wait 四个共用 agent 分支
+    assert seen.count("agent") == 4, f"agent 分支应被调用 4 次，实得 {seen.count('agent')}"
+
+
+def test_subcommands_tuple_is_the_single_source_of_help_and_dispatch() -> None:
+    """`_SUBCOMMANDS` 必须同时被 help 与分发消费 —— 只改一处就是空头承诺。"""
+    help_text = cli_main._subcommand_help("run.py")
+    for cmd in cli_main._SUBCOMMANDS:
+        assert cmd in help_text, f"{cmd} 在分发表里但 help 里没有"
+
+
+def test_unknown_subcommand_lists_the_options(monkeypatch, capsys) -> None:
+    """打错子命令要把清单当场列出来，而不是丢一句 argparse 的 unrecognized。"""
+    monkeypatch.setattr(sys, "argv", ["run.py", "__打错的子命令__"])
+    rc = cli_main.main()
+    err = capsys.readouterr().err
+    assert rc == cli_main.EXIT_CONFIG
+    assert "未知子命令" in err
+    for cmd in cli_main._SUBCOMMANDS:
+        assert cmd in err, f"清单里少了 {cmd}"
+
+
+# ---------------------------------------------------------------------------
+# 入参护栏（越界参数必须在花钱之前拦住）
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("argv", [["--cases", "0"], ["--cases", "9"], ["--cases", "-1"]])
+def test_cases_out_of_range_exits_2(monkeypatch, capsys, argv) -> None:
+    monkeypatch.setattr(sys, "argv", ["run.py", "--task", "让AI分析销售数据", *argv])
+    with pytest.raises(SystemExit) as e:
+        cli_main.main()
+    assert e.value.code == 2
+    assert "--cases" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["--max-iter", "-1"], ["--max-iter", "11"]])
+def test_max_iter_out_of_range_exits_2(monkeypatch, capsys, argv) -> None:
+    monkeypatch.setattr(sys, "argv", ["run.py", "--task", "让AI分析销售数据", *argv])
+    with pytest.raises(SystemExit) as e:
+        cli_main.main()
+    assert e.value.code == 2
+    assert "--max-iter" in capsys.readouterr().err
+
+
+def test_task_too_short_exits_2(monkeypatch, capsys) -> None:
+    """需求短于 4 字 = 大概率粘错了参数，当场拦（别烧一轮调用才发现）。"""
+    monkeypatch.setattr(sys, "argv", ["run.py", "--task", "abc"])
+    with pytest.raises(SystemExit) as e:
+        cli_main.main()
+    assert e.value.code == 2
+    assert "4-8000" in capsys.readouterr().err
+
+
+def test_task_too_long_exits_2(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", ["run.py", "--task", "x" * 8001])
+    with pytest.raises(SystemExit) as e:
+        cli_main.main()
+    assert e.value.code == 2
+    assert "8000" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# 装包后的入口与包级纠错（对应 pyproject 的 [project.scripts]）
+# ---------------------------------------------------------------------------
+def test_console_entry_delegates_to_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`prompt-master` 命令的入口必须真的转到 `pm.cli.main.main`。
+
+    这是装包态的唯一入口：它坏了，`pip install .` 出来的命令就是个哑炮，
+    而"哑炮"在测试态看不出来（大家都用 `python run.py`）。
+    """
+    import pm.cli.console as console
+
+    called: list[str] = []
+    monkeypatch.setattr(console, "prepare_console", lambda: called.append("prepare"))
+    monkeypatch.setattr(cli_main, "main", lambda: called.append("main") or 0)
+    monkeypatch.setitem(sys.modules, "pm.cli.main", cli_main)
+
+    rc = console.main()
+    assert rc == 0
+    # 顺序是行为的一部分：prepare_console 必须早于 main（它负责 dotenv/utf8/stdout）
+    assert called == ["prepare", "main"], f"引导顺序不对：{called}"
+
+
+def test_bootstrap_is_shared_with_run_py(monkeypatch: pytest.MonkeyPatch) -> None:
+    """两个入口必须共用同一套引导，否则会出现"一个入口能跑、另一个乱码"。"""
+    import pm.cli.console as console
+    import run as run_module
+
+    assert console.prepare_console is run_module.prepare_console
+
+
+def test_package_level_getattr_rejects_ambiguous_names() -> None:
+    """`from pm.cli import main` 曾因惰性导出变成"看导入顺序定含义"，已移除。
+
+    误用时必须给出**可执行的纠正**（告诉你去哪个子模块取），而不是静默返回一个
+    含义随导入顺序变化的对象 —— 那种歧义会让门禁结果不可复现。
+    """
+    import pm.cli as pkg
+
+    for name, sub in (("main", "main"), ("selftest", "selftest"), ("run_pipeline", "pipeline")):
+        with pytest.raises(AttributeError) as e:
+            pkg.__getattr__(name)
+        msg = str(e.value)
+        assert f"from pm.cli.{sub} import {name}" in msg, f"{name} 的纠正提示不具体：{msg}"
+        assert "导入顺序" in msg, "没解释原因，读者会以为是 bug"
+
+
+def test_package_level_getattr_rejects_unknown_attribute() -> None:
+    with pytest.raises(AttributeError, match="has no attribute"):
+        import pm.cli as pkg
+
+        pkg.__getattr__("__完全不存在__")
+
+
+def test_package_all_matches_real_exports() -> None:
+    """`__all__` 里列的每个名字都必须真的取得到（写错就是文档骗人）。"""
+    import pm.cli as pkg
+
+    for name in pkg.__all__:
+        assert hasattr(pkg, name), f"__all__ 列了 {name} 但取不到"
+
+
+# ---------------------------------------------------------------------------
+# `--dry-run` 的金额外推（2026-10-02 新增能力，此前无覆盖）
+# ---------------------------------------------------------------------------
+def test_dry_run_without_prices_omits_cost(monkeypatch, capsys, tmp_path: Path) -> None:
+    """没配单价时**不能**出现 `estimated_cost` —— 本系统不内置价目表。
+
+    编一个"看起来合理"的单价比不显示危险得多：它会一路被当成真实读数。
+    """
+    for k in list(os.environ):
+        if k.startswith("PM_PRICE_"):
+            monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
+    monkeypatch.setattr(sys, "argv", ["run.py", "--dry-run", "--task", "让AI分析销售数据"])
+    assert cli_main.main() == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "dry_run"
+    assert "estimated_cost" not in payload
+
+
+def test_dry_run_projects_cost_from_last_run(monkeypatch, capsys, tmp_path: Path) -> None:
+    """配了单价 + 有历史台账时，按**最近一次运行的实测均价**外推金额区间。
+
+    这里连"没有历史"的分支一起证明：先跑一次没有台账的（应无金额），
+    再放一份带 llm_usage 的运行记录（应出金额，且区间随调用数线性放大）。
+    """
+    monkeypatch.setenv("PM_PRICE_INPUT_PER_M", "1")
+    monkeypatch.setenv("PM_PRICE_OUTPUT_PER_M", "2")
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
+    argv = ["run.py", "--dry-run", "--task", "让AI分析销售数据"]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    # ① 没有任何历史运行 → 拿不到均价，不出金额
+    assert cli_main.main() == 0
+    first = json.loads(capsys.readouterr().out)
+    assert "estimated_cost" not in first, "没有历史台账时不该编出金额"
+
+    # ② 放一份真实形态的运行记录（10 次调用、各角色若干 token）
+    run = {
+        "run_id": "abcdef123456",
+        "task": "让AI分析销售数据",
+        "status": "passed",
+        "llm_usage": {
+            "target": {"calls": 6, "input_tokens": 100_000, "output_tokens": 50_000},
+            "evaluator": {"calls": 4, "input_tokens": 80_000, "output_tokens": 20_000},
+        },
+        "trace": [],  # 无 fake 通道 → 会被 history 当作真实运行
+    }
+    (tmp_path / "run_abcdef123456.json").write_text(
+        json.dumps(run, ensure_ascii=False), encoding="utf-8"
+    )
+
+    assert cli_main.main() == 0
+    second = json.loads(capsys.readouterr().out)
+    cost = second.get("estimated_cost")
+    assert cost, "有历史台账 + 有单价时必须给出金额外推"
+    assert cost["per_call"] > 0
+    # 区间下界 ≤ 上界，且与调用数同比例
+    assert cost["estimated_total_min"] <= cost["estimated_total_max"]
+    calls = second["estimated_llm_calls"]
+    assert cost["basis_calls"] == {"min": calls["min"], "max": calls["max"]}
+    assert "最近一次运行" in cost["basis"], "没说明外推依据是哪一次运行"
+
+
+def test_dry_run_survives_corrupt_history_file(monkeypatch, capsys, tmp_path: Path) -> None:
+    """历史记录损坏时**不许**把 `--dry-run` 整体搞崩。
+
+    金额外推是增强信息：它拿不到就该安静地不出，而不是让"提交前的预算决策"
+    这个入口直接失败（那会逼人绕过 dry-run 直接提交）。
+    """
+    monkeypatch.setenv("PM_PRICE_INPUT_PER_M", "1")
+    monkeypatch.setenv("PM_PRICE_OUTPUT_PER_M", "1")
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_path))
+    (tmp_path / "run_broken1234.json").write_text("{ 这不是 JSON", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["run.py", "--dry-run", "--task", "让AI分析销售数据"])
+    assert cli_main.main() == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "dry_run"
+    assert payload["estimated_llm_calls"]["min"] > 0
+
+
+def test_mermaid_returns_empty_string_when_drawing_fails(monkeypatch, caplog) -> None:
+    """`mermaid()` 的失败兜底：画不出来就返回空串，**不许**把调用方炸掉。
+
+    `--mermaid` 是文档里的"看拓扑"入口（`docs/agent-cli-guide.md` 与 README 都提）。
+    它挂在 langgraph 的 `draw_mermaid()` 上，而那条链路依赖可选的可视化组件；
+    拿不到时应该给出空串并留下告警日志，而不是让一个"看一眼图"的动作抛异常。
+    """
+    import logging
+
+    import pm.graph as graph_mod
+
+    def boom(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("draw_mermaid 不可用")
+
+    class _FakeGraph:
+        def draw_mermaid(self) -> str:
+            return boom()
+
+    class _FakeCompiled:
+        def get_graph(self) -> _FakeGraph:
+            return _FakeGraph()
+
+    monkeypatch.setattr(graph_mod, "build_graph", lambda checkpointer=None: _FakeCompiled())
+
+    with caplog.at_level(logging.WARNING, logger="pm.graph"):
+        out = graph_mod.mermaid()
+
+    assert out == "", "失败时必须返回空串（调用方按「没图」处理，不是崩）"
+    assert any("生成 mermaid 失败" in str(r.message) for r in caplog.records), (
+        "失败要留下告警日志，否则「图是空的」与「模板里真没内容」分不开"
+    )
+
+
+def test_mermaid_happy_path_returns_diagram(monkeypatch) -> None:
+    """正常路径返回图描述（与失败分支配成一对，防止"永远返回空串"也算通过）。"""
+    import pm.graph as graph_mod
+
+    class _FakeGraph:
+        def draw_mermaid(self) -> str:
+            return "graph TD; START-->clarify"
+
+    class _FakeCompiled:
+        def get_graph(self) -> _FakeGraph:
+            return _FakeGraph()
+
+    monkeypatch.setattr(graph_mod, "build_graph", lambda checkpointer=None: _FakeCompiled())
+    assert graph_mod.mermaid() == "graph TD; START-->clarify"
+
+
+def test_mermaid_real_build_is_stable() -> None:
+    """不打桩，真跑一次：证明真实依赖链能产出非空图（桩测不出依赖缺失）。"""
+    import pm.graph as graph_mod
+
+    out = graph_mod.mermaid()
+    assert out.strip(), "真实构建返回了空图 —— 说明 draw_mermaid 链路在当前环境不可用"
+    for node in ("clarify", "optimize", "evaluate", "report"):
+        assert node in out, f"图里缺少节点 {node}"
+
+
+# ---------------------------------------------------------------------------
+# library 的文本出口与损坏文件跳过（2026-10-02 补：此前只测了 JSON 出口）
+# ---------------------------------------------------------------------------
+def test_library_recommend_text_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--recommend` 不带 `--json` 时走人读分支：相似度 / 分数 / run_id / 任务都要在。
+
+    这条分支此前零覆盖，而它正是**人手动跑**时看到的东西
+    （`--json` 是给 Agent 的）。只测 JSON 出口 = 只测了一半用户。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    _asset_run(tmp_path, "hi", "帮我写一个 prompt 让 AI 分析销售数据", 9.0)
+
+    ns = argparse.Namespace(task_text="分析销售数据的需求描述", json=False)
+    assert cli_library._library_recommend(ns) == 0
+    out = capsys.readouterr().out
+    assert "新任务：分析销售数据的需求描述" in out
+    assert "相似资产 top-" in out
+    assert "hi" in out and "9.0" in out
+    # 相似度必须真的打出来（否则读者无法判断"为什么推荐这个"）
+    assert "相似度" in out
+
+
+def test_library_recommend_text_without_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """人读分支的"没有相似资产"也必须可读（空列表不能只打印一个空块）。"""
+    _patch_log_dir(monkeypatch, tmp_path)
+    _asset_run(tmp_path, "far", "翻译英文学术论文摘要", 9.0)
+    ns = argparse.Namespace(task_text="量子物理实验数据处理", json=False)
+    assert cli_library._library_recommend(ns) == 0
+    out = capsys.readouterr().out
+    # 无命中时走**提前返回**分支（不是打印一个 top-0 空列表）：
+    # 直接给一句可执行的结论，人读到就知道该按全新需求跑。
+    assert "没有相似" in out
+    assert "全新需求" in out
+
+
+def test_library_list_text_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`library` 不带 `--json` 的列表输出：状态 / 分数 / Δ基线 / 调用数 / 导出提示。
+
+    Δ 基线为 None 时要打 `-` 而不是崩（这是最容易出错的一处：
+    没有基线臂的运行 delta_vs_baseline 就是 None）。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    _asset_run(tmp_path, "withbase", "分析销售数据并给出改进建议", 9.0)
+    # 一条没有基线的资产：Δ 列必须走 None 分支
+    _write_run(
+        tmp_path,
+        "nobase",
+        task="分析销售数据并给出改进建议",
+        status="passed",
+        prompt="# 无基线版本",
+        aggregate={"avg_score": 8.0},
+        trace=[{"node": "test", "channel": "real"}],
+    )
+
+    assert cli_library._library_command([]) == 0
+    out = capsys.readouterr().out
+    assert "提示词资产" in out and "条" in out
+    assert "withbase" in out and "nobase" in out
+    assert "Δ基线" in out and "次调用" in out
+    assert "导出成品" in out, "列表末尾要给导出用法，否则读者不知道下一步怎么用"
+
+
+def test_library_list_text_mentions_all_flag_when_undelivered_hidden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """默认只列达标资产时，必须提示"加 --all 才显示未达标"。
+
+    不提示的话，用户会以为历史里根本没有未达标的运行 ——
+    而那些恰恰是最需要回头看的东西。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    _asset_run(tmp_path, "ok", "分析销售数据并给出改进建议", 9.0)
+    _asset_run(tmp_path, "undelivered", "分析销售数据并给出改进建议", 5.0, status="max_iterations")
+
+    assert cli_library._library_command([]) == 0
+    out = capsys.readouterr().out
+    assert "--all" in out, "隐藏了未达标交付却没告诉读者怎么看到它们"
+
+
+def test_library_list_with_all_flag_shows_undelivered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """加了 `--all` 要真的列出来（否则那个提示是空头承诺）。"""
+    _patch_log_dir(monkeypatch, tmp_path)
+    _asset_run("ok") if False else _asset_run(tmp_path, "ok", "分析销售数据并给出改进建议", 9.0)
+    _asset_run(tmp_path, "undelivered", "分析销售数据并给出改进建议", 5.0, status="max_iterations")
+
+    assert cli_library._library_command(["--all"]) == 0
+    out = capsys.readouterr().out
+    assert "undelivered" in out
+    # 加了 --all 之后就不该再提示"加 --all 才显示"
+    assert "加 --all 才显示" not in out
+
+
+def test_library_list_empty_text_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """空资产库的人读出口要给出下一步（而不是只打印一个空标题）。"""
+    _patch_log_dir(monkeypatch, tmp_path)
+    assert cli_library._library_command([]) == 0
+    out = capsys.readouterr().out
+    # 空库同样走提前返回：给一句"跑几个真实任务后会积累起来"，
+    # 而不是打印一个 "0 条：" 的空标题（后者让人以为命令坏了）。
+    assert "没有匹配的提示词" in out
+    assert "积累" in out
+
+
+@pytest.mark.parametrize("bad_name", ["run_broken1.json", "run_broken2.json"])
+def test_library_survives_corrupt_run_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    bad_name: str,
+) -> None:
+    """单个 run 文件损坏时**跳过它**，不能让整条命令崩掉。
+
+    仓库文档明确记着"不能让一颗坏牙毁掉整份体检"（`history` 同款处理）。
+    三个扫描点（recommend / export / list）各自都有这个 try/except，此处一并覆盖：
+    损坏文件 + 一个正常资产同存时，正常资产仍要被列出来。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    (tmp_path / bad_name).write_text("{ 这不是合法 JSON", encoding="utf-8")
+    # 另一种坏法：能读但 JSON 结构不对（顶层不是对象）
+    (tmp_path / "run_broken3.json").write_text('["数组不是对象"]', encoding="utf-8")
+    _asset_run(tmp_path, "healthy", "分析销售数据并给出改进建议", 9.0)
+
+    assert cli_library._library_command([]) == 0
+    out = capsys.readouterr().out
+    assert "healthy" in out, "坏文件把正常资产也一起带没了"
+
+
+def test_library_export_skips_corrupt_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--export` 扫描时同样要跳过坏文件（第三处 try/except）。"""
+    _patch_log_dir(monkeypatch, tmp_path)
+    (tmp_path / "run_badbadbad.json").write_text("不是 JSON", encoding="utf-8")
+    _asset_run(tmp_path, "goodone", "分析销售数据并给出改进建议", 9.0)
+    out_path = tmp_path / "exported.md"
+    assert cli_library._library_command(["--export", "goodone", "--out", str(out_path)]) == 0
+    assert out_path.exists(), "坏文件挡在了导出前面"
+    assert out_path.read_text(encoding="utf-8").strip()
+
+
+def test_library_recommend_skips_corrupt_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--recommend` 扫描时跳过坏文件（第一处 try/except），正常资产仍被推荐。"""
+    _patch_log_dir(monkeypatch, tmp_path)
+    (tmp_path / "run_badbadbad.json").write_text("不是 JSON", encoding="utf-8")
+    _asset_run(tmp_path, "goodrec", "帮我写一个 prompt 让 AI 分析销售数据", 9.0)
+    ns = argparse.Namespace(task_text="分析销售数据的需求描述", json=True)
+    assert cli_library._library_recommend(ns) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [r["run_id"] for r in payload["recommendations"]] == ["goodrec"]
+
+
+def test_library_command_routes_recommend_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--recommend` 必须经**子命令入口**分发到推荐实现（不只是直接调内部函数）。
+
+    我前面几条推荐测试都是直接调 `_library_recommend`，所以"入口那一行分发"
+    一直没被走到 —— 而它坏了的话，用户敲 `library --recommend` 会静默落到
+    默认的列表分支（看到一堆资产列表，而不是推荐结果），且不报任何错。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    _asset_run(tmp_path, "viaroute", "帮我写一个 prompt 让 AI 分析销售数据", 9.0)
+    assert (
+        cli_library._library_command(["--recommend", "--task-text", "分析销售数据", "--json"]) == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert [r["run_id"] for r in payload["recommendations"]] == ["viaroute"]
+
+
+def test_library_command_routes_export_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--export` 同样要经入口分发（且坏文件不挡路）。"""
+    _patch_log_dir(monkeypatch, tmp_path)
+    # 坏文件放在前面（按 mtime 排序会先扫到它）→ 覆盖 export 扫描里的跳过分支
+    (tmp_path / "run_zzz_broken.json").write_text('{"status": "passed"', encoding="utf-8")
+    _asset_run(tmp_path, "viaroute2", "分析销售数据并给出改进建议", 9.0)
+    out_path = tmp_path / "o.md"
+    assert cli_library._library_command(["--export", "viaroute2", "--out", str(out_path)]) == 0
+    assert out_path.exists()
+
+
+def test_library_list_skips_corrupt_files_but_keeps_valid_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """列表扫描遇到坏文件要跳过（覆盖 list 那一处的 `continue`），正常资产照常列出。"""
+    _patch_log_dir(monkeypatch, tmp_path)
+    (tmp_path / "run_brk_a.json").write_text("不是 JSON", encoding="utf-8")
+    (tmp_path / "run_brk_b.json").write_text('"字符串也是合法 JSON"', encoding="utf-8")
+    _asset_run(tmp_path, "survivor", "分析销售数据并给出改进建议", 9.0)
+    assert cli_library._library_command([]) == 0
+    out = capsys.readouterr().out
+    assert "survivor" in out
+
+
+def test_load_run_file_rejects_every_bad_shape(tmp_path: Path) -> None:
+    """`_load_run_file` 的三种坏法都要返回 None（这是三处扫描点共用的唯一判据）。
+
+    写成表驱动的单点测试：以后有人扩了"什么算坏文件"，这里是唯一需要加用例的地方。
+    """
+    good = tmp_path / "good.json"
+    good.write_text('{"status": "passed"}', encoding="utf-8")
+    assert cli_library._load_run_file(good) == {"status": "passed"}
+
+    missing = tmp_path / "__不存在__.json"
+    assert cli_library._load_run_file(missing) is None
+
+    not_json = tmp_path / "not_json.json"
+    not_json.write_text("{ 这不是 JSON", encoding="utf-8")
+    assert cli_library._load_run_file(not_json) is None
+
+    # JSON 合法但顶层不是对象 —— 这一种此前会让整个命令崩掉（实测）
+    wrong_shape = tmp_path / "wrong_shape.json"
+    wrong_shape.write_text('["数组不是对象"]', encoding="utf-8")
+    assert cli_library._load_run_file(wrong_shape) is None
+
+    scalar = tmp_path / "scalar.json"
+    scalar.write_text("12345", encoding="utf-8")
+    assert cli_library._load_run_file(scalar) is None
+
+    # 非 UTF-8 字节：读的时候就抛 UnicodeDecodeError（同样要算坏文件）
+    bad_bytes = tmp_path / "bad_bytes.json"
+    bad_bytes.write_bytes(b"\xff\xfe\x00\x01not-utf8")
+    assert cli_library._load_run_file(bad_bytes) is None
+
+
+def test_library_recommend_filters_non_passed_and_empty_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """推荐扫描的两个过滤闸：非 passed、无正文。
+
+    它们都必须**真的挡住**对应资产，否则推荐里会出现"未达标输出"或
+    "没有正文的空壳" —— 前者借鉴了会带偏，后者根本无从借鉴。
+    与 `test_library_recommend_ranks_and_dedups` 里那条 demo 排除（fake 通道）
+    合起来，正好把推荐扫描的三道前置闸各走一遍。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    _asset_run(tmp_path, "good", "帮我写一个 prompt 让 AI 分析销售数据", 9.0)
+    # 闸①：非 passed（未达标交付不做参考）
+    _asset_run(
+        tmp_path,
+        "undelivered",
+        "帮我写一个 prompt 让 AI 分析销售数据",
+        9.5,
+        status="max_iterations",
+    )
+    # 闸②：passed 但正文为空（空壳，无从借鉴）
+    _write_run(
+        tmp_path,
+        "emptyprompt",
+        task="帮我写一个 prompt 让 AI 分析销售数据",
+        status="passed",
+        prompt="   ",
+        aggregate={"avg_score": 9.9},
+        trace=[{"node": "test", "channel": "real"}],
+    )
+
+    ns = argparse.Namespace(task_text="分析销售数据的需求描述", json=True)
+    assert cli_library._library_recommend(ns) == 0
+    payload = json.loads(capsys.readouterr().out)
+    ids = [r["run_id"] for r in payload["recommendations"]]
+    assert ids == ["good"], f"未达标/空正文的资产混进了推荐：{ids}"
+
+
+def test_library_list_skips_non_terminal_and_empty_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """列表扫描的准入闸：非终态状态、空正文，都要被挡在外面。
+
+    运行中途失败的记录（status=running）与空壳交付混进资产库，
+    会让人误以为"历史里有这版提示词可用"。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    _asset_run(tmp_path, "keepme", "分析销售数据并给出改进建议", 9.0)
+    _write_run(
+        tmp_path,
+        "running",
+        task="分析销售数据并给出改进建议",
+        status="running",
+        prompt="# 还没跑完的中间产物",
+        aggregate={"avg_score": None},
+        trace=[{"node": "test", "channel": "real"}],
+    )
+    _write_run(
+        tmp_path,
+        "emptybody",
+        task="分析销售数据并给出改进建议",
+        status="passed",
+        prompt="  \n ",
+        aggregate={"avg_score": 9.0},
+        trace=[{"node": "test", "channel": "real"}],
+    )
+
+    assert cli_library._library_command(["--all"]) == 0
+    out = capsys.readouterr().out
+    assert "keepme" in out
+    assert "running" not in out, "非终态记录混进了资产库"
+    assert "emptybody" not in out, "空正文记录混进了资产库"
+
+
+def test_library_export_skips_bad_json_shapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """export 扫描里的坏文件跳过（第三处 `_load_run_file` 调用点）。
+
+    这里特意放**结构不对但 JSON 合法**的那种（`[...]`）——
+    它正是 2026-10-02 实测会让整个命令崩掉的形态；
+    只防 `JSONDecodeError` 的实现会在这里抛 AttributeError。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    # ⚠️ 顺序决定这条测试有没有测到东西：扫描按 mtime **倒序**，
+    # 且一旦命中目标 run_id 就 `break`。所以坏文件必须**排在正常文件之前**
+    # （即 mtime 更新），否则扫描先撞上正常文件直接跳出，跳过分支永远走不到
+    # —— 我第一版就是这么写的，覆盖率卡在 99% 不动。
+    _asset_run(tmp_path, "expok", "分析销售数据并给出改进建议", 8.0)
+    import time as _time
+
+    _time.sleep(0.05)
+    (tmp_path / "run_shape_bad.json").write_text('["不是对象"]', encoding="utf-8")
+    (tmp_path / "run_text_bad.json").write_text("根本不是 JSON", encoding="utf-8")
+
+    out = tmp_path / "x.md"
+    assert cli_library._library_command(["--export", "expok", "--out", str(out)]) == 0
+    assert "run_id: expok" in out.read_text(encoding="utf-8")
