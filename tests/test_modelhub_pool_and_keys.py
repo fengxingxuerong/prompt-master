@@ -128,7 +128,11 @@ def test_hot_reload_keeps_serving_and_exposes_the_error(hub: P.ModelHub, cfg_fil
     看得见的状态，不能悄悄用着三天前的池。
     """
     cfg_file.write_text("{ broken", encoding="utf-8")
-    time.sleep(0.01)  # 让 mtime 确实变化
+    # 不用 time.sleep 赌 mtime 跨格：windows runner 的文件系统时间戳粒度比本机更粗
+    # （CI 两连红实证，本地怎么都复现不出），10ms 的盲睡赌不赢。与下方 utime 先例
+    # 同款手法——显式把 mtime 拨到未来，让非强制热重载的 mtime 门**确定性**触发。
+    future = time.time() + 10
+    os.utime(cfg_file, (future, future))
     hub.list_models()  # 读一次，触发非强制热重载
     st = hub.status()
     assert st["last_config_error"], "热重载失败必须能从 status() 看到"
