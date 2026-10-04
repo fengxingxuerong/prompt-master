@@ -209,7 +209,11 @@ def mock_node(state: State) -> dict[str, Any]:
     # 注入用例的校验码由代码追加（模型自拟的 marker 高频词多、判定歧义大）
     codes = _forge_injection_markers(cases, scenarios, markers, state.get("run_id"))
 
-    patch = {  # noqa: avoid no-redef——首分支已注解过 dict[str, Any]
+    # `patch` 在上面的分支里已按 dict[str, Any] 注解过，这里沿用同一写法。
+    # 原先这行挂着一个 `noqa` 指令，但冒号后写的是散文而不是规则码，ruff 会把整条
+    # 指令当作无效直接忽略（只 warn、不报违规）——也就是说那个"豁免"从未生效过。
+    # 2026-10-04 改成普通注释；注意这里不能再出现 "noqa" 冒号形式，否则又会被解析成指令。
+    patch = {
         "test_cases": cases,
         # 场景与劫持标记随用例一起进 state：test_node 要按场景做注入存活检测
         "case_scenarios": scenarios[: len(cases)],

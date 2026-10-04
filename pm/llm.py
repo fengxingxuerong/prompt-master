@@ -988,9 +988,7 @@ def _schema_skeleton(model: type[BaseModel], indent: int = 0) -> str:
             lines.append(f'{child_pad}"{name}": {inner}')
         elif anno is bool:
             lines.append(f'{child_pad}"{name}": false')
-        elif anno is int:
-            lines.append(f'{child_pad}"{name}": 0')
-        elif anno is float:
+        elif anno is int or anno is float:
             lines.append(f'{child_pad}"{name}": 0')
         else:
             lines.append(f'{child_pad}"{name}": ""')

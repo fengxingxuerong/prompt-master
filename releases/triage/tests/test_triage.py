@@ -141,7 +141,7 @@ def test_ledger_traceability(client):
 # ---------------------------------------------------------------------------
 # v1.2 新增：异步提交 + SSE 进度（G-07/G-12）
 # ---------------------------------------------------------------------------
-def test_async_submit_returns_immediately(client, monkeypatch):
+def test_async_submit_returns_immediately(client):
     """异步模式：立即返回 running，后台完成后轮询可见 done。"""
     import time as _t
     r = client.post("/api/reviews", json={"subject": "异步单", "body": "不等结果"})

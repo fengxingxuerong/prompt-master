@@ -480,7 +480,7 @@ def test_optimize_wait_returns_report_on_terminal_status(monkeypatch):
     assert any("/api/report/ok123" in u for u in urls)
 
 
-def test_module_entry_actually_starts_the_server(tmp_path):
+def test_module_entry_actually_starts_the_server():
     """`python -m pm.mcp_server` 这条命令必须真的起 stdio 服务。
 
     这是 MCP 客户端的**真实挂载方式**（`{"command":"python","args":["-m","pm.mcp_server"]}`），

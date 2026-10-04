@@ -9,7 +9,7 @@
 
 | 层次 | 命令 | 证明 | **不**证明 |
 |---|---|---|---|
-| 单元测试 | `pytest tests/ -q`（1246 项，`--collect-only` 计数 2026-10-02 原稿改进模式轮 +36、同日臂感知轮 +3、同日差分/成本轮 +46、同日 CI 门禁轮 +39、同日节点提示词契约轮 +22、同日 lint 范围轮 +3、同日 live 工作流轮 +10、同日 Environment 审批轮 +2、同日测试补强轮 +21、同日 CLI 分发轮 +18、同日 graph 补齐轮 +10、同日 MCP 补齐轮 +8、同日 library 补齐轮 +17、同日 calibrate 补齐轮 +29、同日薄弱点清单轮 +2、同日纯逻辑桩轮 +17、同日降级兜底桩轮 +18、同日 10-03 卡死机修复轮 +19、同日 10-03 锚点出处轮 +11（`tests/test_call_budget.py` / `tests/test_anchor_provenance.py`，活体 1246）；这条数由 `test_test_count_copies_match_the_live_collection` 对着活体收集钉，抄在三处就要三处同改） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀 / 约束超载 / 定界符配平）、null 容错、演示模式隔离与产物落盘、**服务层限流**（滑动窗口 / 429+Retry-After / 赛马按任务数计费）、**两轮澄清提问语义**、**MockGen 场景覆盖校验（含注入用例）**、**用量台账**、**入口编码兜底**、**节点提示词结构契约**、**控制台渲染 XSS 防线与安全响应头**、**任务记录存储层**（内存/SQLite 行为一致 + 跨实例可见 + 并发写不丢账）、**REST API 七个路由与 404/422/401 分支**、**CLI 入参护栏与 `--fast` 快速档**、**LLM 限流退避/降级通道/记账分支**、**缓存落盘与淘汰异常分支**、**SqliteCache 多进程共享缓存**、**评委输出形状容错**（对象数组 issues / JSON 字符串 / 缺尾键 / null 数组 / **键名被按 description 同义改写**，都不该作废整条评估）、**取证先于打分的字段序**、**双向盲评与位置偏置计数**、**fixed–broken 逐条得失记账**、**对比切片与高方差用例优先**、**Δ 的基础设施有效性闸**（零有效样本报「不可采信」）、**注入存活按用例计数与代码派生校验码**、**评委同源检测**、**仲裁分数出处披露**（N/M 例出自仲裁者一人时报告必须说不，别让读者以为那是双评委共识）、**自报分与加权分相等时披露探测器失效**、**满分声明告警**（五维全 ≥9.5 却仍列 issue／或零 issue，只提醒不否决）、**评委复现性 `--repeat`**（绕缓存重复打；绕缓存不许整体替换 CallHook，否则自测会打真端点）、**仲裁失败回退仍记全出处账**（`conservative` 也要带 `judge_scores` 与分差）、**仲裁 prompt 的「给看分数」与「要求忽略」必须共生**、**出处字面量跨 judge/report 一致**（改了值不许让那行静默失效）、**评估缓存的 rubric 指纹**、**校准账本的口径指纹**、**净增量对退化基准不失真**、**`releases/*/tests` 里每一套都必须同时出现在 CI 两个 job 与下面的门禁块**、**重试层叠收敛与墙钟预算**（SDK 隐式重试被钉成 0、超时/5xx 按实测文本与状态码分类、`PM_CALL_BUDGET` 在每次真实发起前检查并把单发 timeout 夹进剩余预算；端点级实证：装死端点收到的请求数 == 我方可见重试数） | 任何与模型能力相关的结论 |
+| 单元测试 | `pytest tests/ -q`（1275 项，`--collect-only` 计数 2026-10-02 原稿改进模式轮 +36、同日臂感知轮 +3、同日差分/成本轮 +46、同日 CI 门禁轮 +39、同日节点提示词契约轮 +22、同日 lint 范围轮 +3、同日 live 工作流轮 +10、同日 Environment 审批轮 +2、同日测试补强轮 +21、同日 CLI 分发轮 +18、同日 graph 补齐轮 +10、同日 MCP 补齐轮 +8、同日 library 补齐轮 +17、同日 calibrate 补齐轮 +29、同日薄弱点清单轮 +2、同日纯逻辑桩轮 +17、同日降级兜底桩轮 +18、同日 10-03 卡死机修复轮 +19、同日 10-03 锚点出处轮 +11（`tests/test_call_budget.py` / `tests/test_anchor_provenance.py`，活体 1246）、同日 10-04 工程质量轮 +5（`tests/test_complexity_ratchet.py` 1 条 + 脏 `test_runs` 让报告整份崩掉的回归 4 例，活体 1251）、同日 10-04 测试质量轮 +24（`tests/test_modelhub_contention_paths.py` 13 条争用/退避分支、CLI 入口拆细后补的 10 条、死夹具守卫 1 条，活体 1275）；这条数由 `test_test_count_copies_match_the_live_collection` 对着活体收集钉，抄在三处就要三处同改） | 评分公式、短板拦截、**用例数不足不判达标**、JSON 解析、路由、降级重试、注入隔离与定界符越界、双评委合并/仲裁、**单评委结果不污染双评委缓存**、并发排序、缓存命中/淘汰与**配置指纹**、提示词质量门（含领域词不误杀 / 约束超载 / 定界符配平）、null 容错、演示模式隔离与产物落盘、**服务层限流**（滑动窗口 / 429+Retry-After / 赛马按任务数计费）、**两轮澄清提问语义**、**MockGen 场景覆盖校验（含注入用例）**、**用量台账**、**入口编码兜底**、**节点提示词结构契约**、**控制台渲染 XSS 防线与安全响应头**、**任务记录存储层**（内存/SQLite 行为一致 + 跨实例可见 + 并发写不丢账）、**REST API 七个路由与 404/422/401 分支**、**CLI 入参护栏与 `--fast` 快速档**、**LLM 限流退避/降级通道/记账分支**、**缓存落盘与淘汰异常分支**、**SqliteCache 多进程共享缓存**、**评委输出形状容错**（对象数组 issues / JSON 字符串 / 缺尾键 / null 数组 / **键名被按 description 同义改写**，都不该作废整条评估）、**取证先于打分的字段序**、**双向盲评与位置偏置计数**、**fixed–broken 逐条得失记账**、**对比切片与高方差用例优先**、**Δ 的基础设施有效性闸**（零有效样本报「不可采信」）、**注入存活按用例计数与代码派生校验码**、**评委同源检测**、**仲裁分数出处披露**（N/M 例出自仲裁者一人时报告必须说不，别让读者以为那是双评委共识）、**自报分与加权分相等时披露探测器失效**、**满分声明告警**（五维全 ≥9.5 却仍列 issue／或零 issue，只提醒不否决）、**评委复现性 `--repeat`**（绕缓存重复打；绕缓存不许整体替换 CallHook，否则自测会打真端点）、**仲裁失败回退仍记全出处账**（`conservative` 也要带 `judge_scores` 与分差）、**仲裁 prompt 的「给看分数」与「要求忽略」必须共生**、**出处字面量跨 judge/report 一致**（改了值不许让那行静默失效）、**评估缓存的 rubric 指纹**、**校准账本的口径指纹**、**净增量对退化基准不失真**、**`releases/*/tests` 里每一套都必须同时出现在 CI 两个 job 与下面的门禁块**、**重试层叠收敛与墙钟预算**（SDK 隐式重试被钉成 0、超时/5xx 按实测文本与状态码分类、`PM_CALL_BUDGET` 在每次真实发起前检查并把单发 timeout 夹进剩余预算；端点级实证：装死端点收到的请求数 == 我方可见重试数） | 任何与模型能力相关的结论 |
 | 拓扑自检 | `python run.py --selftest` | 图能跑通、状态正确累加、迭代终止与兜底正确、双评委仲裁路径 | 优化效果（用的是假后端） |
 | 真实 HTTP e2e | `bash examples/run_e2e_stub.sh` / `examples/run_e2e_stub.ps1` | 真实客户端 → HTTP → 响应解析 → 校验链路通畅；两条结构化输出通道均可用；**所有角色端点都被锁在桩上** | 优化效果（桩服务返回固定内容） |
 | 提示词回归评测 | `python eval_prompts.py`（离线，零成本；CI 两个 job 都跑）/ `--live`（真实调用，**永不进 CI**） | **节点提示词自身的结构契约**：渲染后无占位符残留、`<安全约束>` 块齐全、各节点专项块存在（optimizer 的自检清单、evaluator 的先取证、reviser 的不得弱化）。判据是**绝对**的——"模板是否残破" | 提示词行为与效果（`--live` 才有行为校验，且只证结构不证质量）；也不拦"这次改动新引入了什么"（那是 gate 的事） |
@@ -27,6 +27,11 @@ ruff check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
 ruff format --check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
 mypy pm/ run.py run_server.py eval_prompts.py
 python -m pytest tests/ -q --cov=pm --cov-report=term-missing     # 覆盖率地板见 pyproject
+# 复杂度也在这条 pytest 里：tests/test_complexity_ratchet.py 用 ruff 自己的 mccabe 计数
+# 逐函数比对台账 tests/complexity_budget.json —— 台账必须与实测**逐字相等**：
+# 新长出来的复杂函数要显式登记（并说明为什么先留着），拆小的收益必须当场回收进台账。
+# 拆完函数后重新生成：python tests/test_complexity_ratchet.py --rewrite
+# （只手工执行 —— 测试自己从不写被跟踪文件，否则下面那条 git diff 检查会把它自己抓红）
 python -m coverage report --include="*/modelhub/*" --fail-under=82  # 网关那条分项线
 python -m pytest releases/lobster/tests/ -q
 python -m pytest releases/taskboard/tests/ -q
@@ -79,13 +84,26 @@ python eval_prompts.py            # 节点提示词结构契约（零调用；�
   - 其余（切换 / 瞬时重试 / 断路器记分 / 台账记账）已由 `tests/test_modelhub_pool_chat.py`
     用假上游覆盖（pool 61% → 85%）。
 
-  **C. 其余 `pm/` 文件**
-  - 无低于 90% 的文件（2026-10-02 逐轮补完 `graph.py` / `mcp_server.py` /
-    `cli/library.py` / `cli/calibrate.py` / `modelhub/server.py` 到 100%）。
+  **C. 其余 `pm/` 文件（2026-10-04 逐文件重测，上一版写的"无低于 90% 的文件"已过期）**
+  - 低于 90% 的只剩 `pm/calibration.py` **89%**（56 条）与 `pm/modelhub/streaming.py` **89%**（11 条）。
+    calibration 的大块是**文件末尾那段 CLI `__main__` 入口**（约四十行，只有 `python -m pm.calibration` 才走）
+    与零散的 `except` 兜底；
+    streaming 的是上游收尾的几条 `except OSError`。两类**都能用假上游/桩补**，
+    不是"要活端点"那一类，别照上一版的结论放弃。
+  - `cli/history.py` 90%、`cli/check.py` 93%、`modelhub/usage_store.py` 93%、`memory.py` 94%。
+  - `pm/modelhub/vkeys.py` 88% → **98%**（2026-10-04，`tests/test_modelhub_contention_paths.py`）。
+    剩 4 条是 `_lock_impl` / `_try_lock` / `_unlock` 里**只在 POSIX 上执行**的分支
+    （Windows 走 `msvcrt`，Linux CI 走 `fcntl`）—— 这是平台分割，不是缺口；
+    在任一台机器上"补到 100%"都是做不到的，别把它写进待办。
 
-  > **结论**：`pm/` 里**只剩 `pm/modelhub/pool.py` 这一处**（45 条语句），
-  > 且它的主体是真 `urllib` 段 —— 要活 socket 或"会按需失败的 socket 桩"。
-  > **不建议为覆盖率数字专门去做**；改到那段代码时顺手补即可。
+  > **结论**：`pm/` 里真正需要"活 socket 或会按需失败的 socket 桩"才能补的仍只有
+  > `pm/modelhub/pool.py` 的 45 条（主体是 331-367 的真 `urllib` 段），**不建议为覆盖率数字专门去做**；
+  > 改到那段代码时顺手补即可。其余（calibration / streaming）是"补得起但还没补"。
+  >
+  > ⚠️ 一条指标层面的教训（2026-10-04）：同一份代码连跑两遍，覆盖率曾是 95.69% / 95.72%，
+  > 差值全部来自 `vkeys.py` 的退避分支**只被真竞态撞上才覆盖**。补成确定性用例之后
+  > 两轮逐文件 miss 数完全一致（96.22%）。**拿覆盖率做前后对比之前，先确认它是可复现的**，
+  > 否则你比较的是噪声。
 
 
 

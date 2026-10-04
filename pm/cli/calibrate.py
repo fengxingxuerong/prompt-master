@@ -7,6 +7,7 @@ import hashlib
 import json
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -223,6 +224,22 @@ def _apply_score_form(samples_path: Path, form_path: Path) -> int:
 
 
 def _calibrate_command(argv: list[str]) -> int:
+    ns = _build_calibrate_parser().parse_args(argv)
+
+    # 两个"只动表、不花钱"的入口先分流：它们不需要 Key、不调模型，
+    # 也不该被后面的样本加载/校准流程牵进去
+    if ns.make_form:
+        return _table_only(_make_score_form, Path(ns.samples), Path(ns.make_form), "生成打分表失败")
+    if ns.apply_scores:
+        return _table_only(
+            _apply_score_form, Path(ns.samples), Path(ns.apply_scores), "回填打分表失败"
+        )
+    if ns.aggregate:
+        return _calibrate_aggregate(ns)
+    return _calibrate_run(ns)
+
+
+def _build_calibrate_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="run.py calibrate")
     ap.add_argument(
         "--judge",
@@ -271,57 +288,57 @@ def _calibrate_command(argv: list[str]) -> int:
         help="不跑校准：只把账本里同 judge+协议的最近几轮合并成带 CI 的跨轮读数"
         "（纯账本重算，零调用不花钱；口径见 docs/evaluation.md §十四）",
     )
-    ns = ap.parse_args(argv)
+    return ap
 
-    # 两个"只动表、不花钱"的入口先分流：它们不需要 Key、不调模型，
-    # 也不该被后面的样本加载/校准流程牵进去
-    if ns.make_form:
+
+def _table_only(op: Any, samples_path: Path, target: Path, label: str) -> int:
+    """打分表两侧操作共用的失败出口：这类操作只动表，坏了就是配置错，不该抛栈。"""
+    try:
+        result: int = op(samples_path, target)
+        return result
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        print(f"{label}：{e}", file=sys.stderr)
+        return EXIT_CONFIG
+
+
+def _calibrate_aggregate(ns: argparse.Namespace) -> int:
+    from .. import calibration as _calib
+
+    history_path = _calib_history()
+    ledger: list[dict[str, Any]] = []
+    if history_path.exists():
         try:
-            return _make_score_form(Path(ns.samples), Path(ns.make_form))
-        except (OSError, ValueError, json.JSONDecodeError) as e:
-            print(f"生成打分表失败：{e}", file=sys.stderr)
+            ledger = json.loads(history_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            msg = f"账本损坏，无法聚合：{history_path}"
+            _calib_error(ns, msg)
             return EXIT_CONFIG
-    if ns.apply_scores:
-        try:
-            return _apply_score_form(Path(ns.samples), Path(ns.apply_scores))
-        except (OSError, ValueError, json.JSONDecodeError) as e:
-            print(f"回填打分表失败：{e}", file=sys.stderr)
-            return EXIT_CONFIG
-    if ns.aggregate:
-        from .. import calibration as _calib
+    eff_mode = ns.scoring_mode or scoring_mode()
+    agg = _calib.aggregate_history(ledger, mode=eff_mode, judge=ns.judge)
+    if agg is None:
+        _calib_error(
+            ns,
+            f"账本里没有 {ns.judge} × {eff_mode} 口径、带逐锚点明细的记录可聚合"
+            "（旧记录只有轮级聚合数，重算不出逐锚点分布）。",
+        )
+        return EXIT_CONFIG
+    if ns.json:
+        print(json.dumps({"aggregate": agg}, ensure_ascii=False, indent=2))
+    else:
+        print(_calib.render_aggregate(agg))
+    return 0
 
-        history_path = _calib_history()
-        ledger: list[dict[str, Any]] = []
-        if history_path.exists():
-            try:
-                ledger = json.loads(history_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                msg = f"账本损坏，无法聚合：{history_path}"
-                if ns.json:
-                    print(json.dumps({"error": msg}, ensure_ascii=False))
-                else:
-                    print(msg, file=sys.stderr)
-                return EXIT_CONFIG
-        eff_mode = ns.scoring_mode or scoring_mode()
-        agg = _calib.aggregate_history(ledger, mode=eff_mode, judge=ns.judge)
-        if agg is None:
-            msg = (
-                f"账本里没有 {ns.judge} × {eff_mode} 口径、带逐锚点明细的记录可聚合"
-                "（旧记录只有轮级聚合数，重算不出逐锚点分布）。"
-            )
-            # README 的约定：--json 时 stdout 恰好一个 JSON 对象——错误路径也不例外，
-            # 否则 MCP 的 _run_cli_json 会在 json.loads("") 上炸出无关错误。
-            if ns.json:
-                print(json.dumps({"error": msg}, ensure_ascii=False))
-            else:
-                print(msg, file=sys.stderr)
-            return EXIT_CONFIG
-        if ns.json:
-            print(json.dumps({"aggregate": agg}, ensure_ascii=False, indent=2))
-        else:
-            print(_calib.render_aggregate(agg))
-        return 0
 
+def _calib_error(ns: argparse.Namespace, msg: str) -> None:
+    # README 的约定：--json 时 stdout 恰好一个 JSON 对象——错误路径也不例外，
+    # 否则 MCP 的 _run_cli_json 会在 json.loads("") 上炸出无关错误。
+    if ns.json:
+        print(json.dumps({"error": msg}, ensure_ascii=False))
+    else:
+        print(msg, file=sys.stderr)
+
+
+def _calibrate_run(ns: argparse.Namespace) -> int:
     from .. import calibration as calib
 
     try:
@@ -333,12 +350,7 @@ def _calibrate_command(argv: list[str]) -> int:
     # 采了 45 条、实际用 11 条，如果不印这一行，读输出的人会以为 45 条全进了分母。
     pending = getattr(samples, "pending", []) or []
     if not samples:
-        hint = (
-            f"（{len(pending)} 条候选全部未人工确认——填 human_score 并把 confirmed 改成 true 再跑）"
-            if pending
-            else "（先跑 python -m pm.calibration --write-template 生成模板，并人工核对 human_score）"
-        )
-        print(f"样本为空：{ns.samples}{hint}", file=sys.stderr)
+        print(_empty_samples_message(ns, pending), file=sys.stderr)
         return EXIT_CONFIG
     if pending:
         print(calib.render_provenance(len(samples) + len(pending), len(pending)), file=sys.stderr)
@@ -356,167 +368,237 @@ def _calibrate_command(argv: list[str]) -> int:
     # 在 bias/MAE/r 上可以看着完全正常（抖动甚至摊平 MAE），但它会让双评委分差、
     # 仲裁触发率与 Δ 的噪声带全部失去含义。绕缓存重复打，否则极差恒为 0。
     if ns.repeat >= 2:
-        rep = calib.repeatability(samples, ns.judge, ns.repeat, mode)
-        analysis["repeatability"] = rep
+        analysis["repeatability"] = calib.repeatability(samples, ns.judge, ns.repeat, mode)
 
-    # 漂移对比：只在**同口径**的历史记录之间比。
-    # 旧写法是"与上一条同角色记录比"，但换评委模型、改评分提示词（锚点/权威顺序）
-    # 都会让 MAE/bias 阶跃——那不是评委漂移，是我们动了尺子；2026-09-18 就把一次
-    # 有意的锚点收紧（MAE 1.07→0.37）读成了"漂移"。所以每条记录额外存三个指纹：
-    # 评委模型名 + 评分 rubric 指纹 + 锚点集指纹，比较时只认三者都与本次一致的最近一条。
-    history: list[dict[str, Any]] = []
-    history_path = _calib_history()
-    if history_path.exists():
-        try:
-            history = json.loads(history_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            history = []  # 历史损坏按空账本处理，本次照常记录
+    history = _load_history()
     now_model, now_rubric, now_anchors = _calib_fingerprints(ns.judge, samples, mode)
-    now_n = int(analysis["n"])
-
-    def _comparable(h: dict[str, Any]) -> bool:
-        """这条历史记录能不能当基线。
-
-        **缺指纹的老记录按可比处理**（账本里真有：加这两个字段之前的记录就没有）——
-        把它们判成"口径不同"等于在此后几轮里静默停掉漂移检测，比误报更糟。
-        只有显式记着不同指纹的，才认定是尺子变了。
-
-        锚点条数是那条兜底的例外：老记录虽然没指纹，`n` 一直都在账本里，
-        所以"6 条的手写锚点 vs 11 条含真实跑批锚点"这种换考卷能被抓出来，
-        而不是被当成评委漂移。
-
-        协议（mode）在两个分支之外单独判：老记录没有这个字段，缺省就是印象式；
-        但判定式跑出来的分与印象式的分不是同一个量，混在一起比"漂移"是自欺。
-        """
-        if h.get("mode", "impression") != mode:
-            return False
-        hm, hr, ha = h.get("model"), h.get("rubric"), h.get("anchors")
-        if not (hm or hr or ha):
-            return h.get("n") in (None, now_n)
-        return (
-            hm == now_model
-            and (not hr or hr == now_rubric)
-            and (not ha or ha == now_anchors)
-            and now_n == h.get("n", now_n)
-        )
-
-    def _same_cohort(h: dict[str, Any]) -> bool:
-        return h.get("judge") == ns.judge and _comparable(h)
-
-    prev = next((h for h in reversed(history) if _same_cohort(h)), None)
-    # 最近一条同角色记录：只在"没有可比基线、但有不可比记录"时才用来说明原因
-    changed = next(
-        (h for h in reversed(history) if h.get("judge") == ns.judge and not _comparable(h)),
-        None,
-    )
-    drift: dict[str, Any] | None = None
-    if prev is not None:
-        d_bias = round(float(analysis["bias"]) - float(prev["bias"]), 2)
-        d_mae = round(float(analysis["mae"]) - float(prev["mae"]), 2)
-        drifted = abs(d_bias) >= _CALIB_DRIFT_ALERT or abs(d_mae) >= _CALIB_DRIFT_ALERT
-        drift = {
-            "prev_ts": prev.get("ts"),
-            "prev_bias": prev["bias"],
-            "prev_mae": prev["mae"],
-            "delta_bias": d_bias,
-            "delta_mae": d_mae,
-            "drifted": drifted,
-            "alert_line": _CALIB_DRIFT_ALERT,
-        }
-    elif changed is not None:
-        reasons = "、".join(
-            filter(
-                None,
-                [
-                    (
-                        f"评分协议已更换（{changed.get('mode', 'impression')} → {mode}）"
-                        if changed.get("mode", "impression") != mode
-                        else ""
-                    ),
-                    "评委模型已更换" if changed.get("model") not in (None, now_model) else "",
-                    "评分提示词已改动" if changed.get("rubric") not in (None, now_rubric) else "",
-                    ("锚点集已更换" if changed.get("anchors") not in (None, now_anchors) else ""),
-                    # n 是"成功打出分的锚点数"，不只是集合大小：某条被端点抖动作废
-                    # 也会让 MAE 的分母不同，所以同样算换考卷。老记录没指纹时，
-                    # 这是唯一能看出 6 条→11 条的信号。
-                    (
-                        f"参与统计的锚点条数不同（{changed.get('n')} → {now_n}）"
-                        if changed.get("n") not in (None, now_n)
-                        else ""
-                    ),
-                ],
-            )
-        )
-        drift = {
-            "prev_ts": changed.get("ts"),
-            "comparable": False,
-            "why_not_comparable": reasons or "口径指纹不一致",
-            "prev_bias": changed["bias"],
-            "prev_mae": changed["mae"],
-            "drifted": False,
-        }
-
+    cohort = _cohort_of(ns.judge, mode, now_model, now_rubric, now_anchors, int(analysis["n"]))
+    drift = _drift_vs_history(history, cohort, analysis)
     if not ns.no_save:
-        entry: dict[str, Any] = {
-            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "judge": ns.judge,
-            "mode": mode,
-            "n": analysis["n"],
-            "bias": analysis["bias"],
-            "mae": analysis["mae"],
-            "r": analysis["r"],
-            "rho": analysis.get("rho"),
-            # 采集了多少条不参与打分的候选也入账：只看 n 会把"扩了 3 倍锚点集"
-            # 和"一条都没人工确认"读成同一件事。
-            "n_pending": len(pending),
-            # 逐条明细必须入账。只留聚合数的账本没法归因：2026-09-25 那轮
-            # impression n=18 / checklist n=15 而 n_pending 都是 0，事后完全查不出
-            # 判定式臂丢了哪 3 条、为什么丢，于是"MAE 0.83 → 1.85"这个换不换默认的依据
-            # 至今无法判断是结论还是幸存者偏差。失败原因当场只打到 stderr（[SKIP] 行），
-            # 关掉终端就没了 —— 账本是唯一能活过一轮跑批的地方。
-            "n_failed": len(errors),
-            "failed": [{"id": sid, "error": err} for sid, err in errors],
-            "items": analysis.get("pairs") or [],
-            "decision_agree": (analysis.get("decision") or {}).get("agree"),
-            "decision_kappa": (analysis.get("decision") or {}).get("kappa"),
-            "model": now_model,
-            "rubric": now_rubric,
-            "anchors": now_anchors,
-        }
-        rep = analysis.get("repeatability") or {}
-        if rep.get("n_items"):
-            # 复现性也进账本：MAE/bias 只说"准不准"，极差说"这台仪表自己稳不稳"。
-            # 换评委型号后若极差变大，仲裁触发率与 Δ 分辨率都会变，那时漂移对比
-            # 必须能把"仪表换了"和"评委漂了"分开。
-            entry.update(
-                {
-                    "rep_times": rep["times"],
-                    "rep_range_mean": rep["range_mean"],
-                    "rep_range_max": rep["range_max"],
-                    "rep_threshold": rep["disagreement_threshold"],
-                    # 每锚点的极差也要落盘：均值会把"半数稳、半数疯"抹平成一个好数字，
-                    # 而两臂配对比必须能只看"两边都成功打完 N 次"的那几条
-                    "rep_items": [
-                        {
-                            "id": it.get("id"),
-                            "n": it.get("n"),
-                            "range": it.get("range"),
-                            "error": it.get("error") or "",
-                        }
-                        for it in rep.get("per_item") or []
-                    ],
-                }
-            )
-        history.append(entry)
-        path = _calib_history()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+        _save_entry(history, ns, mode, analysis, errors, pending, cohort)
 
     # 跨轮聚合：把账本里同 judge+协议、带逐锚点明细的最近几轮（保存路径下含刚入账的本次）
     # 合并成带 CI 的读数。单轮校准把锚点取样波动 + 评委逐轮抖动都抹进一个数——这是对
     # README §三 "这些读数本身不稳，单次读数不能当尺子的精度"的正面回应：
     # CI 管两次比较的分辨率，轮间极差管单轮读数能信多宽，两个数不收敛就都别当结论。
     agg = calib.aggregate_history(history, mode=mode, judge=ns.judge)
+    _print_calibrate_result(ns, mode, analysis, drift, agg, pending, history)
+    return 0
+
+
+def _empty_samples_message(ns: argparse.Namespace, pending: list[Any]) -> str:
+    hint = (
+        f"（{len(pending)} 条候选全部未人工确认——填 human_score 并把 confirmed 改成 true 再跑）"
+        if pending
+        else "（先跑 python -m pm.calibration --write-template 生成模板，并人工核对 human_score）"
+    )
+    return f"样本为空：{ns.samples}{hint}"
+
+
+def _load_history() -> list[dict[str, Any]]:
+    path = _calib_history()
+    history: list[dict[str, Any]] = []
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []  # 历史损坏按空账本处理，本次照常记录
+        history = loaded
+    return history
+
+
+@dataclass(frozen=True)
+class _Cohort:
+    """一把"尺子"的身份：漂移对比只在口径完全一致的历史记录之间做。
+
+    漂移对比原先是"与上一条同角色记录比"，但换评委模型、改评分提示词（锚点/权威顺序）
+    都会让 MAE/bias 阶跃——那不是评委漂移，是我们动了尺子；2026-09-18 就把一次
+    有意的锚点收紧（MAE 1.07→0.37）读成了"漂移"。所以每条记录额外存这几个指纹，
+    比较时只认它们都与本次一致的最近一条。
+    """
+
+    judge: str
+    mode: str
+    model: str
+    rubric: str
+    anchors: str
+    n: int
+
+
+def _cohort_of(judge: str, mode: str, model: str, rubric: str, anchors: str, n: int) -> _Cohort:
+    return _Cohort(judge=judge, mode=mode, model=model, rubric=rubric, anchors=anchors, n=n)
+
+
+def _comparable(h: dict[str, Any], c: _Cohort) -> bool:
+    """这条历史记录能不能当基线。
+
+    **缺指纹的老记录按可比处理**（账本里真有：加这两个字段之前的记录就没有）——
+    把它们判成"口径不同"等于在此后几轮里静默停掉漂移检测，比误报更糟。
+    只有显式记着不同指纹的，才认定是尺子变了。
+
+    锚点条数是那条兜底的例外：老记录虽然没指纹，`n` 一直都在账本里，
+    所以"6 条的手写锚点 vs 11 条含真实跑批锚点"这种换考卷能被抓出来，
+    而不是被当成评委漂移。
+
+    协议（mode）在两个分支之外单独判：老记录没有这个字段，缺省就是印象式；
+    但判定式跑出来的分与印象式的分不是同一个量，混在一起比"漂移"是自欺。
+    """
+    if h.get("mode", "impression") != c.mode:
+        return False
+    hm, hr, ha = h.get("model"), h.get("rubric"), h.get("anchors")
+    if not (hm or hr or ha):
+        return h.get("n") in (None, c.n)
+    return (
+        hm == c.model
+        and (not hr or hr == c.rubric)
+        and (not ha or ha == c.anchors)
+        and c.n == h.get("n", c.n)
+    )
+
+
+def _same_cohort(h: dict[str, Any], c: _Cohort) -> bool:
+    return h.get("judge") == c.judge and _comparable(h, c)
+
+
+def _drift_vs_history(
+    history: list[dict[str, Any]], c: _Cohort, analysis: dict[str, Any]
+) -> dict[str, Any] | None:
+    prev = next((h for h in reversed(history) if _same_cohort(h, c)), None)
+    # 最近一条同角色记录：只在"没有可比基线、但有不可比记录"时才用来说明原因
+    changed = next(
+        (h for h in reversed(history) if h.get("judge") == c.judge and not _comparable(h, c)),
+        None,
+    )
+    if prev is not None:
+        d_bias = round(float(analysis["bias"]) - float(prev["bias"]), 2)
+        d_mae = round(float(analysis["mae"]) - float(prev["mae"]), 2)
+        return {
+            "prev_ts": prev.get("ts"),
+            "prev_bias": prev["bias"],
+            "prev_mae": prev["mae"],
+            "delta_bias": d_bias,
+            "delta_mae": d_mae,
+            "drifted": abs(d_bias) >= _CALIB_DRIFT_ALERT or abs(d_mae) >= _CALIB_DRIFT_ALERT,
+            "alert_line": _CALIB_DRIFT_ALERT,
+        }
+    if changed is not None:
+        return {
+            "prev_ts": changed.get("ts"),
+            "comparable": False,
+            "why_not_comparable": _why_not_comparable(changed, c),
+            "prev_bias": changed["bias"],
+            "prev_mae": changed["mae"],
+            "drifted": False,
+        }
+    return None
+
+
+def _why_not_comparable(changed: dict[str, Any], c: _Cohort) -> str:
+    # 兜底那句不能省：`_comparable` 会因为"老记录没 model 字段而本次读到了"判不可比，
+    # 而下面五条理由在这种"缺字段"上都不成立 —— 没有兜底就会印出空原因。
+    return (
+        "、".join(
+            filter(
+                None,
+                [
+                    (
+                        f"评分协议已更换（{changed.get('mode', 'impression')} → {c.mode}）"
+                        if changed.get("mode", "impression") != c.mode
+                        else ""
+                    ),
+                    "评委模型已更换" if changed.get("model") not in (None, c.model) else "",
+                    "评分提示词已改动" if changed.get("rubric") not in (None, c.rubric) else "",
+                    ("锚点集已更换" if changed.get("anchors") not in (None, c.anchors) else ""),
+                    # n 是"成功打出分的锚点数"，不只是集合大小：某条被端点抖动作废
+                    # 也会让 MAE 的分母不同，所以同样算换考卷。老记录没指纹时，
+                    # 这是唯一能看出 6 条→11 条的信号。
+                    (
+                        f"参与统计的锚点条数不同（{changed.get('n')} → {c.n}）"
+                        if changed.get("n") not in (None, c.n)
+                        else ""
+                    ),
+                ],
+            )
+        )
+        or "口径指纹不一致"
+    )
+
+
+def _save_entry(
+    history: list[dict[str, Any]],
+    ns: argparse.Namespace,
+    mode: str,
+    analysis: dict[str, Any],
+    errors: list[Any],
+    pending: list[Any],
+    c: _Cohort,
+) -> None:
+    entry: dict[str, Any] = {
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "judge": ns.judge,
+        "mode": mode,
+        "n": analysis["n"],
+        "bias": analysis["bias"],
+        "mae": analysis["mae"],
+        "r": analysis["r"],
+        "rho": analysis.get("rho"),
+        # 采集了多少条不参与打分的候选也入账：只看 n 会把"扩了 3 倍锚点集"
+        # 和"一条都没人工确认"读成同一件事。
+        "n_pending": len(pending),
+        # 逐条明细必须入账。只留聚合数的账本没法归因：2026-09-25 那轮
+        # impression n=18 / checklist n=15 而 n_pending 都是 0，事后完全查不出
+        # 判定式臂丢了哪 3 条、为什么丢，于是"MAE 0.83 → 1.85"这个换不换默认的依据
+        # 至今无法判断是结论还是幸存者偏差。失败原因当场只打到 stderr（[SKIP] 行），
+        # 关掉终端就没了 —— 账本是唯一能活过一轮跑批的地方。
+        "n_failed": len(errors),
+        "failed": [{"id": sid, "error": err} for sid, err in errors],
+        "items": analysis.get("pairs") or [],
+        "decision_agree": (analysis.get("decision") or {}).get("agree"),
+        "decision_kappa": (analysis.get("decision") or {}).get("kappa"),
+        "model": c.model,
+        "rubric": c.rubric,
+        "anchors": c.anchors,
+    }
+    rep = analysis.get("repeatability") or {}
+    if rep.get("n_items"):
+        # 复现性也进账本：MAE/bias 只说"准不准"，极差说"这台仪表自己稳不稳"。
+        # 换评委型号后若极差变大，仲裁触发率与 Δ 分辨率都会变，那时漂移对比
+        # 必须能把"仪表换了"和"评委漂了"分开。
+        entry.update(
+            {
+                "rep_times": rep["times"],
+                "rep_range_mean": rep["range_mean"],
+                "rep_range_max": rep["range_max"],
+                "rep_threshold": rep["disagreement_threshold"],
+                # 每锚点的极差也要落盘：均值会把"半数稳、半数疯"抹平成一个好数字，
+                # 而两臂配对比必须能只看"两边都成功打完 N 次"的那几条
+                "rep_items": [
+                    {
+                        "id": it.get("id"),
+                        "n": it.get("n"),
+                        "range": it.get("range"),
+                        "error": it.get("error") or "",
+                    }
+                    for it in rep.get("per_item") or []
+                ],
+            }
+        )
+    history.append(entry)
+    path = _calib_history()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _print_calibrate_result(
+    ns: argparse.Namespace,
+    mode: str,
+    analysis: dict[str, Any],
+    drift: dict[str, Any] | None,
+    agg: dict[str, Any] | None,
+    pending: list[Any],
+    history: list[dict[str, Any]],
+) -> None:
+    from .. import calibration as calib
 
     if ns.json:
         print(
@@ -537,7 +619,7 @@ def _calibrate_command(argv: list[str]) -> int:
                 indent=2,
             )
         )
-        return 0
+        return
 
     print(f"[评分协议] {mode}")
     print(calib.render_report(ns.judge, analysis))
@@ -562,4 +644,3 @@ def _calibrate_command(argv: list[str]) -> int:
     if agg_out:
         print(agg_out)
     print(f"校准记录已{'保存' if not ns.no_save else '跳过保存'}：{_calib_history()}")
-    return 0

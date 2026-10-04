@@ -75,7 +75,7 @@ def ledger_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return path
 
 
-def _hub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pool: list[dict[str, Any]]) -> ModelHub:
+def _hub(tmp_path: Path, pool: list[dict[str, Any]]) -> ModelHub:
     specs = [
         {
             "name": s["name"],
@@ -98,7 +98,7 @@ def test_first_model_succeeds_and_no_switch_is_recorded(
 ) -> None:
     up = _Upstream([_ok("hi")])
     monkeypatch.setattr(ModelHub, "_http_post_json", up)
-    hub = _hub(tmp_path, monkeypatch, [{"name": "a"}, {"name": "b"}])
+    hub = _hub(tmp_path, [{"name": "a"}, {"name": "b"}])
     out = hub.chat(MSG)
     assert out["content"] == "hi" and out["model"] == "a" and out["failovers"] == 0
     assert out["usage"]["completion_tokens"] == 5
@@ -123,7 +123,7 @@ def test_transient_error_retries_in_place_and_the_cost_is_real(
     monkeypatch.setattr(P.time, "sleep", lambda s: slept.append(s))
     up = _Upstream([GatewayError("401 偶发", http_status=401), _ok("第二次成")])
     monkeypatch.setattr(ModelHub, "_http_post_json", up)
-    hub = _hub(tmp_path, monkeypatch, [{"name": "a"}, {"name": "b"}])
+    hub = _hub(tmp_path, [{"name": "a"}, {"name": "b"}])
     out = hub.chat(MSG)
     assert out["transient_retried"] is True and out["model"] == "a"
     assert out["failovers"] == 0  # 原地重试不算切换
@@ -151,7 +151,7 @@ def test_non_transient_error_switches_without_retrying(
         ]
     )
     monkeypatch.setattr(ModelHub, "_http_post_json", up)
-    hub = _hub(tmp_path, monkeypatch, [{"name": "a", "priority": 1}, {"name": "b", "priority": 2}])
+    hub = _hub(tmp_path, [{"name": "a", "priority": 1}, {"name": "b", "priority": 2}])
     out = hub.chat(MSG)
     assert out["model"] == "b" and out["failovers"] == 1
     assert slept == [], "400 走了原地重试路径"
@@ -170,7 +170,7 @@ def test_fake_success_empty_choices_switches_rather_than_counting_as_ok(
     monkeypatch.setattr(P.time, "sleep", lambda s: None)
     up = _Upstream([{"choices": []}, _ok("备的正文")])
     monkeypatch.setattr(ModelHub, "_http_post_json", up)
-    hub = _hub(tmp_path, monkeypatch, [{"name": "a"}, {"name": "b"}])
+    hub = _hub(tmp_path, [{"name": "a"}, {"name": "b"}])
     out = hub.chat(MSG)
     assert out["model"] == "b"
     failed = next(r for r in _rows(ledger_path, "switch"))
@@ -190,7 +190,7 @@ def test_all_models_failing_reports_the_order_and_the_last_error(
         ]
     )
     monkeypatch.setattr(ModelHub, "_http_post_json", up)
-    hub = _hub(tmp_path, monkeypatch, [{"name": "a"}, {"name": "b"}])
+    hub = _hub(tmp_path, [{"name": "a"}, {"name": "b"}])
     with pytest.raises(ModelPoolExhaustedError) as e:
         hub.chat(MSG)
     msg = str(e.value)
@@ -208,7 +208,7 @@ def test_all_models_disabled_is_a_config_error_not_a_runtime_one(
     up = _Upstream([])
     monkeypatch.setattr(ModelHub, "_http_post_json", up)
     with pytest.raises(P.ConfigError) as e:
-        _hub(tmp_path, monkeypatch, [{"name": "a", "enabled": False}])
+        _hub(tmp_path, [{"name": "a", "enabled": False}])
     assert "enabled" in str(e.value)
     assert up.calls == []
 
@@ -223,7 +223,7 @@ def test_every_model_broken_open_exhausts_the_pool_before_any_network(
         raise GatewayError("一直 400", http_status=400)
 
     monkeypatch.setattr(ModelHub, "_http_post_json", staticmethod(down))
-    hub = _hub(tmp_path, monkeypatch, [{"name": "solo"}])
+    hub = _hub(tmp_path, [{"name": "solo"}])
     for _ in range(3):
         with pytest.raises(ModelPoolExhaustedError):
             hub.chat(MSG)
@@ -241,7 +241,7 @@ def test_specified_model_is_tried_first_and_unknown_name_falls_back_with_a_ledge
 ) -> None:
     up = _Upstream([_ok("备")])
     monkeypatch.setattr(ModelHub, "_http_post_json", up)
-    hub = _hub(tmp_path, monkeypatch, [{"name": "a", "priority": 1}, {"name": "b", "priority": 2}])
+    hub = _hub(tmp_path, [{"name": "a", "priority": 1}, {"name": "b", "priority": 2}])
     out = hub.chat(MSG, model="b")
     assert out["model"] == "b" and _tag(up.calls[0]["url"]) == "v1-b"
 
@@ -259,7 +259,7 @@ def test_stream_true_is_a_400_and_writes_no_call_event(
     """不支持的能力要在入口就拒绝（400），而不是打出去再说；也不该污染台账。"""
     up = _Upstream([])
     monkeypatch.setattr(ModelHub, "_http_post_json", up)
-    hub = _hub(tmp_path, monkeypatch, [{"name": "a"}])
+    hub = _hub(tmp_path, [{"name": "a"}])
     with pytest.raises(GatewayError) as e:
         hub.chat(MSG, stream=True)
     assert e.value.http_status == 400
@@ -271,7 +271,7 @@ def test_extra_params_reach_the_upstream_payload(
 ) -> None:
     up = _Upstream([_ok()])
     monkeypatch.setattr(ModelHub, "_http_post_json", up)
-    hub = _hub(tmp_path, monkeypatch, [{"name": "a"}])
+    hub = _hub(tmp_path, [{"name": "a"}])
     hub.chat(MSG, temperature=0.2, max_tokens=512, agent="bot-a", role="evaluator")
     sent = up.calls[0]["payload"]
     assert sent["temperature"] == 0.2 and sent["max_tokens"] == 512, (
@@ -296,7 +296,7 @@ def test_breaker_opens_after_the_threshold_and_the_model_is_then_skipped(
         return _ok("备")
 
     monkeypatch.setattr(ModelHub, "_http_post_json", staticmethod(failing))
-    hub = _hub(tmp_path, monkeypatch, [{"name": "a", "priority": 1}, {"name": "b", "priority": 2}])
+    hub = _hub(tmp_path, [{"name": "a", "priority": 1}, {"name": "b", "priority": 2}])
     for _ in range(3):
         hub.chat(MSG)
     st = {m["name"]: m for m in hub.status()["models"]}

@@ -132,7 +132,7 @@ def test_render_preflight_summary_lines():
     assert "gateway" in text and "错峰或换端点" in text
 
 
-def test_run_py_preflight_wiring(tmp_path):
+def test_run_py_preflight_wiring():
     """run.py --preflight 接线：端点不可达时快速失败、退出码 1、不崩。
 
     关键坑：run.py 的 load_dotenv() 会把仓库 .env 的真实 Key/端点注回来

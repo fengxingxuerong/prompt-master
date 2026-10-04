@@ -345,6 +345,148 @@ def test_main_cases_file_rule_like_contains_rejected(
     assert "mode" in capsys.readouterr().err
 
 
+# ---------------------------------------------------------------------------
+# main() 拆成函数之后露出来的那些分支（2026-10-04 补）
+#
+# 它们原来挤在一条 346 行的直线里，覆盖率把缺口抹成了一个数字；拆细之后每一段
+# 都必须自己证明自己被执行过。这里补的全是"错了会骗到调用方"的那几类：
+# 开关没落进 env、外推编出金额、机器可读出口多打了一行。
+# ---------------------------------------------------------------------------
+
+
+def test_no_baseline_and_no_pairwise_reach_the_pipeline_via_env(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """CLI 的 --no-baseline/--no-pairwise 只能靠环境变量传给流水线（API 没这两个参数）。
+
+    写没写进去在 CLI 里看不出来，只有 dry-run 的 enabled 两栏会露 —— 所以 env 与 payload
+    要一起断言，两边不一致就等于"参数被静默吃掉"。
+    """
+    monkeypatch.delenv("PM_BASELINE", raising=False)
+    monkeypatch.delenv("PM_PAIRWISE", raising=False)
+    rc = _run_main(
+        monkeypatch,
+        ["--task", "让 AI 分析销售数据", "--no-baseline", "--no-pairwise", "--dry-run"],
+    )
+    assert rc == 0
+    assert os.environ["PM_BASELINE"] == "0"
+    assert os.environ["PM_PAIRWISE"] == "0"
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["baseline_enabled"] is False
+    assert payload["pairwise_enabled"] is False
+
+
+def test_cases_file_bare_strings_become_full_cases(
+    tmp_path: Path,
+) -> None:
+    """用例集允许写裸字符串；补齐 expected/mode 之后才是流水线认的形状。"""
+    p = cli_main._build_parser("run.py")
+    args = p.parse_args(["--task", "抽取城市", "--cases-file", _cases_file(tmp_path, ["甲", "乙"])])
+    cases = cli_main._load_seed_cases(p, args)
+    assert cases == [
+        {"input": "甲", "expected": "", "mode": "contains"},
+        {"input": "乙", "expected": "", "mode": "contains"},
+    ]
+    assert args.cases == 2, "用例数以用例集为准（达标口径按它做完整性校验）"
+
+
+def test_cases_file_that_cannot_be_parsed_exits_2_naming_the_reason(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bad = tmp_path / "cases.json"
+    bad.write_text("{ not json", encoding="utf-8")
+    _main_error(monkeypatch, ["--task", "让 AI 分析销售数据", "--cases-file", str(bad)])
+    assert "读取失败" in capsys.readouterr().err
+
+
+def test_last_run_usage_tolerates_history_pointing_at_a_missing_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """台账说有过这轮、产物文件却不在了（日志被清/换机器）：读不到就返回 None。
+
+    这条不能抛 —— `--dry-run` 是"要不要花这笔钱"的决策入口，它自己崩掉等于把增强信息
+    的读取失败升级成整个入口不可用。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cli_history, "_load_run_history", lambda n, include_demo=False: [{"run_id": "ghost"}]
+    )
+    assert cli_main._last_run_usage() == (None, "ghost")
+
+
+@pytest.mark.parametrize(
+    "usage,run_id",
+    [
+        (None, ""),  # 没有可比历史
+        ({"target": {"calls": 3, "input_tokens": 100, "output_tokens": 20}}, "r1"),  # 没配单价
+    ],
+)
+def test_dry_run_refuses_to_invent_a_cost(
+    monkeypatch: pytest.MonkeyPatch, usage: dict[str, Any] | None, run_id: str
+) -> None:
+    """没有价目表也没有历史时，整段金额必须不出现（"没有数"比"看起来很合理的假数"安全）。"""
+    for k in ("PM_PRICE_INPUT_PER_M", "PM_PRICE_OUTPUT_PER_M"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(cli_main, "_last_run_usage", lambda: (usage, run_id))
+    payload: dict[str, Any] = {"mode": "dry_run"}
+    cli_main._attach_estimated_cost(payload, 10, 20)
+    assert "estimated_cost" not in payload
+
+
+def test_dry_run_cost_extrapolation_needs_a_nonzero_call_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """单价有了、历史调用数却是 0：均价无从算起，此时也不能给金额（除零那一侧的守卫）。"""
+    monkeypatch.setenv("PM_PRICE_INPUT_PER_M", "1")
+    monkeypatch.setenv("PM_PRICE_OUTPUT_PER_M", "2")
+    monkeypatch.setattr(
+        cli_main, "_last_run_usage", lambda: ({"target": {"calls": 0, "input_tokens": 1000}}, "r1")
+    )
+    payload: dict[str, Any] = {"mode": "dry_run"}
+    cli_main._attach_estimated_cost(payload, 10, 20)
+    assert "estimated_cost" not in payload
+
+
+def test_dry_run_cost_extrapolation_names_its_basis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """正对照：给足了单价与历史，金额必须出现，而且自曝是按哪一轮外推的。"""
+    monkeypatch.setenv("PM_PRICE_INPUT_PER_M", "1")
+    monkeypatch.setenv("PM_PRICE_OUTPUT_PER_M", "2")
+    monkeypatch.setattr(
+        cli_main,
+        "_last_run_usage",
+        lambda: ({"target": {"calls": 4, "input_tokens": 1_000_000, "output_tokens": 0}}, "r7"),
+    )
+    payload: dict[str, Any] = {"mode": "dry_run"}
+    cli_main._attach_estimated_cost(payload, 10, 20)
+    assert payload["estimated_cost"]["basis"] == "按最近一次运行（r7）的实测逐角色均价外推"
+
+
+def test_print_run_outcome_json_branch_emits_exactly_one_json_object(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """入口的机器可读出口：stdout 必须恰好一个 JSON 对象（Agent 直接 loads 它）。
+
+    `emit_json_result` 自己在 test_emit_json_result_fields 里已有断言；这条钉的是
+    **main 那条线真的走到了它**，否则"函数是对的、入口没接上"这一类会全绿溜过去。
+    """
+    cli_main._print_run_outcome(
+        SimpleNamespace(json=True), {"run_id": "r1", "status": "passed"}, Path("L"), Path("R")
+    )
+    out = capsys.readouterr().out
+    assert json.loads(out)["run_id"] == "r1"
+
+
+def test_print_run_outcome_human_branch_shows_report_and_paths(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli_main._print_run_outcome(
+        SimpleNamespace(json=False), {"final_report": "REPORT-BODY"}, Path("L"), Path("R")
+    )
+    out = capsys.readouterr().out
+    assert "REPORT-BODY" in out
+    assert "完整运行日志：L" in out and "报告已保存：R" in out
+
+
 def test_main_fast_sets_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # --fast 与 --mermaid 组合：fast 落完 env 后由 mermaid 出口返回
     monkeypatch.setenv("PM_BASELINE", "1")
@@ -535,7 +677,7 @@ def test_library_recommend_no_match(
     assert payload["recommendations"] == [] and "没有相似" in payload["note"]
 
 
-def test_library_recommend_requires_task_text(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_library_recommend_requires_task_text() -> None:
     with pytest.raises(SystemExit):
         cli_library._library_command(["--recommend"])
 
@@ -748,7 +890,7 @@ def test_console_entry_delegates_to_main(monkeypatch: pytest.MonkeyPatch) -> Non
     assert called == ["prepare", "main"], f"引导顺序不对：{called}"
 
 
-def test_bootstrap_is_shared_with_run_py(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bootstrap_is_shared_with_run_py() -> None:
     """两个入口必须共用同一套引导，否则会出现"一个入口能跑、另一个乱码"。"""
     import pm.cli.console as console
     import run as run_module
@@ -1064,7 +1206,7 @@ def test_library_survives_corrupt_run_files(
 
 
 def test_library_export_skips_corrupt_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`--export` 扫描时同样要跳过坏文件（第三处 try/except）。"""
     _patch_log_dir(monkeypatch, tmp_path)
@@ -1108,7 +1250,7 @@ def test_library_command_routes_recommend_flag(
 
 
 def test_library_command_routes_export_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`--export` 同样要经入口分发（且坏文件不挡路）。"""
     _patch_log_dir(monkeypatch, tmp_path)
@@ -1239,7 +1381,7 @@ def test_library_list_skips_non_terminal_and_empty_prompt(
 
 
 def test_library_export_skips_bad_json_shapes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """export 扫描里的坏文件跳过（第三处 `_load_run_file` 调用点）。
 

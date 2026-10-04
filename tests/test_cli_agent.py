@@ -113,7 +113,7 @@ def test_agent_submit_requires_task() -> None:
 
 
 def test_agent_submit_payload_from_cases_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     seen: dict[str, Any] = {}
 
@@ -301,7 +301,7 @@ def test_calibrate_empty_samples(tmp_path: Path, capsys: pytest.CaptureFixture[s
 
 
 def test_calibrate_all_anchors_failed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _patch_calib(monkeypatch, {}, errors=[("s1", "超时")])
     assert cli_calibrate._calibrate_command([]) == cli_support.EXIT_FAILED
@@ -661,9 +661,7 @@ def test_run_pipeline_interactive_resumes_interrupts(
     assert "口径是什么" in capsys.readouterr().out
 
 
-def test_run_pipeline_interactive_eof_falls_back(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_run_pipeline_interactive_eof_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     """stdin 关闭（EOF）时按"按你的推断继续"推进，不挂死。"""
     from pm.cli import pipeline as cli_pipeline
 
@@ -1000,7 +998,7 @@ def test_anchors_stamp_tracks_scores_not_just_ids() -> None:
     assert cli_calibrate._anchors_stamp(a) != cli_calibrate._anchors_stamp(c)
 
 
-def test_calibrate_real_fingerprints_are_populated(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_calibrate_real_fingerprints_are_populated() -> None:
     """没被 monkeypatch 时，指纹要真的取到模型名与 rubric 哈希（不是占位符）。"""
     model, rubric, anchors = cli_calibrate._calib_fingerprints(
         "evaluator", [{"id": "a", "human_score": 5}], "impression"
@@ -1485,7 +1483,7 @@ def test_aggregate_renders_text_when_records_exist(
 
 
 def test_calibrate_empty_samples_hints_when_pending_exists(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """样本全未确认时，提示要**指向下一步**（填 human_score 并置 confirmed）。"""
     f = tmp_path / "s.json"
@@ -1551,9 +1549,7 @@ def test_apply_scores_skips_rows_without_id(
     assert "已回填 1 条" in capsys.readouterr().out
 
 
-def test_apply_scores_skips_non_dict_items_in_samples(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_apply_scores_skips_non_dict_items_in_samples(tmp_path: Path) -> None:
     """锚点文件里混着非 dict 条目（分隔注释）时，回填要跳过它们而不是崩。
 
     这类条目在真实锚点文件里是常态（`_comment` 分隔条），

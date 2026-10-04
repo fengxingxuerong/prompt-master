@@ -213,10 +213,7 @@ def _fake_structured(
             # 同一用例的 k 次采样取**同一个**脚本值：否则多采样会把分数脚本提前耗完，
             # “逐批提升”的场景会退化成首轮就达标，自检不再验证修订环
             k = _script_repeat()
-            if role == "evaluator_b":
-                pos = st.peek("eval") - 1
-            else:
-                pos = st.bump("eval") - 1
+            pos = st.peek("eval") - 1 if role == "evaluator_b" else st.bump("eval") - 1
             idx = pos // k
             score = float(SCORE_SCRIPT[idx] if 0 <= idx < len(SCORE_SCRIPT) else SCORE_SCRIPT[-1])
         base = round(score)

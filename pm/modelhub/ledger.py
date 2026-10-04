@@ -43,9 +43,8 @@ def append_event(event: dict[str, Any]) -> None:
         line = json.dumps(event, ensure_ascii=False)
         path = ledger_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        with _LEDGER_LOCK:
-            with path.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
+        with _LEDGER_LOCK, path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
     except Exception as e:  # noqa: BLE001 - 台账绝不影响主流程
         print(f"[modelhub] ledger write failed: {type(e).__name__}: {e}")
 

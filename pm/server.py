@@ -483,11 +483,8 @@ async def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     await enforce_rate_limit(request, cost=1)
     run_id = uuid.uuid4().hex[:12]
     seeds = [c.model_dump() for c in req.test_cases] if req.test_cases else None
-    if seeds:
-        # 用例数以用户提供为准：断言按序号与 expected 对齐，声明数不一致会搅乱达标口径
-        n_cases = len(seeds)
-    else:
-        n_cases = req.n_test_cases
+    # 用例数以用户提供为准：断言按序号与 expected 对齐，声明数不一致会搅乱达标口径
+    n_cases = len(seeds) if seeds else req.n_test_cases
     _scheduler.submit(
         run_id,
         task=req.task,

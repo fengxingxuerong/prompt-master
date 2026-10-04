@@ -517,7 +517,7 @@ def test_heartbeat_is_sent_while_upstream_is_slow(
 
 
 def test_str_payload_from_upstream_is_not_forwarded_as_data(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """上游若产出 `str` 载荷（非 bytes），**不得原样 yield**。
 
@@ -841,7 +841,6 @@ def test_stream_failover_records_a_switch_event(
 
 
 def test_stream_empty_first_chunk_is_treated_as_failure(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """连接建立但**没有首块数据** → 当成失败（覆盖 `338`）。

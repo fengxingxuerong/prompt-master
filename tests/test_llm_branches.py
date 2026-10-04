@@ -214,7 +214,7 @@ def test_single_key_pool_doubles_backoff(monkeypatch):
 # --------------------------------------------------------------------------
 # 5. 配置与指纹
 # --------------------------------------------------------------------------
-def test_build_config_overrides_apply_and_ignore_unknown_keys(monkeypatch):
+def test_build_config_overrides_apply_and_ignore_unknown_keys():
     cfg = L.build_config("optimizer", {"max_tokens": 123, "nope": 1})
     assert cfg.max_tokens == 123
     assert not hasattr(cfg, "nope")
@@ -272,7 +272,7 @@ def test_force_json_channel_skips_native(monkeypatch):
     assert "强制" in (L._skip_channel_a(cfg) or "")
 
 
-def test_remember_unsupported_only_for_deterministic_errors(monkeypatch):
+def test_remember_unsupported_only_for_deterministic_errors():
     cfg = L.build_config("optimizer")
     key = L._capability_key(cfg)
     # 网络抖动不能记：否则一次偶发错误永久关掉原生通道
@@ -509,7 +509,7 @@ def test_transient_conn_error_classification():
     assert L._is_transient_conn_error(Exception("Error code: 429")) is False
 
 
-def test_conn_retry_recovers_after_blip(monkeypatch):
+def test_conn_retry_recovers_after_blip():
     """一次连接抖动后恢复：不应把整次调用判死。"""
     calls = {"n": 0}
 
@@ -731,9 +731,8 @@ def test_retry_hint_mentions_nested_requirement(monkeypatch, caplog):
     cls = _eval_cls()
     fake = _FakeLLM([RuntimeError("native down"), _Resp("not json"), _Resp("still bad")])
     _patch_llm(monkeypatch, fake)
-    with caplog.at_level("WARNING", logger="pm.llm"):
-        with pytest.raises(RuntimeError):
-            L.structured_call("evaluator", cls, "sys", "user", max_retries=2)
+    with caplog.at_level("WARNING", logger="pm.llm"), pytest.raises(RuntimeError):
+        L.structured_call("evaluator", cls, "sys", "user", max_retries=2)
     assert "嵌套对象" in caplog.text
     assert "不要" in caplog.text and "平铺" in caplog.text
 

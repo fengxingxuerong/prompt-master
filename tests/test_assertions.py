@@ -836,7 +836,7 @@ def test_case_ground_truth_per_mode():
     assert empty[1](0) == "" and empty[2](0) == ""
 
 
-def test_mixed_modes_end_to_end(monkeypatch):
+def test_mixed_modes_end_to_end():
     """同一份用例集：case#0 走确定性否决，case#1 走评委语义判定（只提醒）。"""
     from pm import testing
     from pm.graph import build_app

@@ -144,7 +144,7 @@ def test_unstable_cases_and_judge_bias_are_surfaced():
 # "无账本→不披露"是默认态；有账本的用例自己往 tmp 里写 fixture。
 
 
-def _write_ledger(monkeypatch: pytest.MonkeyPatch, tmp_path, items: list[dict]) -> None:
+def _write_ledger(tmp_path, items: list[dict]) -> None:
     """往被密封的产物目录里写一份只含一轮的校准账本。"""
     import json
 
@@ -155,10 +155,9 @@ def _write_ledger(monkeypatch: pytest.MonkeyPatch, tmp_path, items: list[dict]) 
     )
 
 
-def test_calibration_disclosure_folds_known_bias(monkeypatch, tmp_path):
+def test_calibration_disclosure_folds_known_bias(tmp_path):
     """bias ≥ 告警线：披露行必须给出折算读数，并声明裸判定不可采信。"""
     _write_ledger(
-        monkeypatch,
         tmp_path,
         [{"id": f"a{i}", "human": 2.0, "judge": 6.0} for i in range(6)],  # bias = +4.0
     )
@@ -169,10 +168,9 @@ def test_calibration_disclosure_folds_known_bias(monkeypatch, tmp_path):
     assert "不可采信" in text, "达标判定行还在渲染，但必须声明它不可采信"
 
 
-def test_calibration_disclosure_quiet_when_bias_small(monkeypatch, tmp_path):
+def test_calibration_disclosure_quiet_when_bias_small(tmp_path):
     """bias < 告警线：弱措辞，不喊狼来了——未来换合格评委时报告措辞要跟得上。"""
     _write_ledger(
-        monkeypatch,
         tmp_path,
         [{"id": f"a{i}", "human": 6.0, "judge": 6.4} for i in range(6)],  # bias = +0.4
     )
@@ -474,3 +472,34 @@ def test_report_cost_section_renders_with_prices(monkeypatch: pytest.MonkeyPatch
     assert "**合计**" in text
     # 金额口径必须自曝来源，否则会被当成权威读数
     assert "不内置价目表" in text
+
+
+@pytest.mark.parametrize(
+    "dirty",
+    [
+        ["不是 dict"],
+        None,
+        [{"test_case_index": "abc", "output": "ok"}],
+        [None, 7, {"test_case_index": 1, "output": "正常输出内容"}],
+    ],
+)
+def test_dirty_state_fields_never_kill_the_report(dirty: object) -> None:
+    """脏 state 只能让局部降级，不能让整份报告出不来。
+
+    2026-10-04 拆 `render_report` 时用 50 例黄金对照撞出来的真缺陷，三条崩法各由一个
+    参数命中：`test_runs=["x"]` → 空产出核查那处抛 AttributeError；`test_runs=None` →
+    事实断言表抛 TypeError；`test_case_index="abc"` → Δ 有效性统计抛 ValueError。
+    同文件的 `_report_safe_int` 早就承认"state 里的字段类型不可信"（旧版 checkpoint 与
+    外部构造都会往里灌），但三处 `test_runs` 读取只有 `_infra_invalid_cases` 防了非 dict。
+    报告是这套系统唯一给读者看的东西，不该因为一条脏记录整个出不来。
+    """
+    st = _state(
+        test_runs=dirty,
+        evaluations=[{"test_case_index": 0, "weighted_score": 9.2, "issues": []}],
+        baseline_aggregate=_agg(avg_score=6.0, min_score=5.0),
+    )
+    text, best = render_report(st)
+    assert text.startswith("# PromptMaster 交付报告")
+    assert "## 评分总览" in text
+    assert "## 与基线对比" in text
+    assert isinstance(best, dict)

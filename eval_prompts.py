@@ -152,15 +152,12 @@ def check_structure(node: str, case: dict[str, Any]) -> list[str]:
             issues.append("optimizer system 缺少 <输出前自检> 清单")
         if "边界语义显式化" not in system:
             issues.append("optimizer system 缺少边界语义显式化规则")
-    if node == "mockgen":
-        if "scenario" not in system:
-            issues.append("mockgen system 未要求 scenario 场景标注（覆盖校验依赖它）")
-    if node == "evaluator":
-        if "先取证" not in system and "取证" not in system:
-            issues.append("evaluator system 缺少「先取证、后打分」流程")
-    if node == "reviser":
-        if not ("已验证" in system and "弱化" in system):
-            issues.append("reviser system 缺少「已验证约束不得删除/弱化」规则")
+    if node == "mockgen" and "scenario" not in system:
+        issues.append("mockgen system 未要求 scenario 场景标注（覆盖校验依赖它）")
+    if node == "evaluator" and "先取证" not in system and "取证" not in system:
+        issues.append("evaluator system 缺少「先取证、后打分」流程")
+    if node == "reviser" and not ("已验证" in system and "弱化" in system):
+        issues.append("reviser system 缺少「已验证约束不得删除/弱化」规则")
 
     # 4) expect 里声明的结构要求（用例自定义，当前仅 comment，预留）
     return issues

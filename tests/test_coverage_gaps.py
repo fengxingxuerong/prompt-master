@@ -200,9 +200,8 @@ def test_calibrate_patrol_loop_reports_each_outcome(
         monkeypatch.setattr(
             pm_server._time, "sleep", lambda secs: (_ for _ in ()).throw(_StopLoop())
         )
-        with caplog.at_level(logging.INFO):
-            with pytest.raises(_StopLoop):
-                pm_server._calibrate_patrol_loop(0.001, "evaluator")
+        with caplog.at_level(logging.INFO), pytest.raises(_StopLoop):
+            pm_server._calibrate_patrol_loop(0.001, "evaluator")
 
     _run_once(None)  # 排程内部已告警的静默分支
     _run_once(
@@ -231,9 +230,8 @@ def test_calibrate_patrol_loop_swallows_exceptions(
 ) -> None:
     monkeypatch.setattr(pm_server, "_scheduled_calibrate_once", _boom)
     monkeypatch.setattr(pm_server._time, "sleep", lambda secs: (_ for _ in ()).throw(_StopLoop()))
-    with caplog.at_level(logging.WARNING):
-        with pytest.raises(_StopLoop):
-            pm_server._calibrate_patrol_loop(0.001, "evaluator")
+    with caplog.at_level(logging.WARNING), pytest.raises(_StopLoop):
+        pm_server._calibrate_patrol_loop(0.001, "evaluator")
     assert "定期校准失败" in caplog.text and "不影响服务" in caplog.text
 
 

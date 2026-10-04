@@ -186,9 +186,12 @@ def count_constraints(prompt: str) -> dict[str, Any]:
             current = m.group(1)
             current_count = 0
             continue
-        if current is not None and _is_constraint_section(current):
-            if _NUMBERED_ITEM_RE.match(line):
-                current_count += 1
+        if (
+            current is not None
+            and _is_constraint_section(current)
+            and _NUMBERED_ITEM_RE.match(line)
+        ):
+            current_count += 1
     if current is not None and current_count:
         parts.append((current, current_count))
     total = sum(n for _, n in parts)

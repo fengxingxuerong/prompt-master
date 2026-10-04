@@ -119,9 +119,12 @@ def find_similar_asset(
             continue
         agg = d.get("aggregate") or {}
         base = (d.get("baseline_aggregate") or {}).get("avg_score")
-        if isinstance(base, (int, float)) and isinstance(agg.get("avg_score"), (int, float)):
-            if agg["avg_score"] - base < 0:
-                continue
+        if (
+            isinstance(base, (int, float))
+            and isinstance(agg.get("avg_score"), (int, float))
+            and agg["avg_score"] - base < 0
+        ):
+            continue
         prompt = str(d.get("prompt") or "")
         if not prompt.strip():
             continue

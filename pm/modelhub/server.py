@@ -321,10 +321,7 @@ def _stream_response(
         """依次尝试候选模型；成功后返回 (entry, 首个 chunk, 剩余 chunk 迭代器)。"""
         last_err: GatewayError | None = None
         for idx, entry in enumerate(candidates):
-            if idx > 0:
-                append_switch = True
-            else:
-                append_switch = False
+            append_switch = idx > 0
             try:
                 _upstream_model, gen = stream_upstream(
                     entry.base_url,

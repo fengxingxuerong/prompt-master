@@ -506,7 +506,7 @@ def test_ci_gate_handles_first_push_without_claiming_pass():
     assert "pull_request" in gate_run  # PR 场景用 base.sha
 
 
-def test_ci_never_runs_the_gate_bare_on_the_first_push_branch(tmp_path):
+def test_ci_never_runs_the_gate_bare_on_the_first_push_branch():
     """**实测缺陷**（2026-10-02）：首次推送那一支最初写的是裸 `python run.py gate`。
 
     而裸跑会走自动探测，自动探测**拒绝把 HEAD 自己当基线**（那是防"静默通过"的护栏）。

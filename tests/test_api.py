@@ -261,7 +261,7 @@ def test_rest_field_reference_matches_models() -> None:
     assert "custom:" in whitelist.group(1)
 
 
-def test_field_reference_guard_actually_catches_drift(tmp_path, monkeypatch) -> None:
+def test_field_reference_guard_actually_catches_drift() -> None:
     """反向自检：这条守卫不是摆设（删掉文档里一个字段就必须红）。"""
     import pathlib
     import re as _re

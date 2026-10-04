@@ -486,7 +486,7 @@ def test_task_table_is_bounded(tmp_path: Path, monkeypatch):
     assert len(tm._tasks) <= 3  # 淘汰后仍留有界余量
 
 
-def test_progress_visible_while_running(tmp_path: Path, monkeypatch):
+def test_progress_visible_while_running(monkeypatch):
     """H2：运行中就能读到累加指标，不再只有一个 running。"""
     import threading
     import time
@@ -842,10 +842,9 @@ def test_carry_context_reaches_pool_workers():
     def probe(_i: int) -> tuple[bool, bool]:
         return backend.current() is not None, backend.cache_disabled()
 
-    with backend.use(hook):
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            bare = list(ex.map(probe, range(3)))
-            carried = list(ex.map(backend.carry_context(probe), range(3)))
+    with backend.use(hook), ThreadPoolExecutor(max_workers=3) as ex:
+        bare = list(ex.map(probe, range(3)))
+        carried = list(ex.map(backend.carry_context(probe), range(3)))
 
     assert not any(any(row) for row in bare), (
         "对照组失效：裸线程池本应看不到钩子，否则这条用例没测到东西"
@@ -863,14 +862,13 @@ def test_target_call_in_pool_hits_injected_backend():
         seen.append(role)
         return f"fake::{role}", {"role": role}
 
-    with backend.use(backend.CallHook(plain=plain)):
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            out = list(
-                ex.map(
-                    backend.carry_context(lambda role: llm_mod.plain_call(role, "sys", "user")[0]),
-                    ["target", "reviser"],
-                )
+    with backend.use(backend.CallHook(plain=plain)), ThreadPoolExecutor(max_workers=2) as ex:
+        out = list(
+            ex.map(
+                backend.carry_context(lambda role: llm_mod.plain_call(role, "sys", "user")[0]),
+                ["target", "reviser"],
             )
+        )
 
     assert out == ["fake::target", "fake::reviser"]
     assert sorted(seen) == ["reviser", "target"]

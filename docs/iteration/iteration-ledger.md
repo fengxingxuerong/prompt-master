@@ -953,3 +953,176 @@ samples.json 全量 3 手写 + 8 真实；`--judge evaluator --no-save` 隔离�
 决策——会改变评估读数坐标系（历史账本/披露行/达标判定口径），需所有者拍板并
 重跑校准基线后才可切换。`PM_CALL_BUDGET` 真端点复测仍未做。
 
+## Round 21（2026-10-04，PromptMaster 本产品）—— 工程质量轮：复杂度拆到可评审，并当场挖出两个真缺陷
+
+本轮不动产品行为，只动"代码能不能被 safely 改"。基线（改前独占实测）：
+`ruff check` / `ruff format --check` / `mypy --strict` 全 rc=0，1246 条 rc=0，覆盖率 95.65%。
+**这三道门当时都是绿的，而下面那两项缺陷就藏在一片绿里** —— 这是本轮的主要发现。
+
+### 挖出来的两个真缺陷（都不是重构的副产品，是重构的副产品也没关系：它们本来就在）
+
+1. **脏 `test_runs` 让整份交付报告崩掉**。`render_report` 里三处读 `test_runs`，只有
+   `_infra_invalid_cases` 防了非 dict，另外两处没有。实测三条崩法：
+   `test_runs=["x"]` → `AttributeError: 'str' object has no attribute 'get'`；
+   `test_runs=None` → `TypeError: 'NoneType' object is not iterable`；
+   `test_case_index="abc"` → `ValueError: invalid literal for int()`。
+   同文件的 `_report_safe_int` 文档里**早就写着**"state 里的字段类型不可信（旧版
+   checkpoint / 外部构造）"，而报告是唯一给读者看的东西 —— 认知在场、执行缺位。
+   修法是在读取点单点收口（`_test_runs()`）+ 索引走 `_report_safe_int`。
+2. **`pm/nodes/execute.py` 上挂着一条从未生效的 `# noqa` 豁免**：冒号后写的是散文
+   （`avoid no-redef——…`）而不是规则码，ruff 把整条指令当无效忽略（只 warn、不报违规）。
+   也就是说那个"这里已显式豁免"的注释一直在骗读者。已改成普通注释，并对全仓扫了一遍
+   形如 `# noqa` 但不合语法的指令：**现在 0 条**。
+
+### 复杂度：三个最大的函数拆到可评审
+
+判据来自 ruff 自己的 mccabe，不另写 AST 口径。作用范围直接取 ci.yml 的 `ruff check` 那一行。
+
+| 函数 | 拆前 | 拆后 |
+|---|---|---|
+| `pm/report.py::render_report` | 508 行 / CC 57 | 编排 27 行 + 16 个章节函数，本文件最高 CC 7 |
+| `pm/cli/main.py::main` | 346 行 / CC 44 | 拆出 12 个函数，`main` CC ≤ 10 |
+| `pm/cli/calibrate.py::_calibrate_command` | 341 行 / CC 33 | 拆出 9 个函数，CC ≤ 10 |
+
+### 等价性怎么证的（以及它当场抓到的一次自伤）
+
+- `render_report`：50 例合成 state（覆盖 `if agg` / `if base` / `pw.verdict` 四值 / 冲突+归因 /
+  注入三态 / 断言四态 / 满分声明 / 空产出 / 脏整数字段等分支）黄金对照，重构前后
+  输出 **sha256 `e9e5916d…` 逐字节相同**；另用 AST 比对了新旧字符串字面量的 multiset，
+  唯一"少掉"的一条是被扩写进 docstring 的原说明。
+- **这个对照当场抓出了我自己写进编排层的一处 API 破坏**：把 `pick_best(state)[1]`（说明文字）
+  当成了 `[0]`（版本字典）返回，`pm/nodes/report.py` 会拿它 `.get("prompt")`。
+  只跑测试套件抓不到 —— 是 50 例输出比对抓住的。这轮之后我对"重构只靠套件绿"这句话
+  的可信度又降了一档。
+- `main` / `_calibrate_command`：同样做字面量 multiset 对账（`main` 少 1 条是把
+  `rows[0]['run_id']` 提成局部变量；`_calibrate_command` 少 4 条分别是 docstring 缩进、
+  两处同文案合并、f-string 里 `：` 被拆出来），加上 CLI/校准相关套件。
+  对账过程中真的发现两处遗漏并补回：`--scoring-mode` 的 `mode` 被我误换成
+  `analysis["mode"]`，以及不可比基线那句兜底 `"口径指纹不一致"` 被吞掉了。
+- 两处新缺陷的回归用例做了**摘守卫验红**：M1（去掉 `_test_runs` 的非 dict/None 防护）
+  → 4 条参数里 3 条红，异常类型与预期逐条对应；M2（把 `_report_safe_int` 换回裸 `int()`）
+  → 恰好 `test_case_index="abc"` 那条红。两次摘除都按逆操作还原并核对 sha256 相同。
+
+### 门禁扩容（防的不是本轮这类"已经改过的地方"，是下一轮）
+
+- `ruff.lint.select` 加 `SIM` + `RET`。存量清了 12 处（嵌套 if 合并、`if x: a=True else: a=False`
+  这类），其中 `--fix` 自动改的只有 SIM114/SIM117 两处、逐处看过 diff。
+- `SIM105`（`try/except/pass` → `contextlib.suppress`）**显式不采纳**并写了理由：这几处
+  是故意的吞异常，都挂着 `# noqa: BLE001 + 一句为什么`，换成 suppress 会把那句"为什么"挤掉，
+  而本仓库的判断恰恰依赖它存在。
+- 新门：`tests/test_complexity_ratchet.py` + 台账 `tests/complexity_budget.json`。
+  不用 `max-complexity` 死线的原因：存量 33 个函数超过 CC 10，定值线只能"全拆或不开"。
+  台账要求与实测**逐字相等** —— 变复杂要显式登记，拆小了必须回收，条目消失要删行，
+  另设硬顶 28（= 本轮实测最高值，抬它需要一个单独决定）。
+  台账重生成是**手工**命令（`python tests/test_complexity_ratchet.py --rewrite`）：
+  测试自己绝不写被跟踪文件，否则 CI 里那条 `git diff --exit-code` 会被自己抓红。
+- 本轮这些门**真的抓红过一次**：我改 README §五.2 的覆盖率措辞时，把 `（地板 92）`
+  写成了 `（地板 92；同一份代码连跑两遍…）`，`test_coverage_floors_agree_across_all_copies`
+  当场断言失败（它按 `（地板 N）` 精确配对两条线，少一条就"静默放过一整个文件的漂移"）。
+  改回可配对的形式后复绿。**没有一处是为了迁就我的编辑而放宽判据** —— 这类判据一旦
+  因为"只是想改个措辞"被松掉，它就再也不保护任何东西了。
+
+### 实测读数（本轮改后独占复测，连跑两遍）
+
+1251 条 rc=0（两遍都是）；覆盖率 `pm/` 全量 **95.69% / 95.72%**（改前 95.65%）、
+去掉网关 **96.3%**、`pm/modelhub/*` **92.8%**（分项地板 82）。README §五.2 原本写的 93.37%/94.91%/86.37%
+是 2026-10-02 的旧快照、已被 10-03 Round 18 的 95.73% 越过，本轮按实测改写，
+并顺手修掉那句过期的"缺口集中在 `server.py` 361-444"（`server.py` 10-02 就补到 100% 了）。
+
+⚠️ 顺带量到一件事：两遍之间那 0.03pp 的差，逐文件比对下来**全部落在
+`pm/modelhub/vkeys.py`**（同一份代码，miss 27 ↔ 30）。
+**覆盖率读数自己也会抖**，所以任何引用它的文档句子都该注明是哪一次跑的，
+别把它当成精确指标；而"同一份代码两遍数不一样"本身是一条待查的测试不确定源
+（vkeys 的密钥签发分支），已进下面的未结案清单。
+
+### 未结案 / 别当事实引用
+
+- 台账里还剩 33 个 CC>10 的函数（最高 28：`pm/modelhub/server.py::_stream_response`，
+  其次是 `pm/llm.py::structured_call` 24）。本轮**没动它们**，只保证不会再长。
+- `ARG001`（13 处未用形参）不采纳：FastAPI 路由形参与假后端桩类的签名是**故意的**，
+  纳进来只会逼出更多 noqa。
+- 等价性证据是合成 state 上的输出比对，覆盖不到真端点跑出来的 state 形状
+  （那条路径仍由 stub e2e 与第三轮真端点 E2E 的结论管：优化效果至今"无证据"）。
+- **新量到的测试不确定源**：`pm/modelhub/vkeys.py` 同一份代码两遍覆盖率 miss 27↔30。
+  本轮只观测到"它在抖"，没定位到是哪条用例的路径不确定（要定位得连跑多遍并逐用例比对）。
+  影响面：任何拿覆盖率数字做前后对比的结论，差值小于 3 条时不构成信号。
+- 本轮所有数字都是本机（Windows / py3.12）独占实测；远端 CI 未重跑，
+  而 origin/main 上那步 windows `Tests (pytest)` 的红仍未结案（见 Round 20 未结案条目）。
+
+### 续记（同日第二轮）：测试面收口——上一轮那条"覆盖率会抖"已结案
+
+未结案第 4 条定位到了根因并修掉：**不是噪声，是"只被真竞态撞上才覆盖"的分支**。
+`_atomic_write` 的 `except PermissionError`（188-190）在全量跑批里恰好被撞到过，
+撞不到就整块不覆盖 ⇒ 两遍差 3 条。
+
+- 新增 `tests/test_modelhub_contention_paths.py`（13 条）：不制造真竞态，而是把
+  "瞬时被拒"直接注入（桩 `os.replace` / `Path.read_text` / `_lock_impl`），
+  每条防御分支每次都走一遍。断言形式是"有没有按设计退避、让了几次、每次多久"，
+  以及失败侧的三条硬约束：**抛出去不静默、老文件不动、临时文件不留场**。
+  `vkeys.py` 88% → **98%**，剩 4 条是只在 POSIX 上执行的分支（平台分割，不是缺口，
+  在任一台机器上都补不到 100%）。
+- 新增 `tests/test_cli_units.py` 的 10 条入口级分支：`--no-baseline/--no-pairwise`
+  是否真的落进 env 并与 dry-run 的 enabled 两栏一致、裸字符串用例补齐全形状、
+  `--cases-file` 解析失败退出 2 并说明原因、金额外推的三条静默出口 + 一条正对照
+  （**外推必须自曝按哪一轮算的**）、`--json` 出口"stdout 恰好一个 JSON"在**入口处**钉住。
+  这些是 `main()` 拆细后新露出来的空档 —— 拆之前它们挤在一条直线里，缺口被抹成一个数。
+- 清掉 30 处"要了但不用的内置夹具形参"（`tmp_path`/`capsys`/`monkeypatch`），
+  并加守卫 `tests/test_hygiene_dead_fixture_args.py`（判据取 ruff ARG001，与 CI 同口径）。
+  **守卫先植入一条违规用例验过会红**，再删掉桩文件。
+- ⚠️ 批量删除形参这件事本身踩了一次真坑：`_hub` / `_write_ledger` 这类 helper 的形参
+  在函数体里没用到，**但调用方还在按位置传**。删掉形参就把实参整体错位了
+  （`monkeypatch` 绑进 `tmp_path`），11 + 2 个调用点全中。教训写进了工具里：
+  "未使用"只描述函数内部，不描述调用边界；自动删除只允许作用于由 pytest 按名字注入的
+  `test_*` / `@pytest.fixture`，其余必须先改调用点。这一类是"看起来像清理、实际是破坏"
+  的形状，靠的仍是跑套件而不是看 diff。
+- 重测（两轮独占）：**逐文件 miss 数完全一致**，`pm/` 全量 **96.22%**（两轮同值）、
+  去掉网关 96.5%、`pm/modelhub/*` 94.6%；1275 条 rc=0，三套 releases 测试 rc=0，
+  `releases/*/data/*` 干净，ruff/format/mypy strict 全 rc=0。
+  `docs/operations.md` 的薄弱点清单 C 段按实测重写（上一版"无低于 90% 的文件"已过期），
+  README §五.2 的覆盖率句子同步。
+
+## Round 22（2026-10-04，PromptMaster 本产品）—— 第四轮真端点 E2E：C1∧C2 首次双过 + G1 字面触发但语义边界暴露 + PM_CALL_BUDGET 实战生效
+
+> 编号注记：Round 21（工程质量轮）是并行协作方在同一工作树完成的未提交轮次，
+> 本轮 append-only 追加其后，不触碰其内容与代码改动。
+
+第四轮 E2E 判据跑前写死（`logs/e2e4_criteria.md`），与第三轮逐字同口径
+（task/原稿/4 用例逐字复用、samples=2、max_iter=3、基线盲评全开），唯一变量
+是代码 add142e（含 `PM_CALL_BUDGET` 墙钟 + `PM_SDK_RETRIES=0`）；`.env` 未动
+（换型暂缓）。run `34a205ecc9c3`，57 调用 / 67 分钟，基线臂缓存全命中
+（4.98 与第三轮逐字一致，可比性锚死）。完整判据对照已入 `docs/evaluation.md`
+§十七·四，此处只记要点与增量。
+
+### 读数要点
+
+- **C1∧C2 四轮以来首次双过**：盲评 4/0/0（与第三轮同）+ Δ+3.64 > 自报噪声带
+  2.609（余量 1.03）。v1 修订成功且**完整评估**：8.62 / min 8.28 / 4/4 用例
+  pointwise 通过 / 修好 3 弄坏 0（净增 3）。
+- **G1 字面触发**：revise 在 v2 修订阶段空返回 → early_stopped（1/3）。按跑前
+  铁律 Δ 不作方向性结论；**但语义边界暴露**——G1 的作废理由（保留版本未评估完）
+  在本轮不成立，v1 评估闭环完整。G1 细化为「仅当早停保留版本**评估未完成**时
+  作废 Δ」应入下一轮判据，本轮作为发现如实记录，不事后放宽。
+- **V1 关闭**：`PM_CALL_BUDGET` 实战生效——6 次「墙钟预算 600s 用尽」拦截
+  （evaluator_b 5 次 302s×2 发、evaluator 1 次 600s×3 发），第三轮 900s 挂死
+  形态消失，错误信息带实际耗时与请求数。§十七 未验项「墙钟复测」兑现。
+- V2：空返回 4 次（evaluator 3 + revise 1），比第三轮少、未根治（换型暂缓，
+  符合预期）。V3：67 分钟（第三轮 61，增量为限流退避与墙钟等待）。
+- evaluator_b（glm-5.2@0.1）case#0/1/2 墙钟用尽 5 次 → 部分用例实为单评委
+  出分（降级处理按设计工作、未污染读数），如实记录。
+
+### 对 Round 21「windows 红未结案」的回应
+
+8edcfb7 的 CI 红确认为 **windows job**（check-runs 实查：三 Linux job success、
+windows failure）；其后 `0ebff28`（五件套，含大量 tests 改动）与 `add142e`
+两轮 CI **4/4 job 全绿**（API 实查 2026-10-04）——红已被后续提交修复或属
+flaky 自愈，Round 21 落笔时点之后已有两轮绿证。若需归因到具体修复提交，
+翻 0ebff28 的 tests/ 变更即可。
+
+### 验证与边界
+
+- 双方共存判据：并行方 19 源文件 + 4 新测试改动与本轮文档改动在工作树共存，
+  合并态全量回归结果见下轮补记（本轮收尾时点跑串行主套件 + 三服务 + 静态）。
+- 本轮只提交 `docs/evaluation.md`（diff 核查纯本轮内容）；ledger 连同并行方
+  Round 21 留待其所有者提交（不动并行方未提交工作）。
+- Δ+3.64 宣称权留给下一轮（判据细化或换型落地）；注入免疫连续两轮未实测。
+

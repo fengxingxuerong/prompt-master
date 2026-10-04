@@ -135,7 +135,7 @@ def test_pooled_split_on_the_live_ledger_is_zero_call() -> None:
     assert pooled["owner_anchors"] > 0, "严格人工那一半必须存在，否则 bias 整句都是家族一致性"
 
 
-def test_render_split_names_both_numbers(capsys: pytest.CaptureFixture[str]) -> None:
+def test_render_split_names_both_numbers() -> None:
     pooled = {
         "by_human_source": {
             C.HUMAN_SOURCE_OWNER: {"n_anchors": 41, "n_pairs": 72, "bias": 2.9, "mae": 3.0},
@@ -191,7 +191,7 @@ def test_report_disclosure_names_the_split_only_when_it_matters() -> None:
     assert _human_source_note({}) == ""
 
 
-def test_migration_script_is_idempotent_on_a_copy(tmp_path: Path) -> None:
+def test_migration_script_is_idempotent_on_a_copy() -> None:
     """重跑 `mark_anchor_provenance.stamp` 不产生第二次改动 ⇒ 它不是每次重写都搅一遍尺子。"""
     import importlib.util
 

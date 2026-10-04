@@ -347,10 +347,7 @@ def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | 
         # 却会让一条本该通过的确定性检查把整轮优化判死。默认忽略这些差异（PM_ASSERT_NORMALIZE=0 可关）。
         # 匹配必须用**原始** expected：`exp_full` 是给人看的单行截断版，拿它去比就永远好不了一致。
         normalized = _flag("PM_ASSERT_NORMALIZE", True)
-        if normalized:
-            passed = _fold(exp) in _fold(out_scan)
-        else:
-            passed = exp in out_scan
+        passed = _fold(exp) in _fold(out_scan) if normalized else exp in out_scan
         note = (
             "（已忽略大小写、全/半角与空白差异）"
             if normalized

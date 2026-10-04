@@ -46,7 +46,7 @@ def test_run_entry_survives_gbk_redirect(tmp_path):
     assert "graph TD" in out_file.read_text(encoding="utf-8")
 
 
-def test_server_entry_prints_chinese_to_redirect(tmp_path):
+def test_server_entry_prints_chinese_to_redirect():
     """run_server.py 的启动横幅/警告输出重定向到文件不炸。
 
     不真正起服务：用一个非法端口让它立刻退出，但在此之前模块级中文告警

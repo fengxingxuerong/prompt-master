@@ -98,7 +98,7 @@ def test_entry_runs_offline_and_exits_zero():
     assert "[FAIL]" not in r.stdout
 
 
-def test_entry_exit_code_reflects_failures(tmp_path):
+def test_entry_exit_code_reflects_failures():
     """**缺口实证**：入口的退出码必须真的反映失败。
 
     此前把 `return 1 if failed else 0` 改成 `return 0` 时 pytest 全绿 ——

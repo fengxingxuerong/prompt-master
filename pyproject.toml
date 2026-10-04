@@ -100,12 +100,22 @@ select = [
     "BLE",    # flake8-blind-except（盲捕；代码中已有 noqa: BLE001 显式豁免）
     "C4",     # flake8-comprehensions
     "RUF",    # ruff 专属
+    # 2026-10-04 加的两条：先按当前实测把存量清干净，再纳进门禁 —— 只清不改就等于
+    # 下次又长出新的。SIM=可简化写法（嵌套 if / 可合成分支 / 重复分支），RET=返回写法。
+    # 复杂度没有走 ruff 的死线：存量 33 个函数超过 CC 10，一条定值只能"全拆或不开"，
+    # 所以那条判据做成逐函数预算表，见 tests/test_complexity_ratchet.py。
+    "SIM",
+    "RET",
 ]
 ignore = [
     "E501",   # 行长 100 内即可，不强制 79
     "RUF001", # 混淆字符检测对中文/全角标点误报严重
     "RUF002",
     "RUF003",
+    # 有意吞掉异常的地方都带 `# noqa: BLE001 + 一句为什么`（modelhub 那四处是流式收尾、
+    # 损坏台账改名、上游错误体读取）。改成 contextlib.suppress 会把这个"为什么"挤掉，
+    # 而本仓库的判断恰恰依赖那句注释存在。
+    "SIM105",
 ]
 
 [tool.ruff.lint.per-file-ignores]
