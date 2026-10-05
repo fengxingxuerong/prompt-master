@@ -47,10 +47,16 @@ def test_limiter_keys_are_isolated():
 
 
 def test_limiter_slides_after_window():
+    """窗口滑出的判定是 `dq[0] <= now - window`：把首条记录拨回窗口外即等效"时间流逝"。
+
+    不真睡 0.25s 等真实时钟——0.2s 窗口只留 25% 余量，负载高时调度延迟可能吃掉它
+    （单独跑绿、全量跑红的经典形态）。与项目既有的 os.utime 拨时间戳手法同源：
+    把"时间过去"做成确定性输入，测试只验证滑动判定本身。
+    """
     lim = SlidingWindowLimiter(max_events=1, window_seconds=0.2)
     assert lim.acquire("k", 1)[0] is True
     assert lim.acquire("k", 1)[0] is False
-    time.sleep(0.25)
+    lim._events["k"][0] = time.monotonic() - 1.0  # 1s 前的记录，窗口 0.2s → 必然滑出
     assert lim.acquire("k", 1)[0] is True
 
 

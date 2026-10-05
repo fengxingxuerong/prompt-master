@@ -224,7 +224,9 @@ def test_breaker_closes_itself_after_the_cooldown(hub: P.ModelHub, monkeypatch) 
     for _ in range(3):
         hub._mark_failure(entry, "boom")
     assert "a" not in [e.name for e in hub._ordered_enabled()]
-    time.sleep(0.25)
+    # 冷却判定是 `now - opened_at >= cooldown`：把 opened_at 拨到 1s 前即等效"冷却已过"，
+    # 不真睡 0.25s 赌真实时钟（0.2s 窗口只留 25% 余量，负载高时偶红的经典形态）。
+    entry.opened_at = time.time() - 1.0
     assert "a" in [e.name for e in hub._ordered_enabled()], "冷却到点必须自己回来（半开）"
 
 

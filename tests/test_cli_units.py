@@ -1395,11 +1395,13 @@ def test_library_export_skips_bad_json_shapes(
     # （即 mtime 更新），否则扫描先撞上正常文件直接跳出，跳过分支永远走不到
     # —— 我第一版就是这么写的，覆盖率卡在 99% 不动。
     _asset_run(tmp_path, "expok", "分析销售数据并给出改进建议", 8.0)
-    import time as _time
-
-    _time.sleep(0.05)
     (tmp_path / "run_shape_bad.json").write_text('["不是对象"]', encoding="utf-8")
     (tmp_path / "run_text_bad.json").write_text("根本不是 JSON", encoding="utf-8")
+    # 顺序用 os.utime 显式钉死，不靠"后写 0.05s mtime 必更新"赌真实时钟——
+    # 文件系统时间戳粒度不保证小于两次写入间隔（同 _write_run(mtime=...) 的手法）。
+    os.utime(tmp_path / "run_expok.json", (1000.0, 1000.0))
+    os.utime(tmp_path / "run_shape_bad.json", (2000.0, 2000.0))
+    os.utime(tmp_path / "run_text_bad.json", (3000.0, 3000.0))
 
     out = tmp_path / "x.md"
     assert cli_library._library_command(["--export", "expok", "--out", str(out)]) == 0
