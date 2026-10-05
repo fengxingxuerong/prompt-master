@@ -5,7 +5,8 @@
 2. 冒烟失败：错误签名归类（rate_limit/gateway/404/quota/401）与对症建议；
 3. 条件角色：PM_JUDGES=1 时不探测 evaluator_b；PM_PAIRWISE=0 时不探测 comparator；
 4. 缺 Key：不发起调用，直接给 auth 失败与配置建议；
-5. run.py --preflight 接线：全绿退出 0、有失败退出 1。
+5. run.py --preflight 接线：全绿退出 0、有失败退出 1；
+6. 出口代理披露：直连/有代理两臂都走到，代理 URL 里的 userinfo 按凭据处理。
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from pm.preflight import (
     RoleReport,
     _classify_error,
     _mask_key,
+    _proxy_note,
     preflight_roles,
     render_preflight,
     run_preflight,
@@ -32,6 +34,32 @@ def test_mask_key_never_reveals_full_secret():
     assert _mask_key("abc") == "…"
     assert _mask_key("") == ""
     assert "sk-abcdefghij123456" not in _mask_key("sk-abcdefghij123456")
+
+
+def test_proxy_note_reports_direct_when_nothing_is_configured():
+    assert "直连" in _proxy_note({})
+
+
+def test_proxy_note_masks_credentials_inside_proxy_urls():
+    note = _proxy_note(
+        {"https": "https://corpuser:s3cret@proxy.corp:3128", "http": "http://127.0.0.1:8080"}
+    )
+    assert "s3cret" not in note, "代理 URL 里的 userinfo 也是凭据，渲染前必须遮掉"
+    assert "corpuser" not in note
+    assert "https=https://***@proxy.corp:3128" in note
+    assert "http://127.0.0.1:8080" in note, "没有 userinfo 的代理不该被顺手改掉"
+    assert note.index("http=") < note.index("https="), "按 scheme 排序，输出才可逐轮 diff"
+
+
+def test_render_preflight_carries_the_proxy_line(monkeypatch):
+    """那一行必须紧跟标题、在配置表之前：整轮 ❌ 时它是唯一先被看到的现场。"""
+    monkeypatch.setattr("pm.preflight._system_proxies", lambda: {"http": "http://127.0.0.1:9"})
+    report = PreflightReport(
+        roles=[RoleReport(role="target", model="t", base_url="http://x", key_tail="…1234", ok=True)]
+    )
+    lines = render_preflight(report).splitlines()
+    assert lines[0] == "端点预检（--preflight）"
+    assert lines[1].startswith("出口代理：http=http://127.0.0.1:9"), lines[:3]
 
 
 def test_classify_error_signatures():

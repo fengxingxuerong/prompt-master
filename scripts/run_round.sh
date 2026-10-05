@@ -32,6 +32,16 @@ if [ $# -eq 0 ]; then
   set -- --samples 2 --max-iter 2
 fi
 
+# 真端点轮次必须串行（2026-10-04 实测教训，见 docs/evaluation.md §十七·七）：
+# 多个会话各自起一轮会共用同一个 Key 池，噪声带被互相污染 —— 第六轮 50 次调用
+# 就换到一个"不可引用"的读数。这把锁缺省关闭（不改产品并发），**launcher 负责打开它**：
+# 保护的单位是"一轮"，不是"一次调用"。要故意做并发实验时才显式取消。
+export PM_LIVE_LOCK="${PM_LIVE_LOCK:-1}"
+if [ "${PM_LIVE_LOCK}" = "1" ]; then
+  echo "串行锁：开（PM_LIVE_LOCK=1；已有别的轮次在跑时会立刻退 2 并点名对方 PID）"
+  echo "        排队等：PM_LIVE_LOCK_WAIT=<秒>（默认 0 = 不等）"
+fi
+
 PY=./.venv/Scripts/python.exe
 OUT="logs/iter${ROUND}_report.md"
 STDOUT="logs/iter${ROUND}_stdout.log"

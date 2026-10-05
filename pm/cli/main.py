@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -18,6 +19,11 @@ from .diffcmd import diff_command
 from .gatecmd import gate_command
 from .history import _history_command
 from .library import _library_command
+from .live_lock import LiveRunBusy
+from .live_lock import enabled as _live_lock_enabled
+from .live_lock import hold as _live_lock_hold
+from .live_lock import lock_path as _live_lock_path
+from .live_lock import wait_seconds as _live_lock_wait
 from .support import (
     EXIT_CONFIG,
     EXIT_FAILED,
@@ -29,6 +35,9 @@ from .support import (
     save_artifacts,
     setup_logging,
 )
+
+# 串行锁的"我挂上了"这条证据走日志，不打扰 stdout 的结果契约
+logger = logging.getLogger("pm.cli.main")
 
 # 子命令清单：argparse 之前按裸字符串分发（这些参数与 --task 那一套互斥），
 # 所以 --help 必须自己把它们列出来 —— 否则文档写着"学 --help 就会用"，
@@ -170,7 +179,37 @@ def main() -> int:
         seed_prompt=seed_prompt,
     )
 
-    return _execute_run(args, init)
+    return _execute_run_serialized(args, init)
+
+
+def _execute_run_serialized(args: argparse.Namespace, init: dict[str, Any]) -> int:
+    """`PM_LIVE_LOCK` 开着时，整轮跑在跨进程锁里；被别人占着就退 2。
+
+    缺省关闭（`live_lock.enabled()`），所以产品侧的并发行为与这行代码之前完全一致。
+    要串起来的是"一轮 E2E"，不是"一次调用"——理由见 `pm/cli/live_lock.py` 的模块说明。
+    """
+    if not _live_lock_enabled():
+        return _execute_run(args, init)
+    try:
+        with _live_lock_hold(timeout=_live_lock_wait()) as pid:
+            # 挂上了就要说得出证据：2026-10-05 实测过一次"启动器没把 PM_LIVE_LOCK 传进子进程"，
+            # 那一轮从头到尾是裸奔的，而日志里没有任何一行能看出没上锁。
+            # 静默的自我保护等于没有保护，所以这条走 stderr（`--json` 的 stdout 契约不动）。
+            logger.info(
+                "串行锁已持有：%s（PID %s）；要并跑请显式取消 PM_LIVE_LOCK", _live_lock_path(), pid
+            )
+            return _execute_run(args, init)
+    except LiveRunBusy as e:
+        return _live_busy_exit(args, str(e))
+
+
+def _live_busy_exit(args: argparse.Namespace, msg: str) -> int:
+    """占用中的两种出口：`--json` 必须仍然只打一个 JSON 对象（README 的约定）。"""
+    if args.json:
+        print(json.dumps({"status": "busy", "error": msg}, ensure_ascii=False))
+    else:
+        print(f"实时轮次被占用：{msg}\n（锁文件：{_live_lock_path()}）", file=sys.stderr)
+    return EXIT_CONFIG
 
 
 def _execute_run(args: argparse.Namespace, init: dict[str, Any]) -> int:

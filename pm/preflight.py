@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -134,6 +136,31 @@ def _mask_key(key: str) -> str:
     return f"…{key[-4:]}" if len(key) > 4 else "…"
 
 
+# 代理 URL 里的 userinfo 也是一种凭据（http://user:pass@corp-proxy:3128）
+_PROXY_CRED_RE = re.compile(r"://[^/@]*@")
+
+
+def _system_proxies() -> dict[str, str]:
+    """本进程的出口代理视图（单独一个函数是为了让渲染能被测到两臂）。"""
+    return dict(urllib.request.getproxies())
+
+
+def _proxy_note(proxies: dict[str, str]) -> str:
+    """出口代理那一行。
+
+    为什么值得占一行：2026-10-05 那轮活端点 11 次调用全 `Connection error` 判 failed，
+    事后翻台账才发现同一条日志里 langchain 打过 "detected system proxy configuration"，
+    而 45 分钟后 `getproxies()` 又是空的。"上游真坏了"与"本机被代理劫了"只有现场能分，
+    而现场只有在**跑之前**打印出来才留得住。
+    """
+    if not proxies:
+        return "出口代理：直连（getproxies() 为空）"
+    masked = "，".join(
+        f"{scheme}={_PROXY_CRED_RE.sub('://***@', url)}" for scheme, url in sorted(proxies.items())
+    )
+    return f"出口代理：{masked}（若端点全 ❌ 而直连能通，先排它）"
+
+
 def preflight_roles() -> list[str]:
     """按当前配置列出需要探测的角色（含条件角色：评委 B / 成对盲评）。"""
     roles = ["clarifier", "optimizer", "mockgen", "evaluator", "reviser", "target"]
@@ -214,6 +241,7 @@ def render_preflight(report: PreflightReport) -> str:
     """渲染人读报告：配置摘要表 + 冒烟结果 + 对症建议。"""
     lines: list[str] = []
     lines.append("端点预检（--preflight）")
+    lines.append(_proxy_note(_system_proxies()))
     lines.append("")
     lines.append("| 角色 | 模型 | 端点 | Key | 冒烟 | 延迟 | 错误签名 | 建议 |")
     lines.append("|---|---|---|---|---|---|---|---|")

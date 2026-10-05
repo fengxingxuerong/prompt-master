@@ -308,41 +308,36 @@ def test_budget_zero_means_no_cap(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # --------------------------------------------------------------------------
-# ⑤ 真端点实证：本地装死 server，数它真实收到几次请求
+# ⑤ 真端点实证：本地"读完就掐"的 server，数它真实收到几次请求
 # --------------------------------------------------------------------------
-# 本文件的 autouse 夹具会把 `time.sleep` 打成 no-op（为了不退避 5/10/20s）。
-# 装死端点必须**真的**挂住，所以这里在 import 期就把真实 sleep 绑住，
-# 不受后续任何 monkeypatch 影响。
-_REAL_SLEEP = time.sleep
+# 为什么不是"装死挂住"：客户端 timeout 与端点线程被调度的先后是一场**竞赛**。本机带
+# `--cov` 跑时 coverage 要给每个新线程装 tracer，handler 线程在客户端 1s 超时之后才起来
+# 读请求，读到的是已关闭的连接（WinError 10053），记账停在 0 ⇒ 这两条实证连红 5 轮，
+# 不带 --cov 又全绿。判据挂在时序上就是错的，跟机器快慢、跟"环境有没有坏"都无关。
+# 改成"读完请求才掐断"：失败由端点亲手制造，必然发生在记账之后 ⇒ 计数与调度解耦。
+# 副作用是墙钟不再包含挂等（本文件 autouse 夹具还把 sleep 打成 no-op），所以这里
+# 不再断言墙钟，改为断言"这个异常确实会被重试层认成瞬时故障"——那条才是计数的解释权。
 
 
-class _HangingHandler(BaseHTTPRequestHandler):
+class _CuttingHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     hits: ClassVar[list[float]] = []
 
     def do_POST(self) -> None:
         n = int(self.headers.get("content-length") or 0)
         self.rfile.read(n)
-        type(self).hits.append(time.monotonic())
-        _REAL_SLEEP(3)  # 装死，比客户端 timeout 长
-        try:
-            self.send_response(200)
-            self.send_header("content-type", "application/json")
-            self.send_header("content-length", "2")
-            self.end_headers()
-            self.wfile.write(b"{}")
-        except OSError:
-            pass
+        type(self).hits.append(time.monotonic())  # 先记账，再制造失败
+        self.close_connection = True  # 不给响应：连接关掉，客户端立刻拿到连接错误
 
     def log_message(self, *a: Any) -> None:
         pass
 
 
-def _hanging_client(monkeypatch, retries: int):
-    """起一个"每发都挂 3s"的本地端点，返回 (ChatOpenAI, 关掉我方重试的钩子, 端点命中数)。"""
-    _HangingHandler.hits = []
+def _cutting_client(monkeypatch, retries: int):
+    """起一个"每发都读完就掐"的本地端点，返回 (server, 打一发并返回落点异常的钩子)。"""
+    _CuttingHandler.hits = []
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), _HangingHandler)
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _CuttingHandler)
     except OSError:  # pragma: no cover - 沙箱/CI 禁绑定时跳过，不算绿
         pytest.skip("本地无法绑定端口 ⇒ 端点实证改跑 scripts/measure_retry_layering.py")
     port = srv.server_address[1]
@@ -354,53 +349,64 @@ def _hanging_client(monkeypatch, retries: int):
         api_key="sk-test",
         model="probe",
         base_url=f"http://127.0.0.1:{port}/v1",
-        timeout=1.0,
+        timeout=5.0,  # 只是兜底：正常路径上失败由端点掐断制造，等不到这 5s
         max_retries=L.SDK_RETRIES,
     )
 
-    def call_once() -> float:
-        t0 = time.monotonic()
+    def call_once() -> Exception:
         try:
             L._invoke_with_conn_retry("evaluator", lambda: llm.invoke([("human", "hi")]))
-            raise AssertionError("端点装死却调用成功 ⇒ timeout 没生效，计数无意义")
         except AssertionError:
             raise
-        except Exception as e:  # noqa: BLE001 - SDK 异常类型随版本变，判据放在文本上
-            assert "timed out" in str(e).lower(), f"不是超时，计数解释不了：{type(e).__name__}: {e}"
-        return time.monotonic() - t0
+        except Exception as e:
+            # 前置条件，不是放宽：失败必须由**端点掐断**制造。如果这里是 timeout，说明
+            # handler 线程连 5s 都没被调度到 —— 那计数就不可解释，必须报成"实证环境坏了"，
+            # 而不是让人去读一个看起来像"重试层多打了/少打了"的差值。
+            text = f"{type(e).__name__}: {e}".lower()
+            if "timed out" in text or "timeout" in text:
+                raise AssertionError(
+                    "端点没抢先掐断，是客户端自己等满 timeout 才失败的"
+                    f"（{type(e).__name__}: {e}）⇒ 本次计数不可解释，先查这台机器能不能"
+                    "在 5s 内调度起一个 handler 线程，别引用下面任何数字"
+                ) from e
+            return e
+        raise AssertionError("端点掐断了连接却调用成功 ⇒ 失败没走到重试层，计数无意义")
 
     return srv, call_once
 
 
 def test_endpoint_hits_are_our_visible_retry_count(monkeypatch: pytest.MonkeyPatch) -> None:
-    """装死端点收到的请求数 == 我方那层**可见**的连接重试数，不含 SDK 的隐式倍增。
+    """端点收到的请求数 == 我方那层**可见**的连接重试数，不含 SDK 的隐式倍增。
 
     修复前这里量到的是 (1+SDK 2)×(1+我方) —— 隐式那层不看代码看不见、日志不留痕。
     """
-    srv, call_once = _hanging_client(monkeypatch, retries=2)
+    srv, call_once = _cutting_client(monkeypatch, retries=2)
     try:
-        wall = call_once()
-        assert len(_HangingHandler.hits) == 1 + L.TRANSIENT_CONN_RETRIES, (
-            f"端点收到 {len(_HangingHandler.hits)} 次，我方只允许 1+{L.TRANSIENT_CONN_RETRIES} 次"
+        err = call_once()
+        assert L._is_transient_conn_error(err), (
+            f"端点掐断的连接没被认成瞬时故障（{type(err).__name__}: {err}）"
+            "⇒ 计数是别的东西贡献的，这条断言的解释权已经丢了"
         )
-        assert wall >= 2.5, f"三发各挂 1s 却只花了 {wall:.1f}s，timeout 没生效"
+        assert len(_CuttingHandler.hits) == 1 + L.TRANSIENT_CONN_RETRIES, (
+            f"端点收到 {len(_CuttingHandler.hits)} 次，我方只允许 1+{L.TRANSIENT_CONN_RETRIES} 次"
+        )
     finally:
         srv.shutdown()
         srv.server_close()
 
 
 def test_sdk_layer_adds_no_invisible_hits(monkeypatch: pytest.MonkeyPatch) -> None:
-    """把我方重试也关掉 ⇒ 一次超时应当**只**打端点一次。
+    """把我方重试也关掉 ⇒ 端点掐断一次连接就应当**只**收到一发。
 
-    这条才是"SDK 隐式重试被钉住"的端点级实证：缺省 `max_retries=2` 时这里会收到 3 次。
+    这条才是"SDK 隐式重试被钉住"的端点级实证：缺省 `max_retries=2` 时这里会收到 3 次
+    （SDK 对连接错误同样重试），我方名额已经清零，多出来的只可能来自隐式层。
     """
-    srv, call_once = _hanging_client(monkeypatch, retries=0)
+    srv, call_once = _cutting_client(monkeypatch, retries=0)
     try:
-        wall = call_once()
-        assert len(_HangingHandler.hits) == 1, (
-            f"端点收到 {len(_HangingHandler.hits)} 次，隐式层又长回来了"
+        err = call_once()
+        assert len(_CuttingHandler.hits) == 1, (
+            f"端点收到 {len(_CuttingHandler.hits)} 次，隐式层又长回来了（末发异常：{err}）"
         )
-        assert wall < 2.0, f"单发 1s timeout 却挂了 {wall:.1f}s"
     finally:
         srv.shutdown()
         srv.server_close()
@@ -459,3 +465,124 @@ def test_json_extract_helper_still_works() -> None:
     """防手滑：本文件依赖 extract_json_object 的既有语义。"""
     assert L.extract_json_object('```json\n{"a": 1}\n```') == {"a": 1}
     assert json.loads('{"b": 2}') == {"b": 2}
+
+
+# ---------------------------------------------------------------------------
+# 四条"只被时序撞上才覆盖"的分支（2026-10-05 补）
+#
+# 连跑两遍全量套件，本文件的 pm/llm.py 未覆盖行在 21 ↔ 25 之间摆，逐行差集
+# 精确到 410 / 734 / 1286-1288。那不是一个数字难看的问题，而是**这四条分支的
+# 正确性过去没有任何用例在管**：多数轮次里它们根本不执行，谁改坏了也不会红。
+# 与 vkeys 那三条退避分支同一形状，所以用同一方法——条件注入，不等真时序。
+# ---------------------------------------------------------------------------
+
+
+def test_budget_expiry_has_two_arms_and_both_are_reachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """410 行的两臂：没到线判"未到期"、到了线判"到期"。
+
+    之前只有其中一臂被执行过（另一臂靠真时序恰好走到），于是把 `<= 0` 写成 `< 0`
+    这类改法在多数轮次里不会让任何测试变红——差的那 1 秒正好是"预算等于 0 时
+    第一发该不该直接拒"的行为差别。
+    """
+    clock = _Clock()
+    monkeypatch.setattr(L.time, "monotonic", clock)
+    budget = L.WallBudget("evaluator", 10.0)
+    assert budget.expired() is False
+    clock.advance(9.9)
+    assert budget.expired() is False, "还没到线就判到期，会把可用预算白扔掉"
+    clock.advance(0.2)
+    assert budget.expired() is True
+    assert budget.remaining() <= 0
+
+
+@pytest.mark.parametrize(
+    "env_base_url,expect_present",
+    [(None, False), ("https://example.test/v1", True)],
+    ids=["没设 base_url", "设了 base_url"],
+)
+def test_base_url_is_passed_only_when_configured(
+    monkeypatch: pytest.MonkeyPatch, env_base_url: str | None, expect_present: bool
+) -> None:
+    """734 行的两臂。缺 base_url 时不能把空串塞进 ChatOpenAI。
+
+    空串会让 SDK 用**它自己的默认端点**，于是"配置指向 A、实际打到 B"——
+    这类错误在账单和读数上都看不出来（本项目 H1 缓存指纹事故就是它的近亲）。
+    """
+    monkeypatch.delenv("PM_BASE_URL", raising=False)
+    if env_base_url is not None:
+        monkeypatch.setenv("PM_BASE_URL", env_base_url)
+    captured = _capture_openai_kwargs(monkeypatch)
+    assert ("base_url" in captured) is expect_present
+    if expect_present:
+        assert captured["base_url"] == env_base_url
+
+
+def _conn_error_llm(clock: _Clock) -> _HangingLLM:
+    """把"每发吃满 timeout 后抛超时"换成"抛连接错"——形态相同、分类不同。"""
+    fake = _HangingLLM(clock)
+
+    def invoke(_messages: object) -> object:
+        fake.n += 1
+        clock.advance(fake.per_attempt)
+        raise Exception(_CONN_TEXT)
+
+    fake.invoke = invoke  # type: ignore[method-assign]
+    return fake
+
+
+def test_transient_conn_error_with_budget_left_reraises_original(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1286 假臂 → 1288：预算还剩时**原样上抛**，且不再叠加解析重试名额。
+
+    注意"原样上抛"不等于"只发一发"：传输层自己那一链（3 发）是有意保留的，
+    这条真正拦的是旧写法在这里又套一层"再烧两次、每次再吃满一整条重试链"——
+    那层叠加才是实测 45 分钟挂死的另一半来源。
+    """
+    clock = _Clock()
+    monkeypatch.setattr(L.time, "monotonic", clock)
+    monkeypatch.setattr(L, "CALL_BUDGET", 0.0)  # 预算关着 → budget 为 None
+    fake = _conn_error_llm(clock)
+    monkeypatch.setattr(L, "get_llm", lambda role, overrides=None: fake)
+
+    with pytest.raises(Exception) as got:
+        L.structured_call("evaluator", EvaluationResult, "sys", "user")
+    assert "Connection error" in str(got.value), (
+        f"应该原样上抛，实测：{type(got.value)}: {got.value}"
+    )
+    assert not isinstance(got.value, L.CallBudgetExceeded)
+    # 6 = 传输层一链 (1+PM_CONN_RETRIES=2) 3 发 × 两条通道（原生结构化输出 + JSON 文本降级）。
+    # 这里要钉的是"不再乘上解析重试名额"：旧写法是 3 通道轮 × 3 发 × max_retries=3 = 18 发，
+    # 那才是实测 45 分钟挂死的另一半来源。所以断言取实际形态 6，而不是想当然的 1。
+    assert fake.n == 6, f"层叠比例变了要重新算最坏墙钟：n={fake.n}（预期 6，旧缺陷形态是 18）"
+
+
+def test_transient_conn_error_with_exhausted_budget_raises_budget_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """预算见底 + 瞬时网络错 ⇒ 上抛的是 `CallBudgetExceeded`（不是 `Connection error`）。
+
+    两个错都成立时选更可执行的那个：`Connection error` 让人去查网络，
+    "墙钟预算 600s 用尽（实际 Xs，已发 N 次请求）"才告诉人该调哪个参数。
+
+    ⚠️ 这条**没有**覆盖 `pm/llm.py:1287`，别照着函数名去信。实测（2026-10-05，
+    `--cov=pm.llm --cov-report=term-missing` 逐行核对）：预算见底时抛点在内层
+    `_invoke_with_conn_retry`（479 / 492 两处 `budget.exceeded(...)`），
+    异常到外层已是 `CallBudgetExceeded`，于是走 1280-1281 的 `isinstance` 分支，
+    外层 1286-1287 到不了。**这条留作"疑似死分支"的取证**：如果哪天要简化重试层，
+    判据就是"能不能构造出一个绕过内层检查、直接到 1282 的瞬时错"。
+    """
+    clock = _Clock()
+    monkeypatch.setattr(L.time, "monotonic", clock)
+    monkeypatch.setattr(L, "CALL_BUDGET", 50.0)
+    monkeypatch.setattr(L, "TRANSIENT_CONN_RETRIES", 0)
+    fake = _conn_error_llm(clock)  # 每发吃 100s，一发就把 50s 预算穿掉
+    monkeypatch.setattr(L, "get_llm", lambda role, overrides=None: fake)
+
+    with pytest.raises(L.CallBudgetExceeded) as got:
+        L.structured_call("evaluator", EvaluationResult, "sys", "user")
+    info = got.value.details
+    assert info["requests"] >= 1, f"预算错必须带上真实请求数：{info}"
+    assert "Connection error" in info["last_error"], f"最后一次错误没带现场：{info}"
