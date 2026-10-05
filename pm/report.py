@@ -355,6 +355,7 @@ def _uncertainty_lines(state: ReportState) -> list[str]:
 
 def _noise_band_lines(agg: dict[str, Any]) -> list[str]:
     lines: list[str] = []
+    lines = _jitter_provenance_lines(agg)
     lines.append(f"- 每条用例重复采样：{agg.get('n_samples', 1)} 次（`PM_SAMPLES_PER_CASE`）")
     lines.append(
         f"- 用例间标准误差 SEM：{agg.get('sem', 0.0)}；采样噪声（平均极差）：{agg.get('noise', 0.0)}"
@@ -385,7 +386,36 @@ def _noise_band_lines(agg: dict[str, Any]) -> list[str]:
     unstable = agg.get("unstable_cases") or []
     if unstable:
         lines.append(f"- ⚠️ 结论不稳的用例：{', '.join('#' + str(i) for i in unstable)}")
+    # ⚠️ 0.0 是二义读数：既是"重复打分完全一致"（好），也是"压根没重复采样、测不出来"。
+    # 默认 PM_SAMPLES_PER_CASE=1 落在后者，而报告曾照印 0.0，读的人会当成"噪声极小"。
+    if not agg.get("noise_measurable", False):
+        lines.append(
+            "- ⚠️ **噪声不可估**：本轮每条用例只采样 1 次，上面那个 `采样噪声 0.0` "
+            "是「没测到」而不是「重复打分完全一致」。要拿到真实的噪声带，"
+            "把 `PM_SAMPLES_PER_CASE` 调到 ≥2 重跑。"
+        )
     return lines
+
+
+def _jitter_provenance_lines(agg: dict[str, Any]) -> list[str]:
+    """评委抖动那个数是从哪来的（§十八：未验证的配置常数不得进带，但必须披露）。"""
+    prov = agg.get("jitter_provenance") or {}
+    if not prov:
+        return []
+    source = prov.get("source")
+    if source in ("measured", "measured_override"):
+        where = f"账本实测（n={prov.get('n_samples')}，ts={prov.get('ts') or '—'}）"
+        if source == "measured_override":
+            where += f"，被显式配置 {prov.get('configured')} 覆盖"
+        return [f"- 评委复现性抖动取值出处：{where}"]
+    configured = prov.get("configured")
+    if source == "unverified_config":
+        return [
+            f"- ⚠️ 评委复现性抖动：配置里写了 `{configured}`，但校准账本里查不到对应的 "
+            "`--repeat` 实测记录 —— 该值**未计入**噪声带与 `ci_lower`。"
+            f"请跑 `python run.py calibrate --judge evaluator --repeat 3` 把它量出来。"
+        ]
+    return ["- 评委复现性抖动：未配置、未实测，按 0 计入（噪声带里不含评委手抖）"]
 
 
 def _judge_bias_lines(agg: dict[str, Any]) -> list[str]:

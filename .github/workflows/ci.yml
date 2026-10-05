@@ -189,6 +189,16 @@ jobs:
         # 模板里含中文与 <<占位符>>，GBK 码页/CRLF 检出会走 emb 与 linux 不同的
         # 渲染与读取路径（本仓库出过入口编码兜底类缺陷，故两侧都跑）。
         run: python eval_prompts.py
+      - name: Topology selftest（Windows 侧同口径，2026-10-05 补）
+        # 为什么 Windows 侧也要跑：单测把 `PM_<SEAT>_JITTER` 全 delenv 了，
+        # 所以 §十八·六 那个"仲裁线按三席合成被抬到 6.12、越过仲裁自身极差 4.43"
+        # 的缺陷 1354 条单测全绿也没抓到 —— 只有 selftest 会真去读宿主 `.env`。
+        # linux 侧这一步是 2026-10-05 补的，Windows 侧当时漏了：
+        # 于是"两个 job 同口径"这句话本身就是假的（判据见
+        # tests/test_ci_gate_matrix.py 的 _ENTRYPOINT_GATES 双向对表）。
+        env:
+          PM_API_KEY: ""
+        run: python run.py --selftest
       - name: Stub e2e (PowerShell)
         shell: pwsh
         run: ./examples/run_e2e_stub.ps1

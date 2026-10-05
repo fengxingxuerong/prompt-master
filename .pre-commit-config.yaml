@@ -1,4 +1,13 @@
-# pre-commit 质量门禁 —— 与 .github/workflows/ci.yml 同口径的本地版
+# pre-commit 质量门禁 —— .github/workflows/ci.yml 的**本地快速版**
+#
+# ⚠️ "同口径"在本仓库有两个含义，各有判据守着（2026-10-05 拆开的）：
+#   · 范围：ruff / format / mypy 检查**哪些路径**
+#     → test_packaging.py::test_precommit_hooks_cover_the_same_scope_as_ci
+#   · 集合：**哪些门禁存在**
+#     → tests/test_precommit_gate_set.py
+#     此前只有前一半有人管，于是这个文件一度只有 4 条钩子、CI 有 12 条门禁。
+#   · 钩子**能不能红**（跑绿不等于在工作）
+#     → tests/test_hooks_actually_block.py
 #
 # 安装：pip install pre-commit && pre-commit install
 # 2026-09-25 已在本机装上并验过两条：①四条钩子对全仓库 rc=0；②故意 stage 一个
@@ -7,9 +16,9 @@
 #    而"我本地 pre-commit 没报错"会被当成"门禁过了"（这正是它最危险的时刻）。
 #    换一台机器 clone 要重装一次：钩子不在仓库里，在 `.git/hooks/` 里。
 #
-# 代价实测（本机，2026-09-25）：`pre-commit run --all-files` 全程 **109 秒**，
-# 其中 pytest 一条就占大头（1308 条用例）。要快：
-#     SKIP=pytest-quick git commit ...        # 只跑静态三条（约 20 秒）
+# 代价实测（本机，2026-10-05 重测八钩子）：`pre-commit run --all-files` 全程约 **100 秒**，
+# 其中 pytest 一条就占大头（1419 条用例 / 84 秒）。要快：
+#     SKIP=pytest-quick git commit ...        # 只跑其余七条（约 16 秒）
 # 但那一趟**不算门禁过了** —— 跳过的那部分必须在别处补跑，别把它记成绿。
 # 同理 `--no-verify`：它是关掉门禁的开关，不是"门禁慢"的解药。
 #
@@ -49,4 +58,51 @@ repos:
         entry: .venv/Scripts/python.exe -m pytest tests/ -q -p no:warnings
         language: system
         pass_filenames: false
+        always_run: true
+
+      # 下面四条是 2026-10-05 补的。起因：实测 CI 有 12 条门禁而这里只有 4 条，
+      # 而文件头写着"与 ci.yml 同口径的本地版"——当时只有"路径相等"那半截有人管
+      # （test_packaging 只比 ruff/format/mypy 的**范围**），
+      # "哪些门禁存在"没人比。集合判据见 tests/test_precommit_gate_set.py。
+      #
+      # 先量了耗时再决定，"太慢"这个不跑的理由不成立（本机实测）：
+      #   selftest 1963ms / prompt-gate 600ms / eval-prompts 738ms / data-clean 50ms
+      # 对照：全量 pytest 已在钩子里，84s。
+      #
+      # 仍然**不进**钩子的 3 条，取舍登记在 _LOCAL_ONLY_CI_GATES（带理由、有判据）：
+      #   · run_e2e_stub —— 要起 HTTP 桩并占端口，易端口冲突；
+      #   · releases 三套 —— 验的是别的产品（发布快照），改了本产品时几乎总是绿的；
+      #   · modelhub 分项覆盖率 —— **不是"太慢"（324ms）是"没有输入"**：本钩子不带
+      #     --cov，跑它只会读到上一份陈旧 .coverage，给出一个看起来正常的假读数。
+
+      - id: selftest
+        name: 拓扑自检（唯一会在推送前抓到仲裁/兜底回归的一条）
+        entry: .venv/Scripts/python.exe run.py --selftest
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: prompt-gate
+        name: 提示词改动回归门禁（零调用，与基线比 pm/prompts.py）
+        entry: .venv/Scripts/python.exe run.py gate
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: eval-prompts
+        name: 节点提示词结构契约（零调用，判"模板是否残破"）
+        entry: .venv/Scripts/python.exe eval_prompts.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # 最便宜的一条（50ms），但防的后果最实际：pytest 写脏 releases/*/data 之后，
+      # 那份脏数据会被 commit 直接带走；CI 的 git diff 要等推上去才发现，
+      # 那时它已经在历史里了。
+      - id: releases-data-clean
+        name: 发布数据未被测试写脏（git diff --exit-code）
+        entry: git diff --exit-code -- "releases/*/data/*"
+        language: system
+        pass_filenames: false
+        always_run: true
         always_run: true

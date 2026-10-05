@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import math
 import os
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
@@ -29,6 +31,10 @@ WEIGHTS: dict[str, float] = {
     "robustness": 0.15,
     "quality": 0.15,
 }
+
+
+def _env_str(name: str, default: str) -> str:
+    return os.environ.get(name, default)
 
 
 def _env_float(name: str, default: float, *, positive_only: bool = False) -> float:
@@ -48,16 +54,202 @@ PASS_THRESHOLD = _env_float("PM_PASS_THRESHOLD", 8.0, positive_only=True)  # >= 
 # 评委抖动（复现性）：同一份输入重复打分时量到的**最大极差**。
 # 只有 `run.py calibrate --judge X --repeat 3` 量出来之后才填得进去；不填=0，行为与旧版一致。
 JUDGE_JITTER = _env_float("PM_JUDGE_JITTER", 0.0)
-# n=3 时"极差→标准差"的换算因子（d2）。填进来的是极差，合成方差要先换成 sd。
-_RANGE_TO_SD = 1.693
+# 极差 → 标准差的换算因子 d2(n)，随采样次数走（n 越大极差越"撞运气"，除得越多）。
+# ⚠️ 曾经硬编码 `_RANGE_TO_SD = 1.693`（= d2(3)），而 `--repeat` 是可配的：
+#    于是 `--repeat 5` 量出来的数会被当成 sd 直接用，比真实值松 2.326/1.693≈1.37 倍
+#    ——**多花 5 倍钱去校准，仲裁反而更容易触发**，方向是反的。
+#    反过来 k=2 偏严 1.50 倍、k=8 偏松 0.60 倍。
+_D2_BY_N = {2: 1.128, 3: 1.693, 4: 2.059, 5: 2.326, 6: 2.534, 7: 2.704, 8: 2.847}
+# 兼容旧名字：n=3 那一个值仍然是默认口径（`.env.example` 教用户 `--repeat 3` 量）。
+_RANGE_TO_SD = _D2_BY_N[3]
+
+
+def _range_to_sd(n_samples: int) -> float:
+    """把极差换算成 sd，d2 随采样次数查表。
+
+    k>8 走 `1.25 * n` 外推（d2 的渐近值是 √2n，1.25n 是一条经验直线）。
+    ⚠️ **这条外推没有实测校验过**（账本里最大只到 n=8），仅作兜底；
+    真要精确请重新 `calibrate --repeat <k>` 并把 n 加进表里。
+    """
+    if n_samples in _D2_BY_N:
+        return _D2_BY_N[n_samples]
+    return round(1.25 * max(2, n_samples), 3)
+
+
 # 三把评委的复现性差着数量级（实测平均极差：A 0.475、B 1.9、仲裁 2.5），一个全局数
 # 会把最抖那把的误差棒套在所有人头上。`PM_<ROLE>_JITTER` 单独测过再填，只用于
 # **仲裁触发线**（那条线读的就是两位各自的手抖）；`ci_lower` 仍用全局值，取保守口径。
 _JITTER_SEATS = ("evaluator", "evaluator_b", "arbiter")
 
 
+def _jitter_ledger_path() -> Path:
+    """校准账本路径（`run.py calibrate` 每次实测都往里追加一条）。
+
+    ⚠️ 必须走 `pm.cli.support.log_dir()`（每次现读 `PM_LOG_DIR`），不能自己
+    `Path(os.getenv("PM_LOG_DIR", "logs"))`：`calibrate.py` 写账本用的就是前者，
+    两处口径分叉过一次（"我把产物挪到别处了"之后，写账本跟着走、读账本没跟）。
+    这里曾读死 `logs/`，于是测试把 `PM_LOG_DIR` 指到 tmp 之后，
+    读的仍是仓库里那本**真实**账本（`evaluator` 0.54），噪声带悄悄带上了它。
+    """
+    from .cli.support import log_dir  # 局部 import：晚绑定 PM_LOG_DIR
+
+    return log_dir() / "judge_calibration_history.json"
+
+
+def current_judge_model(seat: str = "evaluator") -> str:
+    """当前这把评委用的模型名（读不到时返回 `(unknown)`）。
+
+    给 `_measured_jitter` 当**仪表身份**用：账本条目的 `model` 与它不一致时，
+    那不是当前这把尺子的实测（换过评委/换过 rubric 都算）。
+    与 `calibrate._calib_fingerprints()` 同源同判据 —— 两处必须对同一本账本给
+    同一个答案，否则"校准说不算、噪声带照算"（见 `_measured_jitter` 的事故注记）。
+    """
+    try:
+        from .llm import build_config
+
+        return build_config(seat).model
+    except Exception:  # noqa: BLE001 - 读不到配置不该让噪声带崩掉，按 unknown 过滤
+        return "(unknown)"
+
+
+@lru_cache(maxsize=16)
+def _measured_jitter(
+    ledger_path: str, model: str | None = None
+) -> dict[str, tuple[float, int, str]]:
+    """从账本里读**当前这把尺子**在各座位的实测极差。
+
+    返回 `{seat: (rep_range_mean, n_samples, ts)}`。
+    ⚠️ `n_samples` 必须**一起**读出来：换算成 sd 要用 d2(n)，而 n 各条目可能不同
+    （早期账本条目没有 `rep_times`，只有默认的 3）。
+
+    ⚠️⚠️ **必须按仪表身份过滤**（2026-10-05 实测出来的缺陷）：
+    账本现存那条 `{judge, rep_range_mean: 0.54, ts}` **没有 `model` 字段**，
+    而 `calibration.aggregate_history` 按 `model` 过滤、明确把它判为"不是当前仪表"，
+    返回 `None`。同一本账本，本函数却把 0.54 当成 evaluator 的实测计进噪声带 ——
+    **两本读者给出相反答案**，而噪声带是产品侧唯一会引用的那个。
+
+    这正是 §十八 要挡的那类错误（拿不属于当前仪表的数当实测），只是换了个入口：
+    §十八 是"配置常数冒充实测"，这次是"**另一把尺子**的实测冒充当前尺子的实测"。
+    换型（换评委模型 / 换 rubric）之后旧记录留着是正常的，不该删——
+    该做的是不把它们算进当前仪表的噪声带。
+
+    ⚠️ `model=None` **不是"{不过滤}”，而是"{无法确定当前仪表是谁} ⇒ 一条都不算。
+    留一个不过滤的默认值等于给这个缺陷留后门：本轮第一版把 `model` 默认成 None，
+    而判据写成 `(entry.get("model") or "") != (model or "")` —— 在 `model=None` 时
+    缺 model 的条目被判成"{匹配}，刚修掉的 bug 从参数默认值绕了回来。
+    调用方必须说清自己认为当前是哪把尺子；说不清就一条都不算。
+    该做的是不把它们算进当前仪表的噪声带。
+    """
+    if not model:
+        return {}
+    try:
+        raw = json.loads(Path(ledger_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, list):
+        return {}
+    out: dict[str, tuple[float, int, str]] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        seat = entry.get("judge")
+        rng = entry.get("rep_range_mean")
+        if not isinstance(seat, str) or not isinstance(rng, (int, float)):
+            continue
+        # 仪表身份不匹配的一律不算当前实测。`model` 缺失同样不算：
+        # 无法证明它是这把尺子量的，就不能当这把尺子的读数用（宁可无，不可伪）。
+        if (entry.get("model") or "") != model:
+            continue
+        out[seat] = (float(rng), _repeat_count(entry.get("rep_times")), str(entry.get("ts", "")))
+    return out
+
+
+def _repeat_count(times: object) -> int:
+    """账本条目里的重复次数，认两种记法，越界一律回落 3。
+
+    `rep_times` 早期记成**列表**（重复打分的原始分），后来记成**整数**（次数）。
+    只认 list 会把所有整数记法的条目当成 n=3，d2 就用错了；只认 int 则反过来。
+    `bool` 是 `int` 的子类，必须先挡掉（`True` 不该被读成"重复 1 次"）。
+
+    独立成函数而不是留在 `_measured_jitter` 的循环里：留在那儿会让它的
+    圈复杂度越过 CC 10 而进复杂度台账（`tests/test_complexity_ratchet.py`）——
+    而这里真正需要登记的是"形状容错"这个决定，不是它的分支数。
+    """
+    if isinstance(times, bool):
+        return 3
+    if isinstance(times, int):
+        return times if times >= 2 else 3
+    if isinstance(times, list):
+        return len(times) if len(times) >= 2 else 3
+    return 3
+
+
+def _seat_sd(seat: str, measured: dict[str, tuple[float, int, str]]) -> float:
+    """某个座位的抖动，**已经换算成 sd**。
+
+    ⚠️⚠️ 三条取值路径全都是**极差**，都必须除以 `_range_to_sd`——
+    曾经只除了账本那一条，把 env/全局当成 sd 直接用，于是：
+    填了 `.env` 的本机仲裁线从 3.18 抬到 5.39，越过 selftest 场景 3 的分差 5.0，
+    **`[FAIL] 双评委分歧触发了仲裁`**——而 1354 条单测全绿，什么都没抓到
+    （单测把座位键 delenv 了，selftest 读宿主 `.env`）。
+    `.env.example:116` 明确写了那些值是 `--repeat 3` 量出来的极差。
+    """
+    if seat in _JITTER_SEATS:
+        own = _env_float(f"PM_{seat.upper()}_JITTER", -1.0)
+        if own >= 0:
+            return own / _range_to_sd(3)  # env 的填写口径来自 `--repeat 3`
+    hit = measured.get(seat)
+    if hit is not None:
+        rng, n, _ts = hit
+        return rng / _range_to_sd(n)  # 账本自带真实 n
+    return JUDGE_JITTER / _range_to_sd(3)
+
+
+def _measured_jitter_band(seat: str = "") -> float:
+    """账本里各座位的实测极差（**不换算**），`seat=""` 时取投票席最大。
+
+    与 `_measured_jitter_sd()` 的区别只有一处，但那一处有后果：
+    · `_seat_sd()` 读的是 sd（极差 ÷ d2）→ 给**仲裁触发线**，那条线按 2σ 走；
+    · 本函数读的是极差 → 给**噪声带**，那里 `measurement_noise` 用的是 `hypot`，
+      按 §十八 的审计口径与目标模型采样极差**同尺度**直接合成。
+
+    早先在这里调了 `_measured_jitter_sd()`，带宽被悄悄除了一次 d2（1.594 → 1.534），
+    即噪声带**变窄 3.8%**，`ci_lower` 随之乐观。两个函数名的差别就是这个除号。
+    """
+    measured = _measured_jitter(str(_jitter_ledger_path()), current_judge_model("evaluator"))
+    if seat:
+        hit = measured.get(seat)
+        return hit[0] if hit else 0.0
+    return max(
+        (measured[s][0] for s in _JITTER_SEATS if s != "arbiter" and s in measured),
+        default=0.0,
+    )
+
+
+def _measured_jitter_sd(seat: str = "") -> float:
+    """账本里各座位的**实测抖动**（sd）；`seat=""` 时取投票席的最大值。
+
+    只认账本实测值——冻结常数不算"测过"。与 `_seat_sd` 不同，这里**完全不回退**
+    到 env / 全局：调用方要回答的是"到底测过没有"，回退会把"配了个数"又算成实测。
+    （曾在这里调 `_seat_sd()`，于是只配了 `.env` 的机器上 2.6 照样进带——正是
+    §十八 要挡的那件事。）
+    """
+    measured = _measured_jitter(str(_jitter_ledger_path()), current_judge_model("evaluator"))
+    if seat:
+        hit = measured.get(seat)
+        return hit[0] / _range_to_sd(hit[1]) if hit else 0.0
+    seats = [s for s in _JITTER_SEATS if s != "arbiter"]
+    return max(
+        (measured[s][0] / _range_to_sd(measured[s][1]) for s in seats if s in measured),
+        default=0.0,
+    )
+
+
 def judge_jitter(seat: str = "") -> float:
     """该评委座位的复现性极差；没单独测过就回退全局 `PM_JUDGE_JITTER`。
+
+    ⚠️ 返回的是**极差**，不是 sd —— 换算是消费方的事（见 `_seat_sd`），
+    在这里换一遍会让调用方再除一次（d2 被除两次）。
 
     显式填了 `PM_<ROLE>_JITTER=0` 按 0 处理（"这把测过、确实不抖"），与"没填"不同。
     """
@@ -65,6 +257,12 @@ def judge_jitter(seat: str = "") -> float:
         own = _env_float(f"PM_{seat.upper()}_JITTER", -1.0)
         if own >= 0:
             return own
+    measured = _measured_jitter(
+        str(_jitter_ledger_path()), current_judge_model(seat if seat else "evaluator")
+    )
+    hit = measured.get(seat) if seat else None
+    if hit is not None:
+        return hit[0]
     return JUDGE_JITTER
 
 
@@ -74,20 +272,43 @@ def measurement_noise(target_noise: float | None) -> float | None:
     两者独立，按方差相加。评委这一项此前完全没进不确定度：报告的 `ci_lower` 只吸收
     "同一用例重复采样"的极差，而实测同一份输入让评委 B 重复打能差 2.60、仲裁差 4.43，
     且 `temperature=0` 不改善——所以"保守下界"其实不保守。
-    `None`（采样次数不足以估计噪声）原样传回，调用方据此走退化路径。
+
+    ⚠️ `None` **必须原样透传**（曾在这里返回 `JUDGE_JITTER`）：
+    `None` 的含义是"采样次数不足以估计噪声"，调用方据此把 `REGRESSION_MARGIN`
+    换成更大的 `UNESTIMATED_MARGIN`（0.5）并**关闭平台期判定**。
+    在这里吞掉它，那条降级路径就永远走不到——单次采样会照常宣布"平台期"。
+
+    ⚠️ 评委那一项取的是**有出处**的抖动（`jitter_provenance().jitter`），
+    不是 import 期冻结的 `JUDGE_JITTER` —— 后者分不出"实测过的"和"配出来的"，
+    而 §十八 的归因审计证明：60.6% 的噪声带来自那个从未被校准验证过的配置常数。
+
+    ⚠️ 用 `_measured_jitter_band()`（**极差**，与采样极差同尺度）而不是
+    `_measured_jitter_sd()`（sd）：噪声带是 `hypot` 合成，§十八 的审计读数
+    （1.138 / 2.891）就是按同尺度口径算的，换成 sd 会让带窄一截而无人察觉。
     """
-    if JUDGE_JITTER <= 0:
+    return measurement_noise_with_jitter(target_noise, _measured_jitter_band())
+
+
+def measurement_noise_with_jitter(target_noise: float | None, jitter: float) -> float | None:
+    """与 `measurement_noise` 同式，但用**调用方给定的**评委抖动（已经过出处过滤）。
+
+    分成两个函数是因为：全局 `JUDGE_JITTER` 是 import 期冻结的常量，分不出
+    "实测过的"与"配出来的"，而这正是 §十八 要切开的那一刀。
+    """
+    if jitter <= 0:
         return target_noise
+    # ⚠️ `None` 是"采样次数不足以估计噪声"的哨兵，**即使评委抖动有实测值也必须透传**：
+    # 它的含义是"这一项压根没测出来"，拿别的项去补会把"测不出"改写成"很小"。
     if target_noise is None:
-        return JUDGE_JITTER
-    return round(math.hypot(target_noise, JUDGE_JITTER), 3)
+        return None
+    return round(math.hypot(target_noise, jitter), 3)
 
 
-def effective_disagreement_threshold() -> float:
+def effective_disagreement_threshold(base: float | None = None) -> float:
     """仲裁的真实触发线：取"配置值"与"评委自我分歧能造出的分差"之中较大者。
 
     两位独立评委各带 sd 的抖动时，其**差**的 sd 是 √(sdA²+sdB²)；越过 2σ 才算真分歧
-    （1σ 会有约 32% 误触）。极差换成 sd 要除以 d2(n=3)=1.693。
+    （1σ 会有约 32% 误触）。sd 由 `_seat_sd()` 给（**三条取值路径都按极差除 d2**）。
     默认两座位都是 0 ⇒ 结果完全等于 `PM_JUDGE_DISAGREEMENT`；填了实测值只会让门更严，
     绝不会把已经存在的仲裁放松。门一旦被抬到无穷高，等于宣布"这套评委测不出分歧信号"，
     报告里会说破，不会让人误以为双评委在交叉验证。
@@ -95,13 +316,18 @@ def effective_disagreement_threshold() -> float:
     为什么按座位分别取数（2026-09-20）：三把评委的复现性差着数量级，只填一个全局值时
     最抖的那把会替所有人决定这条线——实测 A 0.475 / B 1.9 时，全局按 2.6 会把触发线
     抬到 4.35（几乎不再仲裁），而按两位各自的抖动算只有 3.18。
+
+    为什么**不含仲裁席**：三席形式会把这条线推到 6.12，而仲裁自身的极差只有 4.43
+    ——永远触发不了仲裁。那样等于把仲裁功能静默关掉却让门看起来更严。
     """
-    sd_a = judge_jitter("evaluator")
-    sd_b = judge_jitter("evaluator_b")
+    configured = judge_disagreement_threshold() if base is None else base
+    measured = _measured_jitter(str(_jitter_ledger_path()), current_judge_model("evaluator"))
+    sd_a = _seat_sd("evaluator", measured)
+    sd_b = _seat_sd("evaluator_b", measured)
     if sd_a <= 0 and sd_b <= 0:
-        return judge_disagreement_threshold()
+        return configured
     diff_sd = math.sqrt(sd_a**2 + sd_b**2)
-    return max(judge_disagreement_threshold(), round(2.0 * diff_sd / _RANGE_TO_SD, 2))
+    return max(configured, round(2.0 * diff_sd, 2))
 
 
 # --------------------------------------------------------------------------
@@ -119,6 +345,11 @@ UNESTIMATED_MARGIN = _env_float("PM_UNESTIMATED_MARGIN", 0.5, positive_only=True
 UNSTABLE_SPREAD = _env_float("PM_UNSTABLE_SPREAD", 1.5, positive_only=True)
 # 评委自报分与代码加权分的平均偏差超过该值 → 判定为系统性放水
 JUDGE_BIAS_ALERT = _env_float("PM_JUDGE_BIAS_ALERT", 1.0, positive_only=True)
+
+# 评分量纲下限（1-10 制）。分数恰好等于它**且**极差为 0 的用例只可能来自失败兜底
+# ——连接失败 / 空输出时评委没有可评的东西，给的是下限而不是一次真实测量。
+# 这个常量只服务 §三十·一 的 `untrusted_case_indices`，不参与任何达标判定。
+_MIN_VALID_SCORE = 1.0
 
 
 def judge_disagreement_threshold() -> float:
@@ -552,6 +783,88 @@ class EvaluationResult(BaseModel):
         return self
 
 
+class JitterProvenance(BaseModel):
+    """抖动那个数的出处。**引用噪声带时必须连它一起引用。**
+
+    §十八 的归因审计发现：`PM_JUDGE_JITTER=2.6` 冻结在 `.env` 后再没被任何一轮
+    校准验证过，而它是合成噪声带的主项——真实采样噪声带 2.891 里有 60.6% 来自
+    这个配置常数。于是 C2 判据（Δ > 本轮自报带）在很大程度上测的是这个常数
+    而不是产品差异，剥掉后 7 轮里 3 轮翻转；同一个常数还经 `ci_lower` 进了达标判定，
+    22 个臂里有 3 个的 `ci_lower` 闸因此翻转。
+
+    四种出处：
+    - `measured`：账本里有 `--repeat` 实测记录，**可以进带**；
+    - `measured_override`：实测存在，但显式配置覆盖了它（要留痕）；
+    - `unverified_config`：配了数但账本里查不到实测 → **不进带**，但必须披露；
+    - `unmeasured`：什么都没配 → 0。
+    """
+
+    source: Literal["measured", "measured_override", "unverified_config", "unmeasured"] = (
+        "unmeasured"
+    )
+    jitter: float = Field(default=0.0, description="计入噪声带的那个值（未验证配置时为 0）")
+    configured: float | None = Field(
+        default=None, description="配置里的原值（被排除时也留着，供报告披露）"
+    )
+    measured: bool = Field(default=False, description="账本里是否真有实测记录")
+    n_samples: int = Field(default=0, description="实测的重复次数（d2 换算要用）")
+    ts: str = Field(default="", description="最近一次实测的时间戳")
+    seat: str = Field(default="", description="哪个座位")
+
+    def as_dict(self) -> dict[str, Any]:
+        return dict(self.model_dump())
+
+
+def jitter_provenance(seat: str = "") -> JitterProvenance:
+    """抖动取数的出处。`seat=""` 时按投票席（evaluator / evaluator_b）取较"重"的一条。
+
+    ⚠️ 这条**只认账本实测**：`PM_JUDGE_JITTER` 这类冻结常数会原样记进 `configured`
+    供披露，但 `jitter` 返回 0 —— 未验证的数不得进噪声带，也不得进 `ci_lower`。
+    """
+    measured = _measured_jitter(str(_jitter_ledger_path()), current_judge_model("evaluator"))
+    configured_raw = JUDGE_JITTER
+    if seat and seat in _JITTER_SEATS:
+        own = _env_float(f"PM_{seat.upper()}_JITTER", -1.0)
+        if own >= 0:
+            configured_raw = own
+    elif seat:
+        configured_raw = 0.0
+
+    seats = [seat] if seat else [s for s in _JITTER_SEATS if s != "arbiter"]
+    hits = [measured[s] for s in seats if s in measured]
+    if not hits:
+        return JitterProvenance(
+            source="unverified_config" if configured_raw else "unmeasured",
+            jitter=0.0,
+            configured=configured_raw if configured_raw else None,
+            measured=False,
+            seat=seat,
+        )
+    # 同一座位多条记录时取**最近**的一条（ts 同格式，字典序即时间序）。
+    best = max(hits, key=lambda h: h[2])
+    if configured_raw:
+        return JitterProvenance(
+            source="measured_override",
+            jitter=configured_raw,
+            configured=configured_raw,
+            measured=True,
+            n_samples=best[1],
+            ts=best[2],
+            seat=seat,
+        )
+    # ⚠️ 返回的是**极差**，不是 sd —— 换算是消费方的事（`_seat_sd` / `_measured_jitter_sd`）。
+    # 在这里换一遍，下游再除一次就成了除两次 d2（3.18 → 1.88，静默变松一倍）。
+    return JitterProvenance(
+        source="measured",
+        jitter=best[0],
+        configured=None,
+        measured=True,
+        n_samples=best[1],
+        ts=best[2],
+        seat=seat,
+    )
+
+
 class AggregateScore(BaseModel):
     """多条测试用例的聚合结果。avg 看整体，min 卡短板——任一用例崩了就不算过。
 
@@ -578,12 +891,27 @@ class AggregateScore(BaseModel):
     n_samples: int = 1
     sem: float = Field(default=0.0, description="用例间标准误差：stdev(用例中位分)/sqrt(n_cases)")
     noise: float = Field(default=0.0, description="同一用例重复采样的平均极差（采样噪声）")
+    # 0.0 是**二义读数**：既可能是"重复打分完全一致"（好），也可能是
+    # "根本没重复采样、压根测不出来"（此时报 0.0 是在骗人）。
+    # 默认 `PM_SAMPLES_PER_CASE=1` 落在后者——报告曾把这种 0.0 当成"噪声极小"印出来。
+    untrusted_case_indices: list[int] = Field(
+        default_factory=list,
+        description=(
+            "分数落在量纲下限且极差为 0 的用例下标 —— 连接失败/输出为空导致评委给 1 分。"
+            "与 `noise_measurable` 分开回答两个问题（§三十·一）："
+            "那个问『带测不测得出来』，这个问『这条数据本身可不可信』。"
+        ),
+    )
+    noise_measurable: bool = Field(
+        default=False, description="噪声带是测出来的，还是测不出来只好记 0"
+    )
     noise_total: float = Field(
         default=0.0,
         description="合成噪声带（目标采样极差 ⊕ 评委复现性抖动）；ci_lower 用的是这个",
     )
-    judge_jitter: float = Field(
-        default=0.0, description="评委复现性极差（PM_JUDGE_JITTER，未测则为 0）"
+    judge_jitter: float = Field(default=0.0, description="评委复现性极差（实测且有出处的才计入）")
+    jitter_provenance: dict[str, Any] | None = Field(
+        default=None, description="抖动取数出处：measured / unverified_config / unmeasured"
     )
     ci_lower: float = Field(default=0.0, description="均分的保守下界；passed 看这个而不是看点估计")
     unstable_cases: list[int] = Field(
@@ -712,9 +1040,10 @@ class AggregateScore(BaseModel):
             sem = 0.0
         spreads = [e.score_spread for e in evals if e.score_spread > 0]
         noise = round(sum(spreads) / len(spreads), 3) if spreads else 0.0
-        # 评委自己重复打同一份输入的抖动也是噪声，而且此前**完全没有**进不确定度。
-        # 两项独立，按方差合成（`PM_JUDGE_JITTER` 未填时完全等于旧口径）。
-        noise_all = measurement_noise(noise)
+        # 评委抖动只有**实测且有出处**的才进带（见 `jitter_provenance`）：
+        # 冻结在 .env 里的配置常数不再无条件进 `noise_total` / `ci_lower`。
+        prov = jitter_provenance()
+        noise_all = measurement_noise_with_jitter(noise, _measured_jitter_band())
         unstable = [e.test_case_index for e in evals if e.score_spread >= UNSTABLE_SPREAD]
         # 下界 = 均值 - 1.96·SEM - 半个噪声带；单用例单次采样时退化为点估计（向后兼容）
         # 但不低于量纲下限 1.0：分数刻度是 1-10，跑出来一个 -0.82 的"下界"是纯噪声
@@ -758,8 +1087,22 @@ class AggregateScore(BaseModel):
             n_samples=max((e.n_samples for e in evals), default=1),
             sem=sem,
             noise=noise,
+            # 0.0 二义：测不出 与 重复打分完全一致。必须有至少一次多采样才叫"测出来"。
+            noise_measurable=(max((e.n_samples for e in evals), default=1) >= 2) and bool(spreads),
+            # §三十·一：崩掉的臂不许被 `noise_measurable` 顺手带走。
+            # `run_7d87c5065c55`（连接失败，四用例全 1.0）与
+            # `run_1b234ac88efa`（结构化输出全崩）极差都是 0，
+            # 于是被判成"不可估"而从 Δ 的统计里消失 —— 而它们 Δ≈−4.4，
+            # 是那批臂里最差的。**筛掉的不是噪声，是结论。**
+            # 判据取"落在量纲下限"：分数刻度 1-10，1.0 只可能来自失败兜底。
+            untrusted_case_indices=sorted(
+                e.test_case_index
+                for e in evals
+                if e.weighted_score <= _MIN_VALID_SCORE and e.score_spread == 0
+            ),
             noise_total=noise_all if noise_all is not None else 0.0,
-            judge_jitter=JUDGE_JITTER,
+            judge_jitter=_measured_jitter_band(),
+            jitter_provenance=prov.as_dict(),
             ci_lower=ci_lower,
             unstable_cases=unstable,
             judge_bias=judge_bias,

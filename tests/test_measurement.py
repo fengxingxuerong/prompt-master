@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+
 from pm import backend, testing
 from pm.graph import build_app
 from pm.nodes import (
@@ -503,19 +505,66 @@ def test_empty_target_output_is_marked_not_silently_scored(monkeypatch):
 # ---------------------------------------------------------------------------
 # 评委复现性进不确定度（PM_JUDGE_JITTER）
 # ---------------------------------------------------------------------------
+def _empty_logdir():
+    """临时产物目录：账本是运行期产物，测试绝不许写进仓库的 logs/。"""
+    import tempfile
+    from pathlib import Path
+
+    return Path(tempfile.mkdtemp(prefix="pm-ledger-"))
+
+
+def _write_ledger(log_dir, rep_range_mean: float, seat: str = "evaluator"):
+    """往账本里写一条"实测记录"，形状对齐 `calibrate._save_entry`。
+
+    ⚠️ `model` 必须填（§二十九）：账本按仪表身份过滤，缺它的条目会被判为
+    "不是当前这把尺子量的"、不进噪声带。`rep_times` 缺省按 n=3 记。
+    """
+    from pm import schemas
+
+    p = log_dir / "judge_calibration_history.json"
+    p.write_text(
+        json.dumps(
+            [
+                {
+                    "judge": seat,
+                    "rep_range_mean": rep_range_mean,
+                    "ts": "2026-10-05",
+                    "model": schemas.current_judge_model(seat),
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    schemas._measured_jitter.cache_clear()
+
+
 def test_measurement_noise_combines_in_quadrature(monkeypatch):
+    """评委抖动与采样噪声按方和根合成。
+
+    ⚠️ 2026-10-05 改口径（§十八）：评委那一项只认**账本实测**，
+    配在 `.env` 里的冻结常数不再进带。所以这里用账本造一个实测值，
+    而不是 `monkeypatch.setattr(schemas, "JUDGE_JITTER", ...)`——
+    后者是 §十八 之前的写法，它断言的行为正是本轮要废掉的。
+    `test_jitter_provenance.py` 是这条的新口径正身。
+    """
     import math
 
     from pm import schemas
 
+    for seat in ("PM_EVALUATOR_JITTER", "PM_EVALUATOR_B_JITTER", "PM_ARBITER_JITTER"):
+        monkeypatch.delenv(seat, raising=False)
     monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.0)
-    assert schemas.measurement_noise(1.0) == 1.0, "未填抖动时完全等于旧口径"
+    monkeypatch.setenv("PM_LOG_DIR", str(tmp_ledger := _empty_logdir()))
+    schemas._measured_jitter.cache_clear()
+
+    assert schemas.measurement_noise(1.0) == 1.0, "没有实测抖动时完全等于旧口径"
     assert schemas.measurement_noise(None) is None, "噪声不可估的语义不许被改写"
 
-    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.0)
-    assert schemas.measurement_noise(None) == 2.0, "只有评委抖动时也进带"
+    # 只有评委抖动、采样噪声测不出来时也进带
+    _write_ledger(tmp_ledger, 2.0)
+    assert schemas.measurement_noise(1.5) == round(math.hypot(1.5, 2.0), 3)
     got = schemas.measurement_noise(1.5)
-    assert got == round(math.hypot(1.5, 2.0), 3)
     assert got > max(1.5, 2.0), "合成必须比任何单独一项更宽（保守方向）"
 
 
@@ -579,25 +628,47 @@ def test_explicit_zero_jitter_is_not_treated_as_unmeasured(monkeypatch):
 
 
 def test_ci_lower_widens_with_judge_jitter(monkeypatch):
+    """⚠️ 2026-10-05 改口径（§十八）：抖动必须**实测**才进 `ci_lower`。
+
+    这条测试原来断言"把 `JUDGE_JITTER` 从 0 改成 2.6，下界就变保守"——
+    而 §十八 的归因审计证明那个数 60.6% 的噪声带来自它、却从未被任何一轮校准
+    验证过，且它经 `ci_lower` 让 22 个臂里 3 个达标闸翻转。所以现在改用账本
+    造一条实测记录：未测 → 不进带；测了 → 进带。
+    """
     from pm import schemas
 
-    evals = [_ev(8.0, spread=0.4), _ev(8.4, spread=0.6), _ev(7.6, spread=0.2)]
+    for seat in ("PM_EVALUATOR_JITTER", "PM_EVALUATOR_B_JITTER", "PM_ARBITER_JITTER"):
+        monkeypatch.delenv(seat, raising=False)
     monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.0)
+    monkeypatch.setenv("PM_LOG_DIR", str(log_dir := _empty_logdir()))
+    schemas._measured_jitter.cache_clear()
+
+    evals = [_ev(8.0, spread=0.4), _ev(8.4, spread=0.6), _ev(7.6, spread=0.2)]
     tight = AggregateScore.from_evaluations(evals, n_expected=3)
-    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
+
+    _write_ledger(log_dir, 2.6)
     wide = AggregateScore.from_evaluations(evals, n_expected=3)
 
-    assert wide.ci_lower < tight.ci_lower, "评委抖动必须让下界更保守"
+    assert wide.ci_lower < tight.ci_lower, "实测的评委抖动必须让下界更保守"
     assert wide.noise_total > wide.noise and wide.judge_jitter == 2.6
     assert tight.noise_total == tight.noise, "未测抖动时不引入任何新数值"
+    assert tight.judge_jitter == 0.0
 
 
 def test_plateau_margin_uses_the_combined_noise(monkeypatch):
-    """回退/平台期余量必须看合成噪声：否则"评委这次手抖"会被当成版本回退而提前停。"""
+    """回退/平台期余量必须看合成噪声：否则"评委这次手抖"会被当成版本回退而提前停。
+
+    ⚠️ 同上（§十八）：抖动取自**账本实测**，不是配置常数。
+    """
     from pm import schemas
 
+    for seat in ("PM_EVALUATOR_JITTER", "PM_EVALUATOR_B_JITTER", "PM_ARBITER_JITTER"):
+        monkeypatch.delenv(seat, raising=False)
     monkeypatch.setattr(schemas, "JUDGE_JITTER", 0.0)
+    monkeypatch.setenv("PM_LOG_DIR", str(log_dir := _empty_logdir()))
+    schemas._measured_jitter.cache_clear()
+
     assert schemas.noise_margin(schemas.measurement_noise(0.5)) == 1.0
-    monkeypatch.setattr(schemas, "JUDGE_JITTER", 2.6)
+    _write_ledger(log_dir, 2.6)
     combined = schemas.measurement_noise(0.5)
     assert schemas.noise_margin(combined) > 1.0

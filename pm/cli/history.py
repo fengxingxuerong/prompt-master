@@ -25,12 +25,48 @@ _TERMINAL_STATUS = {
 }
 
 
+def _arm_is_trusted(d: dict[str, Any]) -> bool:
+    """这一条臂的数据本身可不可信（与"噪声带测不测得出来"无关）。
+
+    新归档直接读 `untrusted_case_indices`（§三十·一 那个字段）；
+    旧归档没有它，按实况回推 —— 平均分触到量纲下限 1.0 且一条都没通过，
+    那不是一次差测量，是一次失败（连接断了 / 输出解析不出来）。
+    """
+    flagged = (d.get("aggregate") or {}).get("untrusted_case_indices")
+    if isinstance(flagged, list):
+        return not flagged
+    agg = d.get("aggregate") or {}
+    avg = agg.get("avg_score")
+    return not (isinstance(avg, (int, float)) and avg <= 1.0 and not agg.get("n_passed"))
+
+
+def _is_mock_run(d: dict[str, Any]) -> bool:
+    """这一条是不是"用例生成降级"的假跑（§三十·二）。
+
+    判据只有 `errors` 的 `mock:` 前缀，因为那是 `pm/nodes/execute.py` 里
+    **唯一**会把用例来源标成不合格的地方（降级兜底 / 条数不够 / 场景覆盖缺失）。
+
+    ⚠️ 原来这里判的是 `trace` 里的 channel 含不含 `"fake"`，那是 pytest 的
+    fake 后端留下的痕迹，而 mock 跑走的是真实通道名（plain/json_fallback/
+    function_calling），一个都匹配不上。实测：36 条 mock 臂**全部**漏判，
+    混进 Δ 的统计当成了真运行 —— 其中一条还把 36 条 Δ 撑成全 0.0。
+
+    补这一条不靠猜：判据来自写出该标记的那三行，字段名与前缀逐字照抄。
+    """
+    return any(str(e).startswith("mock:") for e in (d.get("errors") or []))
+
+
 def _load_run_history(last: int, include_demo: bool) -> list[dict[str, Any]]:
     """扫描 logs/run_*.json，按修改时间从新到旧收集，抽出聚合所需的最小字段集。
 
     全量 pytest 的 fake 跑也会往 logs/ 落 run 文件（数量远多于真实运行）：
     所以 demo 过滤必须发生在取样窗口**之内**逐个进行，而不是先截断再过滤——
     否则最近 N 个文件可能全是测试产物，真实运行反而被挤出窗口。
+
+    §三十·一：`noise_measurable` **不参与**取样过滤。实测它会把崩掉的臂
+    （连接失败 / 结构化输出全崩，四用例全 1.0、极差全 0）判成"不可估"而
+    一并删掉，而那正是 Δ 最差的两条臂 —— 筛掉的不是噪声，是结论。
+    崩掉的臂改由 `trusted` 字段**点名**，让引用的人看见并自己决定。
     """
     from datetime import datetime
 
@@ -44,7 +80,7 @@ def _load_run_history(last: int, include_demo: bool) -> list[dict[str, Any]]:
         agg = d.get("aggregate") or {}
         base = d.get("baseline_aggregate") or {}
         channels = {str(e.get("channel")) for e in (d.get("trace") or [])}
-        is_demo = "fake" in channels
+        is_demo = "fake" in channels or _is_mock_run(d)
         if is_demo and not include_demo:
             continue
         opt_avg = agg.get("avg_score")
@@ -66,6 +102,9 @@ def _load_run_history(last: int, include_demo: bool) -> list[dict[str, Any]]:
                 "llm_calls": d.get("llm_calls", 0),
                 "demo": is_demo,
                 "noise": agg.get("noise"),
+                # §三十·一：点名崩掉的臂，而不是靠 `noise_measurable` 顺手删掉。
+                # 取不到旧字段（这些归档早于该字段）时按实况回推：平均分触底且一条没过。
+                "trusted": _arm_is_trusted(d),
             }
         )
         if len(rows) >= max(0, last):
@@ -73,18 +112,15 @@ def _load_run_history(last: int, include_demo: bool) -> list[dict[str, Any]]:
     return rows
 
 
-def _history_command(argv: list[str]) -> int:
+def _task_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按 task 分组做 Δ 的配对统计：均值 ± 1.96×SE，置信区间不含 0 才算显著。
+
+    独立成函数是因为它是"**哪些臂计入**"这个决定（§三十·一），而
+    `_history_command` 只该管渲染。两件事挤在一个函数里时，
+    渲染上的任何分支都会顶高统计那段的复杂度台账。
+    """
     import math
 
-    ap = argparse.ArgumentParser(prog="run.py history")
-    ap.add_argument("--last", type=int, default=50, help="只看最近 N 条运行（默认 50）")
-    ap.add_argument("--include-demo", action="store_true", help="包含演示模式的运行（默认排除）")
-    ap.add_argument("--json", action="store_true", help="输出 JSON（智能体消费）")
-    ns = ap.parse_args(argv)
-
-    rows = _load_run_history(ns.last, ns.include_demo)
-
-    # 按 task 分组：组内 ≥2 条且都有基线 → Δ 配对统计（置信区间不含 0 = 显著）
     groups: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         if r["delta"] is not None:
@@ -94,16 +130,14 @@ def _history_command(argv: list[str]) -> int:
     for task, rs in groups.items():
         if len(rs) < 2:
             continue
-        deltas = [float(r["delta"]) for r in rs]
+        deltas = [float(r["delta"]) for r in rs if r["trusted"]]
         n = len(deltas)
+        if n < 2:
+            continue  # 崩的臂被点名之后，可信臂不足 2 条就不给显著性判定
         mean = sum(deltas) / n
-        if n >= 2:
-            var = sum((x - mean) ** 2 for x in deltas) / (n - 1)
-            se = math.sqrt(var / n)
-        else:
-            se = 0.0
+        var = sum((x - mean) ** 2 for x in deltas) / (n - 1)
+        se = math.sqrt(var / n)
         lo, hi = mean - 1.96 * se, mean + 1.96 * se
-        significant = n >= 2 and (lo > 0 or hi < 0)
         task_stats.append(
             {
                 "task": task,
@@ -111,11 +145,32 @@ def _history_command(argv: list[str]) -> int:
                 "deltas": deltas,
                 "delta_mean": round(mean, 2),
                 "delta_ci95": [round(lo, 2), round(hi, 2)],
-                "significant": significant,
+                "significant": lo > 0 or hi < 0,
+                # §三十·一：崩掉的臂**不参与**统计，但必须**点名**。
+                # 曾经它们被"噪声不可估"这条过滤静默删掉（见 `_load_run_history`），
+                # 于是 Δ 均值从 +1.34 顶到 +2.15、CI 从跨 0 变成不含 0 ——
+                # 一个"显著"的结论是被筛出来的。现在它明写在输出里。
+                "excluded_untrusted": [
+                    {"run_id": r["run_id"], "delta": r["delta"], "opt_avg": r["opt_avg"]}
+                    for r in rs
+                    if not r["trusted"]
+                ],
                 "note": "样本少，结论仅供观察" if n < 5 else None,
-                "run_ids": [r["run_id"] for r in rs],
+                "run_ids": [r["run_id"] for r in rs if r["trusted"]],
             }
         )
+    return task_stats
+
+
+def _history_command(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="run.py history")
+    ap.add_argument("--last", type=int, default=50, help="只看最近 N 条运行（默认 50）")
+    ap.add_argument("--include-demo", action="store_true", help="包含演示模式的运行（默认排除）")
+    ap.add_argument("--json", action="store_true", help="输出 JSON（智能体消费）")
+    ns = ap.parse_args(argv)
+
+    rows = _load_run_history(ns.last, ns.include_demo)
+    task_stats = _task_stats(rows)
     task_stats.sort(key=lambda s: -s["n_runs"])
 
     if ns.json:
@@ -125,7 +180,9 @@ def _history_command(argv: list[str]) -> int:
                     "n_runs": len(rows),
                     "runs": rows,
                     "task_groups": task_stats,
-                    "method": "同任务 Δ 的均值 ± 1.96×SE；置信区间不含 0 视为显著（小样本粗判）",
+                    "method": "同任务 Δ 的均值 ± 1.96×SE；置信区间不含 0 视为显著（小样本粗判）。"
+                    "崩溃臂（连接失败/输出不可解析，均分触底）不计入统计但在 "
+                    "`task_groups[].excluded_untrusted` 里逐条点名（§三十·一）",
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -155,6 +212,21 @@ def _history_command(argv: list[str]) -> int:
                 f"  {mark}  Δ均值 {s['delta_mean']:+.2f}  CI [{s['delta_ci95'][0]:+.2f}, {s['delta_ci95'][1]:+.2f}]"
                 f"  n={s['n_runs']} {note}｜{s['task']}"
             )
+            # §三十·一：崩掉的臂被排除时必须说出来，不能只报排除后的漂亮数字
+            for e in s["excluded_untrusted"]:
+                print(_excluded_line(e))
     else:
-        print("\n（暂无同任务 ≥2 次的运行——对同一需求多跑几轮，这里会给出 Δ 的显著性判定）")
+        print("\n（暂无同任务 ≥2 次的有效运行——对同一需求多跑几轮，这里会给出 Δ 的显著性判定）")
     return 0
+
+
+def _excluded_line(e: dict[str, Any]) -> str:
+    """排除说明那一行。
+
+    独立成函数是为了不把 `_history_command` 的圈复杂度顶过 CC 10 ——
+    渲染细节不该和"哪些臂计入统计"那个决定挤在同一个函数里。
+    """
+    return (
+        f"      ⚠️ 已排除崩溃臂 {e['run_id']}（优化后均分 {e['opt_avg']}、"
+        f"Δ {e['delta']:+}）—— 不计入上面的均值，列在这儿是为了不让你以为它没跑过"
+    )
