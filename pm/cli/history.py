@@ -29,15 +29,32 @@ def _arm_is_trusted(d: dict[str, Any]) -> bool:
     """这一条臂的数据本身可不可信（与"噪声带测不测得出来"无关）。
 
     新归档直接读 `untrusted_case_indices`（§三十·一 那个字段）；
-    旧归档没有它，按实况回推 —— 平均分触到量纲下限 1.0 且一条都没通过，
-    那不是一次差测量，是一次失败（连接断了 / 输出解析不出来）。
+    旧归档没有它，按实况回推。
+
+    ⚠️ 回推判据试过两版，都不够：
+
+    - 第一版"均分 ≤ 1.0"只抓得住**全**崩的那条（`7d87c5065c55`，四用例全 1.0），
+      漏掉**半崩**的 `1b234ac88efa`（两条评 1.0、一条 6.7，均分被拉到 2.9）。
+    - 第二版"`n_passed == 0` 且均分 ≤ 5.0"更糟：`a43e44adcc9f` 是
+      **一条都没通过**（n_passed=0，均分 7.83），但它的用例分是
+      `[7.81, 4.0, 4.0, 4.0]` —— 那是一次真实测量（优化确实没提上去），
+      却被判成崩溃。**判据吃掉了我们要看的信号。**
+
+    能分开的是**有没有用例真的触到量纲下限**：`min_score` 就是那个下限，
+    评委只在没有可评的东西（连接断了 / 输出为空）时才给 1.0。
+    崩掉的臂有 4/4 或 2/3 条触底，真实臂一条都没有。
+
+    所以判据是 `min_score` 触底 **且** 一条都没通过 ——
+    只触底不通过的 `a43e44adcc9f` 留得住（它有 7.81 分的用例），全崩的两条抓得住。
     """
     flagged = (d.get("aggregate") or {}).get("untrusted_case_indices")
     if isinstance(flagged, list):
         return not flagged
     agg = d.get("aggregate") or {}
-    avg = agg.get("avg_score")
-    return not (isinstance(avg, (int, float)) and avg <= 1.0 and not agg.get("n_passed"))
+    floor = agg.get("min_score")
+    if not isinstance(floor, (int, float)):
+        return True  # 没有下限可判，交给别的闸
+    return not (floor <= 1.0 and not agg.get("n_passed"))
 
 
 def _is_mock_run(d: dict[str, Any]) -> bool:

@@ -163,8 +163,74 @@ def test_crashed_arm_is_flagged_untrusted_but_not_mock() -> None:
 
 
 def test_legacy_archive_without_the_field_is_recovered() -> None:
-    """旧归档没有 `untrusted_case_indices`（该字段比它们晚），必须能按实况回推。"""
-    legacy = _d(aggregate={"avg_score": 1.0, "n_passed": 0})
-    assert _arm_is_trusted(legacy) is False
-    normal = _d(aggregate={"avg_score": 7.6, "n_passed": 2})
+    """旧归档没有 `untrusted_case_indices`，按实况回推。
+
+    判据挂在 `min_score` 上（第三版）：均分触底**不算**判据 ——
+    `1b234ac88efa` 均分 2.9 而 min 是 1.0，反过来 `a43e44adcc9f` 均分 7.83、
+    min 4.0。只有"确实有用例触到下限"才是失败兜底的证据。
+    """
+    crashed = _d(aggregate={"avg_score": 1.0, "min_score": 1.0, "n_passed": 0})
+    assert _arm_is_trusted(crashed) is False
+    normal = _d(aggregate={"avg_score": 7.6, "min_score": 6.1, "n_passed": 2})
     assert _arm_is_trusted(normal) is True
+
+
+def test_missing_min_score_is_indeterminate_not_accused() -> None:
+    """`min_score` 缺失时不做判定 —— 宁可放过，不可冤。
+
+    拿均分代替判据就是上一版的错：均值是聚合量，会被好用例拉高，
+    从而放过半崩的臂（`1b234ac88efa`）。没有下限证据就没有崩的证据。
+    """
+    d = _d(aggregate={"avg_score": 1.0, "n_passed": 0})
+    assert _arm_is_trusted(d) is True
+
+
+# ---------------------------------------------------------------------------
+# 回推判据的第二版：抓得住**半崩**的臂
+# ---------------------------------------------------------------------------
+def test_half_crashed_arm_is_not_trusted() -> None:
+    """`run_1b234ac88efa`：两条用例输出为空（评 1.0）、一条评了 6.7。
+
+    均分被拉到 **2.9** —— 判据第一版写的是"均分 ≤ 1.0"，这一条正好从指缝里漏过去，
+    于是 Δ=−4.81（全臂最差）被当成一次正常测量混进了统计。
+    """
+    half = _d(aggregate={"avg_score": 2.9, "n_passed": 0, "min_score": 1.0})
+    assert _arm_is_trusted(half) is False, "半崩的臂不许因为均分>1.0 就当成可信"
+
+
+def test_genuinely_bad_but_valid_arm_stays_trusted() -> None:
+    """对照组，而且是**真实归档里的一条**：`a43e44adcc9f`。
+
+    它一条都没通过（`n_passed=0`），均分 7.83，但用例分是 `[7.81, 4.0, 4.0, 4.0]`
+    —— 一次真实测量，只是优化没提上去。那正是我们要看的信号。
+
+    判据第二版写成"`n_passed==0` 且均分 ≤ 5.0"时这条会被误判成崩溃；
+    第三版才把它留得住。这条测试钉的就是那个"最容易改坏的一侧"。
+    """
+    p = RUNS / "run_a43e44adcc9f.json"
+    if not p.exists():
+        pytest.skip("归档不在本机")
+    d = json.loads(p.read_text(encoding="utf-8"))
+    assert d["aggregate"]["n_passed"] == 0, "前提变了：这条臂不是一条都没通过"
+    assert _arm_is_trusted(d) is True, "跑成了但没提分 = 真实信号，不许当崩溃丢掉"
+    synthetic = _d(aggregate={"avg_score": 3.4, "n_passed": 0, "min_score": 4.0})
+    assert _arm_is_trusted(synthetic) is True
+
+
+def test_the_two_real_crashed_arms_are_both_flagged() -> None:
+    """把两条实际发生过的崩溃臂钉住：全崩的那条与半崩的那条都要被抓到。"""
+    for run_id in ("7d87c5065c55", "1b234ac88efa"):
+        p = RUNS / f"run_{run_id}.json"
+        if not p.exists():
+            pytest.skip("归档不在本机")
+        assert _arm_is_trusted(json.loads(p.read_text(encoding="utf-8"))) is False, run_id
+
+
+def test_floor_score_alone_is_not_enough() -> None:
+    """触底 + 一条没通过，两个条件缺一不可。
+
+    只看"有没有触底"会把 `e76f9acfefab` 那种（有 1.0 的用例但 2 条通过、
+    属于真实测量）也拖下水；只看"n_passed==0"会误伤 `a43e44adcc9f`。
+    """
+    passed_anyway = _d(aggregate={"avg_score": 5.0, "n_passed": 1, "min_score": 1.0})
+    assert _arm_is_trusted(passed_anyway) is True
