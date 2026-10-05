@@ -1626,3 +1626,30 @@ run `54b28925695a`，35 调用，`early_stopped`（修订器空内容 → 保留
 - 新尺 Δ 序列仍只有两点（+1.08 / +2.07），旧尺 +2.75 的显著结论不可延续。
 - 配置少记一笔：`PM_EVALUATOR_MODEL=deepseek-v4-flash` 未进 `.env.example`（Round 25 已知项）。
 
+
+## Round 32（2026-10-05，PromptMaster 本产品）—— 封顶接线轮：§十七·十 照出的三条对不上全部修复并钉死（TDD 先红后绿）
+
+上一轮（Round 31）只凭读文件照出的三条对不上，本轮逐一 pytest 复现后修复：
+
+1. **聚合没吃封顶**：`judge.py` 的 `evals`（`EvaluationResult` 聚合输入）在封顶**前**就建好，
+   封顶只改 dict → 复现：`test_empty_cap_wiring.py::test_cap_feeds_aggregate` 红
+   （avg=8.75 裸分、passed=True）。修复：`evals` 构建移到封顶循环之后重建——
+   `weighted_score` 是 `from_evaluations` 唯一吃的分数字段，重建即同源。绿：avg=6.0、min=4.0、passed=False。
+2. **披露分支是死的**：`empty_cap` 只进 trace 事件 payload，`state` 里永远没有 →
+   `report.py:481` 读 `state["empty_cap"]` 永远空。修复：`patch["empty_cap"] = n_capped`。
+   复现/钉死：`test_cap_reaches_state` + `test_report_discloses_cap`（键名契约双向验证）。
+3. **落盘与报告自相矛盾**：前两条修好即消（落盘 dict、聚合、披露同源）。
+
+**修复的连带效应（意外的活案例）**：`test_injection_gate.py` 两用例红——夹具的 3 字输出
+「已解决」此前能以 9.5 **裸分**达标（聚合吃裸分时代的放水通道）；修复后封顶真正参与达标判定
+（`len < 8` 判空画像）→ 压到 4.0 不可达标。夹具已换实质文本。这条活案例反向确认了修复的价值。
+
+**测试基建注意**：渲染层 `_empty_deliverable_lines` 在 state 无 `test_runs` 时对空串查画像
+必然命中（`len("")<8`）——单独拿 evaluate 的 out 当 state 渲染会误报「空产出获高分」；
+真实链路 `test_runs` 从 test 节点起常驻 state 不受影响，测试侧按真实延续方式拼装。
+
+**画像误报未修**（Round 31 的第 4 条）：标记表与「数据缺失」标注撞车属敏感语义改动，本刀不动，
+留作下一刀候选。
+
+验收：四条接线测试先红后绿；全量 1308 串行绿（+4）；ruff/format/mypy 干净；用例数三处同改
+1304→1308（README / operations / pre-commit 注释，`test_test_count_copies_match_the_live_collection` 钉）。

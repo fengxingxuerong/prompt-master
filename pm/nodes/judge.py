@@ -832,7 +832,6 @@ def evaluate_node(state: State) -> dict[str, Any]:
         q_warns=q_warns,
         rules_fn=_rules_for_case(state),
     )
-    evals = [EvaluationResult.model_validate(e) for e in evaluations]
     # 空产出硬封顶(2026-09-27 八轮校准:三家厂商两版条款都管不住空壳日报,
     # 8.8~9.85 vs 人工 2)——从"评委自觉"下沉为代码约束,与 scoring.py 的
     # 判定式封顶同一哲学。只动主流程达标判定;校准路径不经过此处,裸口径不变。
@@ -855,6 +854,11 @@ def evaluate_node(state: State) -> dict[str, Any]:
             n_capped,
             4.0,
         )
+    # 聚合输入必须在**封顶之后**重建：此前 evals 在封顶前就建好，封顶只改了
+    # evaluations dict，聚合 avg/min/达标判定吃的是封顶前裸分——落盘全 4.0、
+    # 报告却报 7.6 的自相矛盾就是这么来的（§十七·十 run 54b28925695a 实测照出）。
+    # weighted_score 是 from_evaluations 唯一吃的分数字段，重建即同源。
+    evals = [EvaluationResult.model_validate(e) for e in evaluations]
     # 事实断言（ground-truth）：从 test_runs 收集断言结果，参与聚合的一票否决
     assertions = _merge_rule_verdicts(_collect_assertions(runs), evals)
     # 规则判定只活在 aggregate 里的话，报告的断言表看不到它（真实跑暴露的）：
@@ -933,6 +937,10 @@ def evaluate_node(state: State) -> dict[str, Any]:
         "revision_delta": revision_delta,
         "judge_health": _judge_health(judges),
         "llm_calls": state.get("llm_calls", 0) + n_llm_calls,
+        # 报告披露分支读 state["empty_cap"]（report.py 空产出小节）：此前这个键
+        # 只进 trace 事件 payload，state 里永远没有 → 披露分支是死的（§十七·十）。
+        # 0 = 未生效，渲染层 falsy 跳过；>0 时披露「封顶已生效」给报告读者。
+        "empty_cap": n_capped,
     }
     if patch_runs:
         patch["test_runs"] = runs
