@@ -45,10 +45,10 @@ ROOT = Path(__file__).parent
 DEFAULT_LOG_DIR = ROOT / "logs"
 DEFAULT_OUT = ROOT / "judge_calibration" / "samples.candidates.json"
 DEFAULT_REVIEW = ROOT / "judge_calibration" / "REVIEW.md"
-DEFAULT_EXISTING = [
-    ROOT / "judge_calibration" / "samples.json",
-    ROOT / "judge_calibration" / "samples_disputed.json",
-]
+# 参与去重的锚点文件：不写死清单。写死的两份（samples.json / samples_disputed.json）
+# 恰好漏掉了 samples.candidates.json —— 那正是 48 条已确认人工分住的地方，
+# 于是重采会把已标过的同一份输出再摊到人面前（实测 25 条里 18 条重复）。
+ANCHOR_DIR = ROOT / "judge_calibration"
 
 # 目标模型为这些值时，输出不是真模型产出的，不能当锚点素材。
 _STUB_TARGETS = {"", "stub-model", "stub", "fake", "mock", "none", "test"}
@@ -211,7 +211,9 @@ def select(
         chosen: list[dict[str, Any]] = []
         queue = list(in_band)
         while queue and len(chosen) < per_band:
-            nxt = min(queue, key=lambda r: (used_task.get(r["original_task"], 0), len(r["original_task"])))
+            nxt = min(
+                queue, key=lambda r: (used_task.get(r["original_task"], 0), len(r["original_task"]))
+            )
             queue.remove(nxt)
             used_task[nxt["original_task"]] = used_task.get(nxt["original_task"], 0) + 1
             nxt["band"] = name
@@ -278,13 +280,15 @@ def render_review(samples: list[dict[str, Any]], skipped: int) -> str:
         "3. **没改的条目不参与校准**——这是刻意的：未确认的分数一旦进集，测出来的 r 只是在读评委自己的口味。",
         "4. 复核顺序按下方清单（判定线附近 + 线索命中的优先，它们对结论的信息量最大）。",
         "5. 跑校准：`python run.py calibrate --samples judge_calibration/samples.candidates.json --aggregate`",
-        "   （注意：人工分进锚点集指纹，回填后第一次校准与历史记录的漂移对比会判为\"换考卷\"，这是对的；",
+        '   （注意：人工分进锚点集指纹，回填后第一次校准与历史记录的漂移对比会判为"换考卷"，这是对的；',
         "   `--aggregate` 会在报告末尾附上跨轮合并读数与置信区间，口径见 `docs/evaluation.md` §十四。）",
         "",
         "评委自己给的分列在每条里，**用途是让你先去看它和直觉不一致的那些**，不是让你抄它。",
         "",
     ]
-    ordered = sorted(samples, key=lambda s: (abs(float(s["provenance"]["judge_score"]) - 8.0), -len(s["note"])))
+    ordered = sorted(
+        samples, key=lambda s: (abs(float(s["provenance"]["judge_score"]) - 8.0), -len(s["note"]))
+    )
     for i, s in enumerate(ordered, 1):
         prov = s["provenance"]
         dims = " / ".join(f"{k}={v}" for k, v in (prov["judge_dims"] or {}).items())
@@ -309,18 +313,50 @@ def render_review(samples: list[dict[str, Any]], skipped: int) -> str:
     return "\n".join(lines)
 
 
+def anchor_files(anchor_dir: Path) -> list[Path]:
+    """锚点目录里所有样本文件的唯一枚举点（示例文件不算数据）。
+
+    去重集、覆盖度表、命中率表、覆盖写保护必须读同一份清单 —— 各写一份就一定会有
+    其中一处漏掉某个文件，而漏掉的恰好是装着人工分的那个。
+    """
+    try:
+        return [p for p in sorted(anchor_dir.glob("samples*.json")) if "example" not in p.name]
+    except OSError:
+        return []
+
+
+def count_labeled(path: Path) -> int:
+    """目标文件里已带人工分（或已 confirmed）的条目数。写保护用它。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    rows = (
+        data
+        if isinstance(data, list)
+        else (data.get("samples") if isinstance(data, dict) else None)
+    )
+    return sum(
+        1
+        for x in rows or []
+        if isinstance(x, dict) and (x.get("human_score") not in (None, "") or x.get("confirmed"))
+    )
+
+
 def _labeled_anchors(anchor_dir: Path) -> list[dict[str, Any]]:
     """读所有锚点样本文件里**已有人工分**的条目（示例文件不算数据）。"""
     out: dict[str, dict[str, Any]] = {}
     dupes = 0
-    for path in sorted(anchor_dir.glob("samples*.json")):
-        if "example" in path.name:
-            continue
+    for path in anchor_files(anchor_dir):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        rows = data if isinstance(data, list) else (data.get("samples") if isinstance(data, dict) else None)
+        rows = (
+            data
+            if isinstance(data, list)
+            else (data.get("samples") if isinstance(data, dict) else None)
+        )
         for item in rows or []:
             if not isinstance(item, dict) or item.get("human_score") in (None, ""):
                 continue
@@ -411,9 +447,13 @@ def recommended_bands(coverage: dict[str, Any], yields: dict[str, dict[str, int]
 
 def render_coverage(coverage: dict[str, Any], yields: dict[str, dict[str, int]]) -> str:
     lines = ["", "## 人工标签格子覆盖度（零调用，门槛与 pm.calibration 同源）", ""]
-    lines.append(f"每个格子要 ≥{coverage['min_cell']} 条才能读出 κ（推导见 docs/evaluation.md §三十一）。")
+    lines.append(
+        f"每个格子要 ≥{coverage['min_cell']} 条才能读出 κ（推导见 docs/evaluation.md §三十一）。"
+    )
     for src, info in coverage["sources"].items():
-        label = {"owner": "所有者亲判", "ai_proxy": "AI 代判（与评委同族，量的是家族一致性）"}.get(src, src)
+        label = {"owner": "所有者亲判", "ai_proxy": "AI 代判（与评委同族，量的是家族一致性）"}.get(
+            src, src
+        )
         detail = "　".join(f"{b}:{c}" for b, c in info["bands"].items() if c)
         gap = "、".join(info["deficient"]) or "无"
         lines.append(f"- {label}：{info['n']} 条 → 缺格 {gap}")
@@ -440,7 +480,14 @@ def main() -> int:
     ap.add_argument("--review", default=str(DEFAULT_REVIEW))
     ap.add_argument("--per-band", type=int, default=10, help="每个分数带最多采集几条")
     ap.add_argument("--keep-duplicate", action="store_true", help="不剔除与现有锚点集重复的输出")
-    ap.add_argument("--coverage", action="store_true", help="只看人工标签格子覆盖度（零采集、零写入）")
+    ap.add_argument(
+        "--allow-overwrite-labeled",
+        action="store_true",
+        help="明知 --out 里有已确认人工分仍然覆盖（默认拒绝，退出码 2）",
+    )
+    ap.add_argument(
+        "--coverage", action="store_true", help="只看人工标签格子覆盖度（零采集、零写入）"
+    )
     ap.add_argument(
         "--prefer-deficient",
         action="store_true",
@@ -448,6 +495,7 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    log_dir = Path(args.log_dir)
     anchor_dir = ROOT / "judge_calibration"
     cov = coverage_by_human_cell(anchor_dir)
     ylds = band_yield(anchor_dir)
@@ -461,9 +509,26 @@ def main() -> int:
     if not rows:
         print("没有可用的真端点记录（全部为 fake/stub）——先去跑一轮真端点批次", file=sys.stderr)
         return 1
+    out_path = Path(args.out)
+    if not args.allow_overwrite_labeled:
+        n_lab = count_labeled(out_path)
+        if n_lab:
+            # 默认 --out 就是装着已确认锚点的那个文件。此前"再采一轮"这个动作
+            # 会把它整份覆盖，48 条人工分一次性消失——而这条路径没有任何测试打过。
+            hint = (
+                f"拒绝覆盖：{out_path} 里已有 {n_lab} 条带人工分/已确认的锚点。"
+                + chr(10)
+                + "  - 想接着补采：换目标文件，例如"
+                + "    --out judge_calibration/samples.candidates.2.json"
+                + chr(10)
+                + "  - 确认要重写这一份（人工分将丢失，而它们是唯一不可再生的东西）："
+                + "    --allow-overwrite-labeled"
+            )
+            print(hint, file=sys.stderr)
+            return 2
     skip: set[str] = set()
     if not args.keep_duplicate:
-        skip = _existing_shas(DEFAULT_EXISTING)
+        skip = _existing_shas(anchor_files(anchor_dir))
     prefer: tuple[str, ...] = tuple(recommended_bands(cov, ylds)) if args.prefer_deficient else ()
     chosen = select(rows, max(1, args.per_band), skip, prefer=prefer)
     samples = to_samples(chosen)
@@ -471,7 +536,7 @@ def main() -> int:
         print("分层后为空（可能全部与现有锚点重复）", file=sys.stderr)
         return 1
 
-    out = Path(args.out)
+    out = out_path
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(samples, ensure_ascii=False, indent=1),
