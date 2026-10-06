@@ -53,13 +53,13 @@ PB-1 与 PB-2 都**不改变评分与优化效果**，只补"可核对性"（改
 | 优化项 | 对应竞品做法 | 优先级 | 实施方式 | 状态 |
 |---|---|---|---|---|
 | PC-1 评委分判别力审计 | Phoenix「judge 模板须过 F1 出厂闸」/ Langfuse κ+混淆矩阵 | P0 | `pm/calibration.py`：`_auc_vs_label`、`discrimination_stats`、`render_discrimination`；`analyze()` 与 `aggregate_history()` **两处**接线（README 抄的是聚合那行） | ✅ 已实施 |
-| PC-2 阈值净增益必须赢过平凡基线 | DeepEval 早期的 `find_threshold`+混淆矩阵（现已删除） | P0 | `_best_cut`（只在评委分可表达区间内扫）+ `_loo_cut_accuracy`（留一折重定阈值）⇒ 报告直接给"净增益 −0.044"这种可以为负的数 | ✅ 已实施 |
+| PC-2 阈值净增益必须赢过平凡基线 | DeepEval 早期的 `find_threshold`+混淆矩阵（现已删除） | P0 | `_best_cut`（只在评委分可表达区间内扫）+ `_loo_cut_accuracy`（留一折重定阈值）⇒ 报告直接给"净增益 +0.000（留一折 0.933 = 平凡基线 0.933）"这种可以为零/为负的数 | ✅ 已实施 |
 | PC-3 κ/一致率的可估性门槛 | 同族：power 分析、显著性检验（**调研对象里无人做**） | P0 | 2×2 四格各 ≥10（κ 标准误反解 + 蒙特卡洛核对）且重抽 CI 半宽 ≤0.3，否则报告改印「这张考卷答不了达标一致性」 | ✅ 已实施 |
 | PC-4 补采队列按人工标签格子排 | Langfuse Annotation Queue 的设计核心 | P0 | `harvest_anchors.py`：`--coverage`（只读、零写入）+ `--prefer-deficient`（最缺格 × 历史命中率排序，**只认 owner 缺口**） | ✅ 已实施 |
 | PC-5 留出集与缓存的 split 维度 | GEPA 缓存键 =(候选哈希,样例 id,**split**)，train/val 命名空间隔离 | P1 | 本产品 target/eval 缓存按内容哈希、**无 split 维**；做留出集时必须先给缓存键加 split，否则留出侧被训练侧热缓存重放 | ⏳ 未做（写死在文档，防顺手踩） |
 | PC-6 廉价优先级联 | `inspect cascade()`：确定性 scorer 定案，评委只跑未定案的 | P1 | 同时省钱与缩小评委决策面；本轮边界是"只加算术、不动调用编排"，故未做 | ⏳ 未做 |
 | PC-7 考卷身份做成内容哈希 | openai/evals 声明式记录 / Langfuse 数据集按时间戳定版本 | P1 | 现状用 n + 协议名推断"是不是同一张考卷"；n 相同不代表集合相同（两批各 45 条可以完全不同） | ⏳ 未做 |
-| N13 自动最优提示词搜索 / GEPA 式反思 | DSPy MIPROv2 / GEPA | 不采纳 | 理由**替换**：上一轮引的二手负结果未能复核到一手（见 §5 引用降级），本轮改用自家实测——评委在 owner 标签上 AUC 0.48~0.64，以这种量具为目标的搜索优化的是它没读出来的那一维 | ❌ 维持不采纳 |
+| N13 自动最优提示词搜索 / GEPA 式反思 | DSPy MIPROv2 / GEPA | 不采纳 | 理由**替换**：上一轮引的二手负结果未能复核到一手（见 §5 引用降级），本轮改用自家实测——评委在 owner 标签上 AUC 0.452（owner 子集）~0.623（全集，CI 覆盖 0.5），以这种量具为目标的搜索优化的是它没读出来的那一维 | ❌ 维持不采纳 |
 | N9 G-Eval logprob 加权 / `rubric=` 区间约束 | DeepEval | 不采纳（暂缓） | 需端点回传 logprobs，经 modelhub 网关**未验证任何上游提供**；先验端点再谈 | ❌ 待前置验证 |
 | N12 合成用例 + critic 复筛 | DeepEval synthesizer | 不采纳（暂缓） | critic 仍会是同一个评委，等于用没读出信息的量具筛题 | ❌ 阻塞在 PC-1 之后 |
 
