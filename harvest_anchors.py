@@ -191,6 +191,7 @@ def select(
     per_band: int,
     skip_shas: set[str],
     prefer: tuple[str, ...] = (),
+    total: int | None = None,
 ) -> list[dict[str, Any]]:
     """按分数带分层 + 带内任务族去重，控制规模。
 
@@ -199,9 +200,17 @@ def select(
     所以每个带都要有人工分，且优先换任务族而不是在同一族里堆条数。
     """
     picked: list[dict[str, Any]] = []
-    # prefer 只改**访问顺序**不改每带上限：补采队列要先把最缺的格子摊到人面前，
-    # 但"每带 ≤per_band 条"这条防的是同一族输出灌满候选集，拆开看是两件事。
-    ordered = [b for b in BANDS if b[0] in prefer] + [b for b in BANDS if b[0] not in prefer]
+    # prefer 只改**访问顺序**不改每带上限："每带 ≤per_band 条"防的是同一族输出灌满
+    # 候选集，与"谁优先"是两件事。但**只有同时给了 total，优先才真的起作用**：
+    # 每带各自封顶时，把某带排前面并不会让它多拿名额，也没有哪个带会被挤掉 ——
+    # 2026-10-06 实测过才发现 `--prefer-deficient` 当时是个空开关（只改列表顺序）。
+    by_name = {band_name: (band_name, lo, hi) for band_name, lo, hi in BANDS}
+    # 必须按 prefer 给出的**序列**走。先前写成 [b for b in BANDS if b[0] in prefer]，
+    # 那只是把带分成两段，prefer 内部的先后仍被 BANDS 顺序覆盖 —— 单带 prefer 看不出来，
+    # 多带时整个优先级就没了（实测 >=9.0 排第一却仍然最后被取）。
+    ordered = [by_name[n] for n in prefer if n in by_name] + [
+        b for b in BANDS if b[0] not in prefer
+    ]
     for name, lo, hi in ordered:
         in_band = [r for r in rows if r["out_sha"] not in skip_shas and lo <= r["judge_score"] < hi]
         in_band.sort(key=lambda r: (r["original_task"], -len(r["test_output"])))
@@ -217,7 +226,7 @@ def select(
             nxt["band"] = name
             chosen.append(nxt)
         picked.extend(chosen)
-    return picked
+    return picked[:total] if total is not None else picked
 
 
 def to_samples(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -512,6 +521,12 @@ def main() -> int:
         "--coverage", action="store_true", help="只看人工标签格子覆盖度（零采集、零写入）"
     )
     ap.add_argument(
+        "--total",
+        type=int,
+        default=0,
+        help="本轮总共只采集几条（0=不设总量）。要给 --prefer-deficient 装上牙：排序只有在名额有限时才决定谁进队列",
+    )
+    ap.add_argument(
         "--prefer-deficient",
         action="store_true",
         help="按「最缺的人工格子 × 历史命中率」排采集顺序（默认按固定分带顺序）",
@@ -555,7 +570,13 @@ def main() -> int:
     prefer: tuple[str, ...] = (
         tuple(recommended_bands(cov, ylds)[0]) if args.prefer_deficient else ()
     )
-    chosen = select(rows, max(1, args.per_band), skip, prefer=prefer)
+    if args.prefer_deficient and not args.total:
+        print(
+            "ℹ️ --prefer-deficient 只排序不取舍：加 --total N（一轮打算请人工判几条）"
+            "才会把优先带之外的名额挤出来。",
+            file=sys.stderr,
+        )
+    chosen = select(rows, max(1, args.per_band), skip, prefer=prefer, total=args.total or None)
     samples = to_samples(chosen)
     if not samples:
         print("分层后为空（可能全部与现有锚点重复）", file=sys.stderr)

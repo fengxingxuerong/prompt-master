@@ -251,6 +251,36 @@ def test_prefer_changes_visit_order_not_per_band_cap() -> None:
     )
 
 
+def test_prefer_order_is_a_sequence_not_a_membership_set() -> None:
+    """实测缺陷：`ordered` 曾写成 `[b for b in BANDS if b[0] in prefer] + ...`，
+    那只是把带分成两段，**prefer 内部的先后仍被 BANDS 顺序覆盖**。
+    单带 prefer 的夹具看不出来（我上一版就是这么漏过的）——两种顺序必须给出不同结果。"""
+    rows = [_row(f"c{i}", f"v{i}", 8.4) for i in range(4)] + [
+        _row(f"d{i}", f"w{i}", 3.2) for i in range(4)
+    ]
+    a = H.select(list(rows), per_band=4, skip_shas=set(), prefer=("8.0-8.9", "<6.0"))
+    b = H.select(list(rows), per_band=4, skip_shas=set(), prefer=("<6.0", "8.0-8.9"))
+    assert [r["band"] for r in a] == ["8.0-8.9"] * 4 + ["<6.0"] * 4
+    assert [r["band"] for r in b] == ["<6.0"] * 4 + ["8.0-8.9"] * 4
+    assert a != b, "顺序必须真的起作用，否则 prefer 只是装饰"
+
+
+def test_total_lets_priority_decide_who_gets_a_slot() -> None:
+    """prefer 只在**名额有限**时才决定谁进队列：每带各自封顶时把某带排前面并不会让它多拿名额。
+    这条就是 2026-10-06 发现 `--prefer-deficient` 是个空开关的复现。"""
+    rows = [_row(f"c{i}", f"v{i}", 8.4) for i in range(4)] + [
+        _row(f"d{i}", f"w{i}", 3.2)
+        for i in range(40)  # 最满的那一格素材最多
+    ]
+    ordered = H.select(list(rows), per_band=6, skip_shas=set(), prefer=("8.0-8.9", "<6.0"))
+    assert len(ordered) == 10, "不设 total 时 prefer 只排序，不该减少条数"
+    capped = H.select(list(rows), per_band=6, skip_shas=set(), prefer=("8.0-8.9", "<6.0"), total=5)
+    assert [r["band"] for r in capped] == ["8.0-8.9"] * 4 + ["<6.0"], capped
+    # 反向对照：同样的 total，不给 prefer 就还是 BANDS 顺序（<6.0 先占满）
+    naive = H.select(list(rows), per_band=6, skip_shas=set(), total=5)
+    assert [r["band"] for r in naive] == ["<6.0"] * 5
+
+
 # --------------------------------------------------------------- 5. --coverage 必须只读
 
 
