@@ -436,6 +436,11 @@ def _norm(text: str) -> str:
 # 共性盲区。拒答是否得体应由 task_completion 维度扣分体现，不该换来可上线判定。
 # 这里只做**画像识别**，告警在 report.py 与 calibration.py 两处消费；刻意不进
 # 判定链——告警误报的代价（多看一眼）远低于判错一条真"无缺失"报告的代价。
+#
+# ⚠️ 2026-10-05（§三十·九）上面那句"刻意不进判定链"**与实现不符**：
+# `judge.py` 把画像结果接进了 `apply_empty_deliverable_cap`，改写 weighted_score，
+# 而那是 avg / n_passed / passed 的唯一输入——等于在判定链上，而且是一刀切。
+# 代价实测出来了：50 条评委打了 ≥8.0 的输出被封到 4.0。
 EMPTY_DELIVERABLE_MARKERS: tuple[str, ...] = (
     "数据缺失",
     "暂无",
@@ -448,19 +453,50 @@ EMPTY_DELIVERABLE_MARKERS: tuple[str, ...] = (
 )
 _EMPTY_MARKERS_NEEDED = 2
 
+# 「实质内容」的判据：去掉标记词与 Markdown 骨架后，还剩下多少字。
+#
+# 为什么要有它（§三十·九 实测）：`数据缺失` 这类标记词在大量任务里是**期望输出的
+# 一部分**——§十七 那批任务的原文就写着「数据不足或缺失时必须显式标注『数据缺失』」。
+# 只按标记词计数，等于**照任务要求做就被判成空壳**：归档里 126/160 次命中是
+# `数据缺失` 单独造成的（占 79%）。读那份被封的输出（`2d306d72feec` case#1，1022 字，
+# 三章节齐全、5 条异常点带行动建议、逐条标注缺失，评委 dimension 均分 8.6）——
+# 那是合规交付，不是空壳。
+#
+# 所以标记词降为**辅证**：命中标记词 **且** 剥掉骨架后没有实质内容，才算空产出。
+# 空壳日报（"今日无可用工作记录，请提供后再生成"）照样命中——它本来就没有实质内容。
+_SUBSTANTIVE_MIN_CHARS = 40
+
+# Markdown 表格/分隔线/标题标记：只是版式，不算交付物。
+_SKELETON_CHARS = str.maketrans("", "", "|*-#>`：:·• \t\n\r")
+
+
+def _substantive_length(stripped: str) -> int:
+    """剥掉版式符号后还剩多少实质字符——用来区分"有交付物"与"只有骨架"。"""
+    return len(stripped.translate(_SKELETON_CHARS))
+
 
 def has_empty_deliverable_profile(text: str) -> bool:
-    """输出是否呈现"空壳/纯拒答"画像：占位或拒答标记累计 ≥2 处，或几乎没有内容。
+    """输出是否呈现"空壳/纯拒答"画像：占位/拒答标记命中，**且**没有实质交付物。
 
     标记按**出现次数**累计而非去重——「• 数据缺失」×3 的模板只含一种标记，
-    按去重会漏。画像刻意保守：命中只意味着"这条高分需要人工看一眼"，不参与
-    任何达标判定。
+    按去重会漏。
+
+    ⚠️ 2026-10-05（§三十·九）加的第二个条件，理由是实测代价：
+    只按标记词计数时，`数据缺失` 单独造成 160 次命中里的 126 次（79%），
+    而任务原文常要求「必须显式标注『数据缺失』」——**照要求做就被判空壳**。
+    50 条评委打了 ≥8.0 的输出因此被封到 4.0。
+    加上"剥掉版式后仍无实质内容"这一条，标记词才回到它该有的地位：
+    **辅证**而不是单独定罪。
+
+    命中只意味着"这条高分需要人工看一眼"；是否可上线仍由评委维度分决定。
     """
     stripped = (text or "").strip()
     if len(stripped) < 8:
         return True
     hits = sum(stripped.count(m) for m in EMPTY_DELIVERABLE_MARKERS)
-    return hits >= _EMPTY_MARKERS_NEEDED
+    if hits < _EMPTY_MARKERS_NEEDED:
+        return False
+    return _substantive_length(stripped) < _SUBSTANTIVE_MIN_CHARS
 
 
 EMPTY_DELIVERABLE_CAP = 4.0
