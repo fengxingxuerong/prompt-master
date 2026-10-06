@@ -101,3 +101,73 @@ B1 与 B2 都刻意做成**零调用**：版本对比要能每次提交都跑，
 code 集合前后完全相同**（`OPTIMIZER_SYSTEM` 正是这种模板）。
 只比 code 的判据会说"无回归"，而门禁恰好对它最该管的模板失效。
 现在补了命中项级通道（并剥离引号内的引用），实测能抓住。
+
+---
+
+## 第三轮（2026-10-06）：把对标对象换成"量具本身"
+
+> 方法：两路并行调研公开仓库（优化器一族 / 评测与评委一族），star、许可证、最近推送
+> 全部当场取自 shields.io 与 GitHub HTML + PyPI/npm 元数据，未取到的标「—」。
+> **本轮不再引用二手博客的结论**（见文末"上一轮引用的复核结果"）。
+
+### 1. 竞品地形（2026-10-06 实测检索）
+
+| 仓库 | 语言/许可证 | ★ | 最近一次活动 | 与本产品最相关的那个机制 |
+|---|---|---|---|---|
+| [langfuse/langfuse](https://github.com/langfuse/langfuse) | TS / MIT（`/ee` 另计） | 35k | 今日有推送 | Annotation Queue：人工标注按队列+Score Config 收敛，配 κ/混淆矩阵分析 |
+| [stanfordnlp/dspy](https://github.com/stanfordnlp/dspy) | Python / MIT | 39k | 2026-10-05（v3.4.0，9-25） | `ScoreWithFeedback` + `warn_on_score_mismatch`：metric 必须自带理由，且自检一致性 |
+| [promptfoo/promptfoo](https://github.com/promptfoo/promptfoo) | TS / MIT | 26k | 今日有推送 | ~70 种断言（`assert-set(threshold)`/`select-best`/`derivedMetrics`/cost/latency）+ CI 里跑对比 |
+| [confident-ai/deepeval](https://github.com/confident-ai/deepeval) | Python / Apache-2.0 | 19k | 昨日（PyPI 4.2.2） | G-Eval：整数判定按 **token 概率归一** + `rubric=` 把分数限制在指定区间；DAG 确定性判据 |
+| [openai/evals](https://github.com/openai/evals) | Python / 见 README | 20k | 2026-04（≈6 个月未动） | 声明式 eval 记录（`id/metrics/class/args/samples_jsonl/eval_type`） |
+| [Arize-ai/phoenix](https://github.com/Arize-ai/phoenix) | Py+TS / **Elastic-2.0**（evals 包） | 12k | 今日有推送 | 出厂纪律：judge 模板必须在 golden set 上 **F1≥85%** 才可用（docs 自述，未独立复现） |
+| [gepa-ai/gepa](https://github.com/gepa-ai/gepa) | Python / MIT | 6.9k | 2026-10-01（v0.1.4，7-15） | rollout 缓存键 = **(候选哈希, 样例 id, split)** 且 train/val 命名空间隔离 → 留出集不可能被训练侧重放 |
+| [codelion/optillm](https://github.com/codelion/optillm) | Python / Apache-2.0 | 4.3k | v0.4.0（9-28） | 推理期方法做成代理：best-of-n / self-consistency / majority k=6 |
+| [UKGovernmentBEIS/inspect_ai](https://github.com/UKGovernmentBEIS/inspect_ai) | Python / MIT | 2.9k | 今日有推送 | `cascade()`：**确定性 scorer 先定案，评委只跑未定案的**；`multi_scorer(mode/majority)` + 各评委原始判定留存 `metadata.panel` |
+| [prometheus-eval/prometheus-eval](https://github.com/prometheus-eval/prometheus-eval) | Python / — | 1.1k | **2025-04 → 约 18 个月未维护** | 开源评委模型对人工的 Pearson 0.6~0.7（README 自述） |
+| [Agenta-AI/agenta](https://github.com/Agenta-AI/agenta) | Py+TS / MIT | 4.8k | 今日有推送 | （文档是 JS SPA，未取到一手内容 → 不下结论） |
+| [braintrustdata/braintrust-sdk](https://github.com/braintrustdata/braintrust-sdk) | TS / Apache-2.0 | **28** | — | 仓库本身近乎无活动，不作为对标物 |
+| [zou-group/textgrad](https://github.com/zou-group/textgrad) | Python / MIT | 3.8k | **2025-07-25 → 约 15 个月未动** | 梯度记忆复用 / `constraint_text` 编辑预算（不采纳，见 §4） |
+| [microsoft/Trace](https://github.com/microsoft/Trace)、[google-deepmind/opro](https://github.com/google-deepmind/opro) | Python / MIT、Apache-2.0 | 762、782 | 2025-08、**2024-12** | OPRO 的可抄点只有：scorer 与 optimizer **分开配模型** + train/eval/test 三段切分 + 花钱前先冒烟 |
+
+### 2. 本轮学到的、并且已经落地的（P0，全部零调用）
+
+| # | 竞品做法（一手出处） | 本产品此前的缺 | 落地 |
+|---|---|---|---|
+| **C1** | 用标签算**判别力**而不是只算误差：Phoenix 的 F1 出厂闸、Langfuse 的 κ+混淆矩阵分析（llm-as-a-judge / pre-built-metrics 文档） | MAE / r / 一致率三个数都不回答"评委分关于达标有没有信息"；AUC 在本仓库**代码与文档里 0 命中** | `discrimination_stats()`：AUC + 重抽 CI 对 0.5 + 按 owner/ai_proxy 拆开，进 `analyze()` 与 `aggregate_history()` 两处报告 |
+| **C2** | 任何阈值收益必须赢过**平凡基线**（DeepEval 曾把这做成 `find_threshold`+混淆矩阵；现行文档已删） | 报告里有"过线判定一致率"，没有"一律判不达标能得多少"，也没有留一折 | `_best_cut`（限可表达区间）+ `_loo_cut_accuracy` ⇒ 净增益可为负；实测 45 条那轮 **−0.044** |
+| **C3** | **可估性/统计门槛**先于结论（同族做法：显著性、power 分析） | `MIN_PER_DECISION_SIDE=1` 把"κ 有定义"当成"κ 可读" | 四格各 ≥10（由 κ 标准误反解 + 蒙特卡洛核对）且 CI 半宽 ≤0.3，否则报告改印"这张考卷答不了" |
+| **C4** | 补采队列按**人工标签格子**排，不按被校对象的输出排（Langfuse annotation queue 的设计核心） | `harvest_anchors.select()` 按**评委分带**分层——评委无判别力时与人工格子完全脱钩，实测补一轮 owner 达标格仍个位数 | `--coverage`（只读）+ `--prefer-deficient`；且**只认 owner 的缺口**，AI 代判缺格不驱动队列 |
+
+四项都不改变评分本身，也都不产出一条"提示词变好了"的结论——它们产出的是
+**下一件事该做哪个**：现在缺的是 20~30 条所有者亲判的"达标"样本，不是又一轮真端点跑批。
+
+### 3. 本轮记录但暂不落地的（附不做的理由）
+
+| # | 竞品特性 | 本轮判 |
+|---|---|---|
+| N7 | `inspect cascade()`：确定性断言先定案、评委只跑未定案的 | **P1 下轮做**。它同时省钱和减少评委决策面，是本轮最实际的未采纳项；没做是因为要动 execute/judge 的调用编排，与本轮"只加算术、不动链路"的边界冲突 |
+| N8 | 多评委 panel + `mode/majority` 归约、原始判定留存（inspect） | 部分已有（双评委 + 仲裁 + 分歧阈值）。缺的是**逐用例**的 panel 与原始判定归档，不是聚合级——记为 P2 |
+| N9 | G-Eval 的 logprob 加权与 `rubric=` 分数区间约束（deepeval） | 需要端点回传 logprobs；本仓库经 modelhub 网关，**未验证任何一家上游给 logprobs** ⇒ 先验端点再谈 |
+| N10 | 声明式 eval 记录 / 数据集按时间戳定版本（openai/evals、langfuse） | 与 §三十·十 的"归档≠当前代码会算出的值"同源，值得做：把**考卷身份**做成锚点集合的内容哈希，而不是靠 n 和协议名推断。P1 |
+| N11 | 红队语料（promptfoo red team：100+ plugins × ~40 strategies） | 本产品有注入存活检测但攻击文本要用户自带。发一份版本化攻击语料是产品面扩，需先定"跑一轮多少钱"的预算判据。P2 |
+| N12 | 合成用例 + `critic_model` 过滤（deepeval synthesizer） | 本产品的用例是 LLM 生成、无 critic 复筛；与 §三十一·四 的结论冲突（评委没判别力时 critic 也是同一个评委）→ 阻塞在 C1 之后 |
+| N13 | 自动最优提示词搜索 / GEPA 式反思（沿用第二轮 N2/N3 的不采纳） | **维持不采纳，且理由换掉**：上一轮引的是二手博客的负结果（未复核，见 §5）；本轮的直接理由是本仓库评委在 owner 标签上 **AUC 0.48~0.64**——以这种量具为目标的搜索，优化的是它没读出来的那一维 |
+| N14 | 把提示词当程序编译（DSPy 范式）、云端版本库、图形看板、多租户 | 维持第二轮结论不变（目标物不同 / 与"零出网也能用"冲突 / 报告即界面 / 单运维者） |
+
+### 4. 一处口径借法（已在实现里）
+
+GEPA 的 rollout 缓存键带 **split**、train/val 命名空间隔离（`core/engine.py`、`core/state.py`）。
+本产品的 target/eval 缓存按内容哈希（含模型与采样指纹），**没有 split 维度**——
+将来任何"留出集"改造若复用这份缓存，留出侧的分数会被训练侧的热缓存重放出来。
+本轮不做留出集，但把这条写死在这里，防止下一轮顺手就踩。
+
+### 5. 上一轮引用的复核结果（必须公开）
+
+第二轮 §1/§4 的两条关键"负结果"——`arXiv:2604.14585`（72 次优化里 49% 低于 zero-shot）
+与「GEPA 在 holdout 上过拟合、跨模型迁移未验证」（dev.to 一篇博客）——**本轮两路调研都
+未能取到一手来源**。它们当时被用来支撑 N2/N3 的不采纳结论。处理方式：
+结论维持（本轮有自家的 AUC 实测作替代理由），但**引用降级为"未证实的二手说法"**，
+后续文档不得再以它们为主要依据。同理，`Google-Prompt-Opt/prompt-opt`、
+`zou-group/awesome-textgrad`、`keirp/GPT-Optimizer`、`langchain-ai/opthax` 现在
+HTML/API/raw 三路 404——不存在或已改名；TextGrad 的 org 已从 `purir` 迁到 `zou-group`。
+竞品分析里"某项目已死"与"某项目不存在"是两种说法，本轮只写能证的那一种。

@@ -412,6 +412,232 @@ def _decision_stats(humans: list[float], judges: list[float], line: float) -> di
     }
 
 
+# --------------------------------------------------------------------------
+# 判别力与可估性（纯算术，零 LLM 调用）
+# --------------------------------------------------------------------------
+# 为什么要单列这一层：MAE / r / 一致率回答的都是"这次读数与人工差多少"，
+# 没有任何一个回答"评委分关于达标这件事到底有没有信息"。而后者才决定
+# 事后处理（换阈值、平移、缩放）救不救得回来——AUC≈0.5 时一律救不回来，
+# 此时换判据是白费，只能换量具或补标签。
+#
+# 可估性门槛不是拍的：κ 的标准误 SE = sqrt[θ(1-θ)/(n(1-θ₀)²)]（Fleiss 1971），
+# 在"正例占比 20%、真实 κ=0.6、95% CI 半宽 ≤0.3"这组要求下反解得 n≈47 → 每个格子 ≥9，
+# 取整为 10；同一组要求再用蒙特卡洛核对过公式（探针 logs/probe_r3_power.py，
+# 推导与实测读数记在 docs/evaluation.md §三十一）。
+# 对比：MIN_PER_DECISION_SIDE=1 只管 κ 有没有**定义**，不管它**能不能读**——
+# 1 个正例时 κ 照样算得出来，只是那个数由构造决定地趋近 0。
+KAPPA_CI_HALF_WIDTH_MAX = 0.3  # κ 的 95% CI 半宽大于它 → 点值不许当结论报
+MIN_ESTIMABLE_CELL = 10  # 2×2 四个格子各自的最小条数（由上面的功率反解得出）
+DISCRIMINATION_BOOTSTRAP = 1000  # 配对重抽次数（单轮校准里每条锚点一条配对）
+DISCRIMINATION_SEED = 20261006  # 固定种子：同一批配对必须每次算出同一个 CI
+CUT_SCAN_STEP = 0.05  # 阈值扫描步长，比评委分的最小可见粒度（0.05）不粗
+
+
+def _auc_vs_label(scores: list[float], labels: list[bool]) -> float | None:
+    """Mann-Whitney AUC：任取一条达标与一条不达标，评委分把前者排高的概率。并列算半分。
+
+    0.5 = 评委分与标签无关（任何阈值都切不出来）；1.0 = 完全可分。
+    任一侧为空时返回 None——那不是"判别力差"，是"没测"。
+    """
+    pos = [s for s, t in zip(scores, labels, strict=False) if t]
+    neg = [s for s, t in zip(scores, labels, strict=False) if not t]
+    if not pos or not neg:
+        return None
+    wins = 0.0
+    ties = 0.0
+    for a in pos:
+        for b in neg:
+            if a > b:
+                wins += 1.0
+            elif a == b:
+                ties += 1.0
+    return (wins + 0.5 * ties) / (len(pos) * len(neg))
+
+
+def _cuts_in_range(scores: list[float]) -> list[float]:
+    """只扫评委分**可表达**的区间。允许 cut 超出 max 就等于允许"全部判不达标"，
+    那是一条输出而不是一个阈值，会被误读成"评委被校准好了"。"""
+    lo, hi = min(scores), max(scores)
+    steps = int((hi - lo) / CUT_SCAN_STEP) + 1
+    return [round(lo + i * CUT_SCAN_STEP, 4) for i in range(steps + 1)]
+
+
+def _best_cut(scores: list[float], labels: list[bool]) -> tuple[float | None, float]:
+    """同批数据上的最优阈值。这是**上界**，只能用来判"有没有空间"，不能当读数。"""
+    cuts = _cuts_in_range(scores)
+    if not cuts:
+        return None, 0.0
+    best_cut, best_acc = cuts[0], -1.0
+    for c in cuts:
+        acc = sum(1 for s, t in zip(scores, labels, strict=False) if (s >= c) == t) / len(scores)
+        if acc > best_acc:
+            best_cut, best_acc = c, acc
+    return best_cut, best_acc
+
+
+def _loo_cut_accuracy(scores: list[float], labels: list[bool]) -> float | None:
+    """留一折重定阈值：每条用其余 n-1 条挑阈值，再判这一条。
+
+    必须留一折：同批拟合的最优阈值恒 ≥ 平凡基线（它总可以退化成"全判一边"），
+    拿它报"调阈值带来了增益"是同义反复。
+    """
+    n = len(scores)
+    if n < 3:
+        return None
+    hit = 0
+    counted = 0
+    for i in range(n):
+        rest_s = [s for q, s in enumerate(scores) if q != i]
+        rest_t = [t for q, t in enumerate(labels) if q != i]
+        cut, _ = _best_cut(rest_s, rest_t)
+        if cut is None:
+            continue
+        counted += 1
+        hit += 1 if ((scores[i] >= cut) == labels[i]) else 0
+    return hit / counted if counted else None
+
+
+def _kappa_and_agree(
+    humans: list[float], judges: list[float], line: float
+) -> tuple[float, float | None]:
+    """(一致率, κ)。κ 在两侧边际退化时返回 None（与 _decision_stats 同一判法）。"""
+    n = len(humans)
+    h_pass = [h >= line for h in humans]
+    j_pass = [j >= line for j in judges]
+    agree = sum(1 for a, b in zip(h_pass, j_pass, strict=False) if a == b) / n
+    p_a = sum(h_pass) / n
+    p_b = sum(j_pass) / n
+    pe = p_a * p_b + (1 - p_a) * (1 - p_b)
+    return agree, (None if pe >= 1.0 else (agree - pe) / (1 - pe))
+
+
+def _decision_ci(
+    humans: list[float],
+    judges: list[float],
+    line: float,
+    reps: int = DISCRIMINATION_BOOTSTRAP,
+    seed: int = DISCRIMINATION_SEED,
+    group_keys: list[str] | None = None,
+) -> dict[str, Any]:
+    """配对（或按锚点聚类）重抽，给一致率、κ 与 AUC 各一个 95% CI。
+
+    重抽单位由 `group_keys` 决定：单轮校准里一条锚点只有一条配对，留空即按配对重抽；
+    跨轮聚合（aggregate_history）里同一锚点在 K 轮出现 K 次，配对之间**不独立**，
+    必须把同一锚点的读数捆在一起走 —— 口径与 `aggregate_history` 的 MAE 聚类自助法一致，
+    否则 CI 系统性偏窄（这正是 §十四 当初单列聚类的原因）。
+    """
+    n = len(humans)
+    if group_keys is None:
+        units: list[list[int]] = [[i] for i in range(n)]
+    else:
+        buckets: dict[str, list[int]] = {}
+        for i, key in enumerate(group_keys):
+            buckets.setdefault(str(key), []).append(i)
+        units = [buckets[key] for key in sorted(buckets)]
+    if len(units) < 2 or reps <= 0:
+        return {"ci_skipped": f"重抽单位 {len(units)} 个 < 2，重抽退化，不给 CI"}
+    rng = random.Random(seed)
+    agrees: list[float] = []
+    kappas: list[float] = []
+    aucs: list[float] = []
+    kappa_undef = 0
+    auc_undef = 0
+    for _ in range(reps):
+        # 每次重抽取 len(units) 个单位（有放回）再摊平：未分组时一个单位=一条配对，
+        # 与"按配对重抽 n 次"完全等价；分组时一个单位=同一锚点的全部轮次读数。
+        drawn = [units[rng.randrange(len(units))] for _ in range(len(units))]
+        idx = [j for u in drawn for j in u]
+        hs = [humans[i] for i in idx]
+        js = [judges[i] for i in idx]
+        a, k = _kappa_and_agree(hs, js, line)
+        agrees.append(a)
+        if k is None:
+            kappa_undef += 1
+        else:
+            kappas.append(k)
+        v = _auc_vs_label(js, [h >= line for h in hs])
+        if v is None:
+            auc_undef += 1
+        else:
+            aucs.append(v)
+    agrees.sort()
+    out: dict[str, Any] = {
+        "agree_ci95": [round(_percentile(agrees, 2.5), 3), round(_percentile(agrees, 97.5), 3)]
+    }
+    # 无定义的重抽不扔掉、也不当门槛：扔掉等于把 CI 条件化在"正例恰好被抽中"上；
+    # 拿它当门槛又太松——1 个正例时 κ 照样"有定义"，只是**由构造决定地趋近 0**。
+    # 真正的可估性判据是格子计数（见 discrimination_stats 里的 MIN_ESTIMABLE_CELL）。
+    out["auc_undefined_resamples"] = auc_undef
+    out["kappa_undefined_resamples"] = kappa_undef
+    if len(aucs) >= 20:
+        aucs.sort()
+        lo, hi = round(_percentile(aucs, 2.5), 3), round(_percentile(aucs, 97.5), 3)
+        out["auc_ci95"] = [lo, hi]
+        out["auc_distinguishable_from_chance"] = lo > 0.5
+    else:
+        out["auc_ci_skipped"] = f"可用重抽仅 {len(aucs)} 次，分位数不稳，不给 AUC CI"
+    if kappas:
+        kappas.sort()
+        lo = round(_percentile(kappas, 2.5), 3)
+        hi = round(_percentile(kappas, 97.5), 3)
+        out["kappa_ci95"] = [lo, hi]
+        out["kappa_ci_half_width"] = round((hi - lo) / 2, 3)
+    return out
+
+
+def discrimination_stats(
+    humans: list[float],
+    judges: list[float],
+    line: float,
+    reps: int = DISCRIMINATION_BOOTSTRAP,
+    seed: int = DISCRIMINATION_SEED,
+    group_keys: list[str] | None = None,
+) -> dict[str, Any]:
+    """评委分对"人工达标"这件事的判别力，以及这张考卷能不能读出达标一致性。
+
+    返回的每一项都对应一个可判的动作，不是装饰：
+    - auc：事后处理有没有空间（≈0.5 就别再调阈值了）；
+    - trivial_accuracy：平凡基线（一律判不达标/不达标里人数多的那一边）的正确率——
+      任何"调阈值有效"的说法必须显式赢过它；
+    - loo_accuracy / loo_gain_vs_trivial：留一折重定阈值的净增益，可为负；
+    - kappa_ci_half_width / estimable：点值能不能当结论。
+    """
+    n = len(humans)
+    if n == 0:
+        return {"n": 0, "usable": False}
+    labels = [h >= line for h in humans]
+    n_pos = sum(labels)
+    n_judge_pass = sum(1 for j in judges if j >= line)
+    cell_min = min(n_pos, n - n_pos, n_judge_pass, n - n_judge_pass)
+    trivial = max(n_pos, n - n_pos) / n
+    auc = _auc_vs_label(judges, labels)
+    best_cut, best_acc = _best_cut(judges, labels)
+    loo = _loo_cut_accuracy(judges, labels)
+    ci = _decision_ci(humans, judges, line, reps=reps, seed=seed, group_keys=group_keys)
+    half = ci.get("kappa_ci_half_width")
+    estimable = (
+        cell_min >= MIN_ESTIMABLE_CELL
+        and isinstance(half, (int, float))
+        and half <= KAPPA_CI_HALF_WIDTH_MAX
+    )
+    return {
+        "n": n,
+        "line": line,
+        "n_human_pass": n_pos,
+        "n_judge_pass": n_judge_pass,
+        "min_cell": cell_min,
+        "auc": None if auc is None else round(auc, 3),
+        "trivial_accuracy": round(trivial, 3),
+        "best_cut": None if best_cut is None else round(best_cut, 2),
+        "best_accuracy": round(best_acc, 3),
+        "loo_accuracy": None if loo is None else round(loo, 3),
+        "loo_gain_vs_trivial": None if loo is None else round(loo - trivial, 3),
+        "kappa_ci_half_width": half,
+        "estimable": estimable,
+        **ci,
+    }
+
+
 def analyze(samples: list[dict[str, Any]], judge_scores: list[float]) -> dict[str, Any]:
     """逐条 Δ + 聚合指标。调用方保证两列表等长且只含成功样本。"""
     pairs: list[dict[str, Any]] = []
@@ -456,6 +682,7 @@ def analyze(samples: list[dict[str, Any]], judge_scores: list[float]) -> dict[st
         "human_band_hist": hist,
         "bands_covered": sum(1 for c in hist.values() if c),
         "decision": _decision_stats(humans, judges, PASS_THRESHOLD),
+        "discrimination": discrimination_stats(humans, judges, PASS_THRESHOLD),
     }
 
 
@@ -502,6 +729,73 @@ def _decision_verdict(dec: dict[str, Any]) -> str:
     )
 
 
+def render_discrimination(disc: dict[str, Any]) -> list[str]:
+    """把判别力读数渲染成"下一步该做什么"，不是又一行指标。
+
+    三行各自挡掉一种自欺：
+    - AUC≈0.5 时还去调阈值/换判据 —— 那是把噪声切成更整的噪声；
+    - 只报"同批最优阈值正确率 93%" —— 那是"全部判不达标"，留一折才看得见它有没有净增益；
+    - 正例几条就下"评委可信/不可信" —— κ 的 CI 宽度直接说明这是取样不是行为。
+    """
+    n = int(disc.get("n") or 0)
+    if n == 0:
+        return []
+    out: list[str] = []
+    auc = disc.get("auc")
+    ci = disc.get("auc_ci95")
+    if auc is None:
+        out.append(
+            f"- 判别力：AUC 不可测（人工达标 {disc.get('n_human_pass')}/{n} —— 标签某一侧为空，"
+            "这张考卷没有可分的两类，谈不上评委有没有判别力）"
+        )
+    else:
+        # 判据只跟 0.5 比，且看重抽 CI 而不是点值：0.6 这种"看着比瞎猜高"的数，
+        # 在 n=22 的考卷上离 0.5 不到一个 CI，拿它下结论就是自欺。
+        if ci is None:
+            verdict = (
+                f"点值 {auc}，但没有可用的重抽 CI"
+                f"（{disc.get('auc_ci_skipped') or disc.get('ci_skipped') or '样本不足'}）"
+            )
+        elif disc.get("auc_distinguishable_from_chance"):
+            verdict = f"显著高于瞎猜（95% CI {ci[0]}~{ci[1]}，下界 >0.5）"
+        else:
+            verdict = (
+                f"**与随机猜不可区分**（95% CI {ci[0]}~{ci[1]} 覆盖 0.5）"
+                "→ 换阈值/平移/缩放都救不回来，只能换量具或补人工标签"
+            )
+        out.append(f"- 判别力：AUC={auc}（0.5=与随机猜无异）→ {verdict}")
+    loo = disc.get("loo_accuracy")
+    trivial = disc.get("trivial_accuracy")
+    gain = disc.get("loo_gain_vs_trivial")
+    if loo is not None and gain is not None:
+        arrow = "**没有净增益**" if gain <= 0 else "有净增益"
+        out.append(
+            f"- 调阈值的净增益：留一折重定阈值 {loo:.3f} − 平凡基线（一律判多数那一侧）{trivial:.3f} "
+            f"= **{gain:+.3f}**（{arrow}；同批拟合的上界 {disc.get('best_accuracy')} 不算数）"
+        )
+    cell = disc.get("min_cell")
+    half = disc.get("kappa_ci_half_width")
+    if cell is not None and cell < MIN_ESTIMABLE_CELL:
+        out.append(
+            f"- 可估性：⚠️ 判定 2×2 里最薄的一格只有 **{cell} 条**（< {MIN_ESTIMABLE_CELL}；"
+            f"人工达标 {disc.get('n_human_pass')}/{n}、评委达标 {disc.get('n_judge_pass')}/{n}）—— "
+            f"**这张考卷答不了「达标一致性」**，上面那个 κ 点值读的是考卷设计，不是评委行为。"
+            f"门槛怎么来的见 docs/evaluation.md §三十一。"
+        )
+    elif half is None:
+        note = disc.get("kappa_ci_skipped") or disc.get("ci_skipped") or "CI 未计算"
+        out.append(f"- 可估性：⚠️ {note} —— **按不可估处理**，不许拿点值下「可信/不可信」的结论")
+    elif half > KAPPA_CI_HALF_WIDTH_MAX:
+        out.append(
+            f"- 可估性：⚠️ κ 的 95% CI 半宽 {half} > {KAPPA_CI_HALF_WIDTH_MAX} —— "
+            f"**这张考卷答不了「达标一致性」**，上面那个点值读的是取样（人工达标仅 "
+            f"{disc.get('n_human_pass')}/{n} 条）。判据推导见 docs/evaluation.md §三十一。"
+        )
+    else:
+        out.append(f"- 可估性：κ 的 95% CI 半宽 {half} ≤ {KAPPA_CI_HALF_WIDTH_MAX}，点值可作结论")
+    return out
+
+
 def render_report(role: str, analysis: dict[str, Any]) -> str:
     label = _ROLE_LABEL.get(role, role)
     lines: list[str] = [f"# 评委校准报告：{label}（{role}）", ""]
@@ -532,6 +826,7 @@ def render_report(role: str, analysis: dict[str, Any]) -> str:
         f"- 排序一致性：{_r_verdict(analysis['r'], analysis.get('rho'), int(analysis.get('bands_covered', 0)))}"
     )
     lines.append(f"- 过线判定：{_decision_verdict(analysis.get('decision') or {'usable': False})}")
+    lines.extend(render_discrimination(analysis.get("discrimination") or {}))
     hist = analysis.get("human_band_hist") or {}
     if hist:
         lines.append(
@@ -796,6 +1091,13 @@ def aggregate_history(
         "bias": round(sum(deltas) / n_pairs, 3),
         # 合并判定统计：κ/一致率是按混淆计数定义的，把各轮配对并起来直接重算即可
         "decision": _decision_stats(humans, judges, PASS_THRESHOLD),
+        # 聚合读数是 README 真正引用的那一行，所以判别力/可估性必须在这里也算一遍：
+        # 只在单轮报告里立门槛、最被引用的那个数不受管，等于门槛没上门。
+        # 重抽单位按锚点聚类（同 §十四 的 MAE CI 口径）——同一锚点跨轮出现 K 次，
+        # 按配对独立重抽会把 K 份相关读数当成 K 个独立样本，CI 系统性偏窄。
+        "discrimination": discrimination_stats(
+            humans, judges, PASS_THRESHOLD, group_keys=[str(p.get("id")) for p in pairs]
+        ),
     }
 
     # 人工分出处拆分：把"bias +3.09"这一句拆成"严格人工 / AI 代判 / 没标注"三份读。
@@ -948,6 +1250,7 @@ def render_aggregate(agg: dict[str, Any] | None) -> str:
     )
     if pooled.get("ci_skipped"):
         lines.append(f"- ⚠️ {pooled['ci_skipped']}")
+    lines.extend(render_discrimination(pooled.get("discrimination") or {}))
     lines.extend(render_human_source_split(pooled))
     disp = agg.get("dispersion") or {}
     spans = []

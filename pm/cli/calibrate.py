@@ -578,6 +578,13 @@ def _save_entry(
         "items": analysis.get("pairs") or [],
         "decision_agree": (analysis.get("decision") or {}).get("agree"),
         "decision_kappa": (analysis.get("decision") or {}).get("kappa"),
+        # 判别力与可估性同时落账。κ 点值脱离"当时能不能读"这个旗标就会被后来的人
+        # 当结论抄走（§三十一），而"那轮最薄格子只有 1 条"只有本轮自己知道——
+        # 下一轮换考卷就再也查不回来。
+        "auc": (analysis.get("discrimination") or {}).get("auc"),
+        "loo_gain_vs_trivial": (analysis.get("discrimination") or {}).get("loo_gain_vs_trivial"),
+        "min_cell": (analysis.get("discrimination") or {}).get("min_cell"),
+        "decision_estimable": (analysis.get("discrimination") or {}).get("estimable"),
         "model": c.model,
         "rubric": c.rubric,
         "anchors": c.anchors,

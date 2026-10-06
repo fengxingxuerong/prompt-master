@@ -38,6 +38,7 @@ from pm.bootstrap import ensure_utf8_stdio  # noqa: E402
 
 ensure_utf8_stdio()
 
+from pm.calibration import MIN_ESTIMABLE_CELL, PASS_THRESHOLD, classify_human_source  # noqa: E402
 from pm.scoring import unsourced_numbers  # noqa: E402
 
 ROOT = Path(__file__).parent
@@ -183,7 +184,12 @@ def _existing_shas(paths: list[Path]) -> set[str]:
     return seen
 
 
-def select(rows: list[dict[str, Any]], per_band: int, skip_shas: set[str]) -> list[dict[str, Any]]:
+def select(
+    rows: list[dict[str, Any]],
+    per_band: int,
+    skip_shas: set[str],
+    prefer: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
     """按分数带分层 + 带内任务族去重，控制规模。
 
     分层的理由不是"好看"：人工分离散度低时 Pearson r 无意义（11 条老锚点的极差
@@ -191,7 +197,10 @@ def select(rows: list[dict[str, Any]], per_band: int, skip_shas: set[str]) -> li
     所以每个带都要有人工分，且优先换任务族而不是在同一族里堆条数。
     """
     picked: list[dict[str, Any]] = []
-    for name, lo, hi in BANDS:
+    # prefer 只改**访问顺序**不改每带上限：补采队列要先把最缺的格子摊到人面前，
+    # 但"每带 ≤per_band 条"这条防的是同一族输出灌满候选集，拆开看是两件事。
+    ordered = [b for b in BANDS if b[0] in prefer] + [b for b in BANDS if b[0] not in prefer]
+    for name, lo, hi in ordered:
         in_band = [
             r
             for r in rows
@@ -300,6 +309,130 @@ def render_review(samples: list[dict[str, Any]], skipped: int) -> str:
     return "\n".join(lines)
 
 
+def _labeled_anchors(anchor_dir: Path) -> list[dict[str, Any]]:
+    """读所有锚点样本文件里**已有人工分**的条目（示例文件不算数据）。"""
+    out: dict[str, dict[str, Any]] = {}
+    dupes = 0
+    for path in sorted(anchor_dir.glob("samples*.json")):
+        if "example" in path.name:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        rows = data if isinstance(data, list) else (data.get("samples") if isinstance(data, dict) else None)
+        for item in rows or []:
+            if not isinstance(item, dict) or item.get("human_score") in (None, ""):
+                continue
+            # 同一 id 会同时出现在多个样本文件里（ab.json 与 samples.json 实测重叠 18 条），
+            # 按行累加会把一格数成两格——覆盖度这张表本身就是"还差几条"的判据，重复即虚高。
+            sid = str(item.get("id"))
+            if sid in out:
+                dupes += 1
+                continue
+            out[sid] = item
+    if dupes:
+        print(f"（已按 id 去重：{dupes} 条锚点跨文件重复出现）", file=sys.stderr)
+    return list(out.values())
+
+
+def _human_source(item: dict[str, Any]) -> str:
+    """与 pm.calibration 同一判据：缺 provenance.human_score_source 一律 unknown。"""
+    return classify_human_source(item)
+
+
+def coverage_by_human_cell(anchor_dir: Path | None = None) -> dict[str, Any]:
+    """现有锚点在"人工标签格子"上的覆盖度，以及每个格子还差几条。
+
+    为什么要单算这一张表：`select()` 一直按**评委分带**分层（见其 docstring 的理由），
+    但 κ/一致率的可估性取决于**人工标签**的格子是否填满。评委没有判别力时这两件事完全
+    脱钩 —— 实测就是补采了一轮 45 条，所有者亲判的"达标"格还是只有 1 条。
+    门槛与 pm.calibration 同源（MIN_ESTIMABLE_CELL），不在这儿另立一个数。
+    """
+    base = anchor_dir or (ROOT / "judge_calibration")
+    cells: dict[str, dict[str, int]] = {}
+    for item in _labeled_anchors(base):
+        src = _human_source(item)
+        band = _band_of(float(item["human_score"]))
+        row = cells.setdefault(src, {name: 0 for name, _, _ in BANDS})
+        row[band] = row.get(band, 0) + 1
+    out: dict[str, Any] = {"min_cell": MIN_ESTIMABLE_CELL, "sources": {}}
+    for src, row in sorted(cells.items()):
+        out["sources"][src] = {
+            "bands": row,
+            "n": sum(row.values()),
+            "deficient": [b for b in row if row[b] < MIN_ESTIMABLE_CELL],
+        }
+    return out
+
+
+def band_yield(anchor_dir: Path | None = None) -> dict[str, dict[str, int]]:
+    """历史映射：落在某评委分带的锚点，后来被人工判成"达标"的比例。
+
+    它替代的是"评委分带 ≈ 人工分带"这个隐含假设 —— 那个假设在评委没判别力时不成立，
+    但补采又只能按评委分带挑，所以把映射实测出来当权重，而不是按带平均分。
+    """
+    stats: dict[str, dict[str, int]] = {}
+    for item in _labeled_anchors(anchor_dir or (ROOT / "judge_calibration")):
+        prov = item.get("provenance") or {}
+        js = prov.get("judge_score")
+        if not isinstance(js, (int, float)):
+            continue
+        name = next((n for n, lo, hi in BANDS if lo <= float(js) < hi), None)
+        if name is None:
+            continue
+        row = stats.setdefault(name, {"labeled": 0, "human_pass": 0})
+        row["labeled"] += 1
+        row["human_pass"] += 1 if float(item["human_score"]) >= PASS_THRESHOLD else 0
+    return stats
+
+
+def recommended_bands(coverage: dict[str, Any], yields: dict[str, dict[str, int]]) -> list[str]:
+    """按"最缺的格子 × 历史命中率"给评委分带排序，供 select(prefer=...) 用。
+
+    只认所有者亲判的格子：AI 代判与评委同族，拿它排出来的队列是在加固同源偏见。
+    """
+    owner = coverage.get("sources", {}).get("owner") or {}
+    deficient = set(owner.get("deficient") or [])
+    target = {b for b in deficient if b in (">=8", "8.0-8.9", ">=9.0")} or deficient
+    if not target:
+        return []
+    scored: list[tuple[float, str]] = []
+    for band, st in yields.items():
+        if not st["labeled"]:
+            continue
+        # 拉普拉斯平滑：只见过 1 条且它恰好达标，不该把整带都判成命中率 100%
+        rate = (st["human_pass"] + 0.5) / (st["labeled"] + 1.0)
+        scored.append((rate, band))
+    ranked = [b for _, b in sorted(scored, key=lambda t: (-t[0], t[1]))]
+    names = {n for n, _, _ in BANDS}
+    return [b for b in ranked if b in names]
+
+
+def render_coverage(coverage: dict[str, Any], yields: dict[str, dict[str, int]]) -> str:
+    lines = ["", "## 人工标签格子覆盖度（零调用，门槛与 pm.calibration 同源）", ""]
+    lines.append(f"每个格子要 ≥{coverage['min_cell']} 条才能读出 κ（推导见 docs/evaluation.md §三十一）。")
+    for src, info in coverage["sources"].items():
+        label = {"owner": "所有者亲判", "ai_proxy": "AI 代判（与评委同族，量的是家族一致性）"}.get(src, src)
+        detail = "　".join(f"{b}:{c}" for b, c in info["bands"].items() if c)
+        gap = "、".join(info["deficient"]) or "无"
+        lines.append(f"- {label}：{info['n']} 条 → 缺格 {gap}")
+        if detail:
+            lines.append(f"  - {detail}")
+    if yields:
+        lines.append("- 评委分带 → 人工达标的历史命中率（用它排补采优先级）：")
+        for band in sorted(yields, key=lambda b: -yields[b]["labeled"]):
+            st = yields[band]
+            lines.append(
+                f"  - {band}：{st['human_pass']}/{st['labeled']} 条后来被人工判达标"
+                f"（{(st['human_pass'] / st['labeled']):.0%}）"
+            )
+    rec = recommended_bands(coverage, yields)
+    if rec:
+        lines.append(f"- 建议补采顺序（--prefer-deficient 即按此走）：{' → '.join(rec)}")
+    return "\n".join(lines)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="从真实跑批记录采集评委校准锚点候选")
     ap.add_argument("--log-dir", default=str(DEFAULT_LOG_DIR))
@@ -307,9 +440,20 @@ def main() -> int:
     ap.add_argument("--review", default=str(DEFAULT_REVIEW))
     ap.add_argument("--per-band", type=int, default=10, help="每个分数带最多采集几条")
     ap.add_argument("--keep-duplicate", action="store_true", help="不剔除与现有锚点集重复的输出")
+    ap.add_argument("--coverage", action="store_true", help="只看人工标签格子覆盖度（零采集、零写入）")
+    ap.add_argument(
+        "--prefer-deficient",
+        action="store_true",
+        help="按「最缺的人工格子 × 历史命中率」排采集顺序（默认按固定分带顺序）",
+    )
     args = ap.parse_args()
 
-    log_dir = Path(args.log_dir)
+    anchor_dir = ROOT / "judge_calibration"
+    cov = coverage_by_human_cell(anchor_dir)
+    ylds = band_yield(anchor_dir)
+    if args.coverage:
+        print(render_coverage(cov, ylds))
+        return 0
     if not log_dir.is_dir():
         print(f"日志目录不存在：{log_dir}", file=sys.stderr)
         return 2
@@ -320,7 +464,8 @@ def main() -> int:
     skip: set[str] = set()
     if not args.keep_duplicate:
         skip = _existing_shas(DEFAULT_EXISTING)
-    chosen = select(rows, max(1, args.per_band), skip)
+    prefer: tuple[str, ...] = tuple(recommended_bands(cov, ylds)) if args.prefer_deficient else ()
+    chosen = select(rows, max(1, args.per_band), skip, prefer=prefer)
     samples = to_samples(chosen)
     if not samples:
         print("分层后为空（可能全部与现有锚点重复）", file=sys.stderr)
@@ -333,7 +478,12 @@ def main() -> int:
         encoding="utf-8",
     )
     n_dupes = sum(1 for r in rows if r["out_sha"] in skip)
-    Path(args.review).write_text(render_review(samples, n_dupes), encoding="utf-8")
+    # render_coverage 自己以空行开头，不额外加分隔符（上一版在这里塞了个换行字面量，
+    # 被脚本层吃掉成真换行，直接把文件写成语法错）
+    Path(args.review).write_text(
+        render_review(samples, n_dupes) + render_coverage(cov, ylds),
+        encoding="utf-8",
+    )
     print(f"候选锚点：{len(samples)} 条 → {out}（素材 {len(rows)} 条，其中重复 {n_dupes} 条）")
     for name, lo, hi in BANDS:
         n = sum(1 for s in samples if lo <= float(s["provenance"]["judge_score"]) < hi)

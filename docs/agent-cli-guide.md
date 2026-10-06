@@ -112,6 +112,19 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
   轮间极差分开报，回答"单轮读数能信多宽"；口径见 `docs/evaluation.md` §十四）。
   协议 A/B：`--scoring-mode impression|checklist`，配对比较见 `scripts/compare_scoring_ab.py --ledger`。
   实测示例：evaluator_b bias=+1.24 超告警线（偏松实锤，含幻觉放水）
+- 判别力与可估性（2026-10-06，判据与实测见 `docs/evaluation.md` §三十一）：`calibrate` 的报告与
+  `--aggregate` **两处**都多出三行——
+  **AUC**（评委分对"人工达标"标签的判别力，配配对重抽 95% CI，**只与 0.5 比**，点值不算证据）、
+  **调阈值的净增益**（留一折重定阈值 − 平凡基线"一律判多数那一侧"，**可以为负**；
+  同批拟合的最优阈值只当上界打印）、
+  **可估性**（2×2 任一格子 <10 条或 κ 的 CI 半宽 >0.3 → 改印「这张考卷答不了达标一致性」，
+  不再印一个 κ 点值让人以为量具坏了）。聚合侧的重抽单位按锚点聚类，与 MAE 的 CI 同一口径。
+  Agent 侧机读位：`--json` 输出里的 `discrimination`（`auc` / `auc_ci95` / `loo_gain_vs_trivial` /
+  `min_cell` / `estimable`），`estimable=false` 时**不要**把 `decision.kappa` 当结论往下传。
+- 补采队列（`harvest_anchors.py`，零调用）：`--coverage` 只读地打印"每个人工标签格子还差几条"
+  与"评委分带 → 人工达标的历史命中率"（实测：评委说 8.0-8.9 的 14 条锚点里人工达标 **0** 条）；
+  `--prefer-deficient` 让采集按缺口排序，而不是按评委分带的固定顺序平均。
+  门槛常数与 `pm/calibration.MIN_ESTIMABLE_CELL` 同源，不在脚本里另立一个数。
 - `library`：记忆层的读侧——所有终态运行的最佳提示词都可按关键词检索、`--export` 导出复用；
   写侧（跨任务经验自动沉淀）规划中
 
