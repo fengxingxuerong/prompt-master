@@ -87,7 +87,9 @@ def _hints(test_input: str, output: str) -> list[str]:
     out: list[str] = []
     suspect = unsourced_numbers(test_input, output)
     if suspect:
-        out.append(f"输出中 {len(suspect)} 个数字在输入里找不到来源（需人工判断是否推算）：{suspect[:6]}")
+        out.append(
+            f"输出中 {len(suspect)} 个数字在输入里找不到来源（需人工判断是否推算）：{suspect[:6]}"
+        )
     if any(p in output for p in _PACKAGING):
         out.append("含 rubric 点名的伪装标记（空抬头/自评达标），这些不应算加分")
     if any(output.rstrip().endswith(t) for t in _TRUNCATED):
@@ -201,11 +203,7 @@ def select(
     # 但"每带 ≤per_band 条"这条防的是同一族输出灌满候选集，拆开看是两件事。
     ordered = [b for b in BANDS if b[0] in prefer] + [b for b in BANDS if b[0] not in prefer]
     for name, lo, hi in ordered:
-        in_band = [
-            r
-            for r in rows
-            if r["out_sha"] not in skip_shas and lo <= r["judge_score"] < hi
-        ]
+        in_band = [r for r in rows if r["out_sha"] not in skip_shas and lo <= r["judge_score"] < hi]
         in_band.sort(key=lambda r: (r["original_task"], -len(r["test_output"])))
         used_task: dict[str, int] = {}
         chosen: list[dict[str, Any]] = []
@@ -423,26 +421,46 @@ def band_yield(anchor_dir: Path | None = None) -> dict[str, dict[str, int]]:
     return stats
 
 
-def recommended_bands(coverage: dict[str, Any], yields: dict[str, dict[str, int]]) -> list[str]:
-    """按"最缺的格子 × 历史命中率"给评委分带排序，供 select(prefer=...) 用。
+def recommended_bands(
+    coverage: dict[str, Any],
+    yields: dict[str, dict[str, int]],
+    min_support: int = MIN_ESTIMABLE_CELL,
+) -> tuple[list[str], list[str]]:
+    """按"最缺的人工格子 × 历史命中率"给评委分带排序，供 select(prefer=...) 用。
 
     只认所有者亲判的格子：AI 代判与评委同族，拿它排出来的队列是在加固同源偏见。
+
+    **支持度不足 min_support 的带一律排到最后**，不参与"命中率高"的竞争。
+    这条是被自己用出来的：实测 48 条锚点里评委带 `<6.0` 只有 3 条被人工判过
+    （其中 1 条达标），平滑后命中率 0.417 反而全场最高 ⇒ 第一版把**已经最满的那格**
+    排在了补采队列第一位。拿 n=3 的比率去决定"接下来花所有者 20 分钟判哪几条"，
+    正是 §三十一 立可估性门槛时要挡的事——门槛这次得管到自己头上。
+    低支持度的带不删（照样要补），只是不许靠一两个偶然样本插队。
+
+    返回 `(补采顺序, 因支持度不足被排后的带)`；第二个值专给报告披露用。
     """
     owner = coverage.get("sources", {}).get("owner") or {}
     deficient = set(owner.get("deficient") or [])
-    target = {b for b in deficient if b in (">=8", "8.0-8.9", ">=9.0")} or deficient
+    # 目标格子：缺的是"人工达标"那一侧（8.0-8.9 / >=9.0）；owner 别的格子缺时也照补
+    target = {b for b in deficient if b in ("8.0-8.9", ">=9.0")} or deficient
     if not target:
-        return []
-    scored: list[tuple[float, str]] = []
+        return [], []
+    strong: list[tuple[float, str]] = []
+    weak: list[str] = []
     for band, st in yields.items():
         if not st["labeled"]:
             continue
-        # 拉普拉斯平滑：只见过 1 条且它恰好达标，不该把整带都判成命中率 100%
+        if st["labeled"] < min_support:
+            weak.append(band)
+            continue
+        # 拉普拉斯平滑只在支持度够的带上做：它防的是"1/1 = 100%"，
+        # 防不了"3 条里 1 条达标"这种整体就没有信息量的比率
         rate = (st["human_pass"] + 0.5) / (st["labeled"] + 1.0)
-        scored.append((rate, band))
-    ranked = [b for _, b in sorted(scored, key=lambda t: (-t[0], t[1]))]
+        strong.append((rate, band))
     names = {n for n, _, _ in BANDS}
-    return [b for b in ranked if b in names]
+    ranked = [b for _, b in sorted(strong, key=lambda t: (-t[0], t[1])) if b in names]
+    tail = [b for b in sorted(weak) if b not in ranked and b in names]
+    return ranked + tail, tail
 
 
 def render_coverage(coverage: dict[str, Any], yields: dict[str, dict[str, int]]) -> str:
@@ -467,9 +485,14 @@ def render_coverage(coverage: dict[str, Any], yields: dict[str, dict[str, int]])
                 f"  - {band}：{st['human_pass']}/{st['labeled']} 条后来被人工判达标"
                 f"（{(st['human_pass'] / st['labeled']):.0%}）"
             )
-    rec = recommended_bands(coverage, yields)
+    rec, weak = recommended_bands(coverage, yields)
     if rec:
         lines.append(f"- 建议补采顺序（--prefer-deficient 即按此走）：{' → '.join(rec)}")
+    if weak:
+        lines.append(
+            f"  - ⚠️ {'、'.join(weak)} 排在末尾不是因为命中率低，而是**被人工判过的条数 < "
+            f"{MIN_ESTIMABLE_CELL}**，比率估不出来——n=1~3 的命中率会把已经最满的格子顶到第一位。"
+        )
     return "\n".join(lines)
 
 
@@ -529,7 +552,9 @@ def main() -> int:
     skip: set[str] = set()
     if not args.keep_duplicate:
         skip = _existing_shas(anchor_files(anchor_dir))
-    prefer: tuple[str, ...] = tuple(recommended_bands(cov, ylds)) if args.prefer_deficient else ()
+    prefer: tuple[str, ...] = (
+        tuple(recommended_bands(cov, ylds)[0]) if args.prefer_deficient else ()
+    )
     chosen = select(rows, max(1, args.per_band), skip, prefer=prefer)
     samples = to_samples(chosen)
     if not samples:

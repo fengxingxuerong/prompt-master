@@ -101,7 +101,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1492 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1494 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）
@@ -115,7 +115,7 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
 
 1. **仪表未收敛**（见 §三）——产品输出的核心数字仍带 ±1~2 量级的自身抖动，
    而这个"量级"本身也是逐轮摆动的读数，不是这把尺子的固定精度。
-2. **覆盖率有门禁了，但它是地板不是目标**（2026-10-06 独占复测，全量 1492 条 rc=0）：
+2. **覆盖率有门禁了，但它是地板不是目标**（2026-10-06 独占复测，全量 1494 条 rc=0）：
    `pm/` 全量实测 **96.01%**（地板 92），拆开看 `pm/` 去掉网关 **96.26%**、
    `pm/modelhub/*` **94.59%**（地板 82）。这块从 33.5% 补上来：`agents.py` 0→100%、
    `pool.py` 61%→85%、`vkeys.py` 21%→98%、`streaming.py` 7%→89%。

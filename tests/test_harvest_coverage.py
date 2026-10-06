@@ -125,13 +125,13 @@ def test_ai_proxy_shortfall_does_not_drive_the_queue(tmp_path: Path) -> None:
     assert not cov["sources"]["owner"]["deficient"], "夹具坏了：所有者侧本应填满"
     y = H.band_yield(tmp_path)
     assert y, "夹具坏了：没有评委分的话这条断言区分不了两种实现"
-    assert H.recommended_bands(cov, y) == []
+    assert H.recommended_bands(cov, y) == ([], [])
     # 反向对照：把"也算代判"的实现放回去就必须红 —— 所以这里显式验一次非空输入下的行为
     cov_fake = {
         "min_cell": cov["min_cell"],
         "sources": {"owner": {"deficient": ["<6.0"], "n": 0, "bands": {}}},
     }
-    assert H.recommended_bands(cov_fake, y) != []
+    assert H.recommended_bands(cov_fake, y)[0] != [], "有缺口时应给出顺序"
 
 
 # ---------------------------------------------------------------- 3. 历史命中率
@@ -150,31 +150,57 @@ def test_band_yield_counts_mapping_not_assumption(tmp_path: Path) -> None:
     assert sum(v["labeled"] for v in y.values()) == 6
 
 
-def test_recommended_bands_prefers_high_yield(tmp_path: Path) -> None:
-    items = [_anchor(i, 3.0, judge=8.4) for i in range(8)]  # 8.0-8.9：0/8 命中
-    items += [_anchor(60 + i, 9.0, judge=9.4) for i in range(4)]  # >=9.0：4/4 命中
-    _fill(tmp_path, items)
-    ranked = H.recommended_bands(H.coverage_by_human_cell(tmp_path), H.band_yield(tmp_path))
-    assert ranked[0] == ">=9.0"
-    assert ranked[-1] == "8.0-8.9"
+def test_recommended_bands_prefers_high_yield_when_support_is_adequate() -> None:
+    """支持度够（每带 ≥ 门槛）时，才轮到"历史命中率"决定顺序。"""
+    cov = {"sources": {"owner": {"deficient": [">=9.0"], "n": 0, "bands": {}}}}
+    yields = {
+        ">=9.0": {"labeled": 19, "human_pass": 3},  # 实测值：2026-10-06 那批锚点
+        "8.0-8.9": {"labeled": 14, "human_pass": 0},
+    }
+    ranked, weak = H.recommended_bands(cov, yields)
+    assert ranked == [">=9.0", "8.0-8.9"]
+    assert weak == []
 
 
-def test_smoothing_stops_one_lucky_sample_from_setting_the_queue(tmp_path: Path) -> None:
-    """不平滑时 1/1 的带（命中率 100%）会压过 8/10 的带（80%）——一个偶然样本就定了队列。
-    平滑之后 8/10（0.727）应排在 1/1（0.6）之前。这条断言只有"真的做了平滑"才成立。"""
-    items = [_anchor(i, 9.0, judge=8.4) for i in range(2)]  # 凑数：让 8.0-8.9 也进目标集
-    items = [_anchor(200 + i, 8.5, judge=8.4) for i in range(2)]
-    items += [_anchor(i, 9.0, judge=8.4) for i in range(8)]  # 这条先不要
-    items = []
-    # 8.0-8.9 带：10 条里 8 条人工达标（0.8 → 平滑 0.727）
-    items += [_anchor(i, 9.0, judge=8.4) for i in range(8)]
-    items += [_anchor(20 + i, 3.0, judge=8.4) for i in range(2)]
-    # >=9.0 带：1 条，人工达标（1.0 → 平滑 0.6）
-    items.append(_anchor(300, 9.5, judge=9.6, src="ai_proxy"))
-    _fill(tmp_path, items)
-    cov = H.coverage_by_human_cell(tmp_path)
-    ranked = H.recommended_bands(cov, H.band_yield(tmp_path))
-    assert ranked.index("8.0-8.9") < ranked.index(">=9.0"), ranked
+def test_low_support_band_cannot_outrank_a_well_supported_one() -> None:
+    """今天把工具真走了一遍才暴露的缺陷（不是假想）：实测锚点里评委带 `<6.0` 只被
+    人工判过 3 条（其中 1 条达标 → 平滑后命中率 0.417，全场最高），于是第一版
+    `--prefer-deficient` 把**已经最满的那一格**（owner 17 条）排到了队列第一位。
+
+    n=3 的比率不该决定"接下来花所有者 20 分钟判哪几条"——§三十一 立可估性门槛
+    挡的就是这件事，门槛这次得管到自己写的排序上。
+    """
+    cov = {"sources": {"owner": {"deficient": [">=9.0"], "n": 0, "bands": {}}}}
+    yields = {
+        "<6.0": {"labeled": 3, "human_pass": 1},  # 0.417（平滑后最高）
+        ">=9.0": {"labeled": 19, "human_pass": 3},  # 0.190
+    }
+    ranked, weak = H.recommended_bands(cov, yields)
+    assert ranked[0] == ">=9.0", ranked
+    assert "<6.0" in weak and ranked[-1] == "<6.0"
+
+
+def test_turning_the_support_floor_off_reproduces_the_defect() -> None:
+    """门槛一关掉就复现缺陷 ⇒ 起作用的是支持度门槛，不是拉普拉斯平滑。
+
+    这条是"不红的变异不许写进证据链"的反面用法：断言必须能区分两种实现。
+    """
+    cov = {"sources": {"owner": {"deficient": [">=9.0"], "n": 0, "bands": {}}}}
+    yields = {"<6.0": {"labeled": 3, "human_pass": 1}, ">=9.0": {"labeled": 19, "human_pass": 3}}
+    ranked, weak = H.recommended_bands(cov, yields, min_support=1)
+    assert ranked[0] == "<6.0"
+    assert weak == []
+
+
+def test_weak_bands_are_disclosed_not_silently_dropped() -> None:
+    """排后 ≠ 不补：那几格照样缺，只是不许靠一两个偶然样本插队，且理由要说出来。"""
+    cov = {"sources": {"owner": {"deficient": [">=9.0"], "n": 0, "bands": {}}}}
+    yields = {"<6.0": {"labeled": 3, "human_pass": 1}, ">=9.0": {"labeled": 19, "human_pass": 3}}
+    cov["min_cell"] = MIN_ESTIMABLE_CELL  # 缺键就该炸：render 用的门槛必须来自同一处
+    txt = H.render_coverage(cov, yields)
+    tail = txt.split("建议补采顺序")[1]
+    assert "<6.0" in tail, "被排后的带仍要出现在队列里（排后不等于不补）"
+    assert "排在末尾不是因为命中率低" in txt
 
 
 # ------------------------------------------------------------------ 4. select 顺序
