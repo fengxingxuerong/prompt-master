@@ -92,9 +92,10 @@ MCP 接入（12 个工具，stdio）：`python -m pm.mcp_server`。计算类工�
   2×2 任一格子 <10 条时不再印 κ 点值，改印「这张考卷答不了达标一致性」（门槛由 κ 标准误反解 + 蒙特卡洛核对）。
   现在真正缺的是 **所有者亲判的"达标"样本**（门槛是每格 10 条，owner 现在只有 10 条且 ≥9 只 1 条）。
   **补料清单当场核过（不是"归档还有很多"）**：按输出内容去重后，评委 ≥8 的素材 52 条里 50 条已在锚点集，
-  **真能新判的只有 2 条**；零算力还能凑 3 条 = 把 AI 代判里落在校 8.0-8.9 段的那 3 条请所有者改判。
+  **真能新判的只有 2 条**；另有 3 条落在评委 8.0-8.9 段的 AI 代判可请所有者**改判**（同一动作顺手补上"bias 拆不出严格人工那一半"那个老洞）。
   其余要靠新一轮真端点批次（§十七实测：一轮 4 用例双采样 ≈80~100 次调用、3~5 小时）：
-  `python harvest_anchors.py --coverage` 看差哪几格，`--prefer-deficient` 按缺口排采集顺序。
+  `python harvest_anchors.py --coverage` 看差哪几格，`--prefer-deficient --total N` 按缺口排采集顺序（没给 `--total` 时它只排序不取舍，那条 CLI 会当场这么说）。
+  零算力那批不用采集：`python scripts/build_owner_rejudge_queue.py` 生成一张表，把 25 条"AI 代判当成人工锚点"的条目请所有者改判——表里 `human_score` 一律留空，回填只写他填过的行并把那些行记成 `human_score_source=owner`，有非法行则整次作废、一字节不动。
 
 ## 四、仓库地图
 
@@ -104,7 +105,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1496 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1500 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）
