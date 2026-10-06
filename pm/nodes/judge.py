@@ -579,27 +579,54 @@ def _safe_int(value: Any) -> int:
 def _is_empty_output_eval(evaluation: dict[str, Any]) -> bool:
     """该评估结果是否来自"没真正拿到分"（无效样本，非真实低分）。
 
-    两种形态，都不是质量读数：
+    三类形态，都不是质量读数：
 
     - **空输出**：目标模型返回空内容。标记由 `pm/nodes/execute.py` 写入
       （`TestRun.error="empty_output"`），评分层沿用"调用失败"分支，
       把原因写进 issues。
     - **调用失败**（2026-10-06 §三十·十一 补）：墙钟预算用尽 / 请求超时 /
       结构化输出重试全败。这些同样"没拿到分"，但字面量各不相同。
+    - **限流 / 配额 / 服务端错误**（2026-10-06 §三十·十四 补）：429
+      `inference exceeds tpm/rpm limit` / `insufficient_quota`、503 过载等。
 
-    ⚠️ 原来这里只认 `"empty_output"` 一个词，于是**超时形态没治**：
-    真实跑 `run_88dcfd4d9c29` 的 case#3 两次采样是 7.6 与 1.0，
-    那 1.0 来自 `Request timed out.`（输出全文其实完全合规、三章节齐全），
-    被当成有效读数进了中位数 → `min_score=4.3` → `ci_lower` 掉到 3.56，
-    **一条传输失败绑架了整条臂的达标判定**。
+    ⚠️ 这三类是**逐次追加**的，每次都是真实跑照出来的：
+      - §三十·十一：只认 `empty_output`，**超时形态漏网**。真实跑
+        `run_88dcfd4d9c29` 的 case#3 两次采样是 7.6 与 1.0，那 1.0 来自
+        `Request timed out.`（输出全文其实完全合规、三章节齐全），
+        被当成有效读数进了中位数 → `min_score=4.3` → `ci_lower` 掉到 3.56，
+        **一条传输失败绑架了整条臂的达标判定**。
+      - §三十·十四：补上超时后又**漏了限流**。真实跑 `run_71ee15abd123`
+        case#0 = [8.1, 1.0]、case#2 = [3.85, 1.0]，两次都是 429
+        `inference exceeds tpm/rpm limit`。补齐后同一份归档重算，
+        这两条的废样本被剔除。
     与 `_collapse_samples` 注释里那个历史事故（矩阵 A：基线 8 条里 4 条空输出，
-    Δ=+6.02 含此偏差）是同一类病，只是换了形态。
+    Δ=+6.02 含此偏差）是同一类病，只是形态一次次换。
+
+    ⚠️ 这份清单**不会是最后一份**。所以除了字面量，另加一条**结构信号**兜底：
+    `judge="system"` 且五维全 1.0 —— 那是 `_evaluate_one` 的
+    `if not results:` 兜底（judge.py 的 system 分支），压根没经过评委。
+    文本会变，结构不会。
 
     为什么不抽成结构化字段而继续匹配文本：这些原因串是调用失败分支拼出来的，
-    现场文本比新增一次改签名便宜；判据集中在这一处，且有守卫钉住
-    （`tests/test_failed_sample_not_a_low_score.py`，含 4 种失败形态的参数化）。
+    现场文本比新增一次改签名便宜；判据集中在一处，且有两组守卫钉住
+    （`tests/test_failed_sample_not_a_low_score.py` 超时类、
+    `tests/test_limit_not_a_low_score.py` 限流类）。
     """
+    if evaluation.get("judge") == "system" and _all_dims_are_floor(evaluation):
+        return True
     return any(_INVALID_SAMPLE_MARKERS.search(str(i)) for i in (evaluation.get("issues") or []))
+
+
+# 兜底分的下限（`_min_dims()` 给的就是全 1.0）；容一点浮点误差。
+_DIM_FLOOR = 1.0
+
+
+def _all_dims_are_floor(evaluation: dict[str, Any]) -> bool:
+    """五维是否全是兜底分 1.0（空 dict / 缺字段都不算——那不是信号）。"""
+    dims = evaluation.get("dimension_scores") or {}
+    if not isinstance(dims, dict) or not dims:
+        return False
+    return all(isinstance(v, (int, float)) and float(v) <= _DIM_FLOOR + 1e-9 for v in dims.values())
 
 
 # 无效样本的判据：只认**失败类别**的字面量，不认评委评语。
@@ -609,7 +636,13 @@ _INVALID_SAMPLE_MARKERS = re.compile(
     r"|Request timed out"  # 请求超时（客户端侧）
     r"|墙钟预算.*用尽"  # 墙钟预算耗尽（节点侧）
     r"|结构化输出失败"  # 重试耗尽仍拿不到合法 JSON
-    r"|Connection error",
+    r"|Connection error"  # 连接层失败
+    # ↓ §三十·十四 真实跑 429 照出来的三类
+    r"|Error code: 429"  # 限流（tpm/rpm）
+    r"|insufficient_quota"  # 配额不足
+    r"|rate_limit_error"  # 端点归类为限流
+    r"|Error code: 5\d\d"  # 服务端错误（503 过载等）
+    r"|service overloaded",
     re.IGNORECASE,
 )
 
