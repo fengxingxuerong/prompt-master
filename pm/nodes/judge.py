@@ -114,7 +114,15 @@ def _judge_health(judges: list[str]) -> dict[str, Any]:
             + "请给 PM_EVALUATOR_B_MODEL 配置不同模型家族。"
         )
         logger.warning("评委同源：%s", note)
-    return {"models": specs, "homogeneous": same_judges, "note": note}
+    # 本轮配了几个评委：models 里含仲裁席，投票席只有前 n 个（arbiter 追加在末尾）。
+    # 缺席披露要拿它当分母——不能靠"这一轮最多见过几个评委"倒推，那样恰好在
+    # 全员缺席时把 0 当成期望值，判不出降级（§三十·十一·二 实测）。
+    return {
+        "models": specs,
+        "homogeneous": same_judges,
+        "note": note,
+        "panel_size": len(judges),
+    }
 
 
 def _call_evaluator(

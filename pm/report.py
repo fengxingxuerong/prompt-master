@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -541,7 +542,49 @@ def _judge_source_lines(state: ReportState) -> list[str]:
             "- ⚠️ 分数出处：" + "；".join(parts) + "——这些数**不是**双评委共识，"
             "逐评委的原始分在 `judge_scores`，跨轮对比时按单评委读。"
         )
+    # 评委席降级（2026-10-06 §三十·十一·二 补）：上面那条只覆盖"两位都在、分歧大、
+    # 交给第三方"这一种形态。**评委直接缺席**是另一种：缺席的用例 `judge` 字段仍是
+    # `"evaluator"`（不是 arbiter / conservative），既有条件一个都判不到。
+    # 真实跑 run_13f9a99096e9：evaluator_b 5 次超时，4 条用例里 2 条只剩单评委，
+    # 那轮的 avg 与基线照常进归档、进分数表，**正文一句都没提这件事**。
+    # 后果：半个评委席的读数被当成双评委共识读——而两臂评委席完整度不同，
+    # Δ 就不可比（§三十·十一·二 结论：那一轮数据不可用）。
+    # 分母取 judge_health.panel_size（配置值），不用"见过几个"倒推：
+    # 全员缺席时倒推会得到 0，判不出降级。
+    # ⚠️ 判据必须用**失败证据**（errors 里 `evaluate#<idx>[<seat>]:`），
+    # 不能用 `len(judge_scores) < panel`——两种形态在归档里**长得一样**：
+    #   · PM_JUDGES=1 配置：`_merge_judge_results` 的 len==1 分支原样返回，不写 judge_scores
+    #   · 双评委但某位失败：同样落到 len==1，同样不写
+    # 真实归档实测（run_13f9a99096e9 的 case#2/#3 与 run_88dcfd4d9c29 的四条）
+    # 都是 `len(judge_scores)==0`。只看 judge_scores 就把配置当故障报（或反之）。
+    panel = int(jh.get("panel_size") or 0)
+    if panel > 1 and evals:
+        absent: dict[int, list[str]] = {}
+        for e in state.get("errors") or []:
+            m = _FAILED_JUDGE_RE.match(str(e))
+            if m:
+                absent.setdefault(int(m.group("idx")), []).append(m.group("seat"))
+        if absent:
+            idxs = "、".join(
+                f"case#{i}({'、'.join(sorted(set(s)))})" for i, s in sorted(absent.items())
+            )
+            seats = {r for r in (jh.get("models") or {}) if r != "arbiter"}
+            gone = sorted({r for s in absent.values() for r in s})
+            # 缺席的评委要能从配置名单里对上号；对不上（配置读失败等）就说"有评委"，
+            # 不猜是哪一位——披露文本本身不许编。
+            missing = "、".join(gone) if set(gone) <= seats else "有评委"
+            lines.append(
+                f"- ⚠️ 评委席降级：{len(absent)}/{len(evals)} 例有评委失败缺席"
+                f"（{missing}：{idxs}）——这些分数**不是**双评委共识；"
+                "两臂的评委席完整度若不同则 Δ 不可比。缺席原因见「运行期错误」。"
+            )
     return lines
+
+
+# 失败证据：errors 里 judge 节点写的 `evaluate#<idx>[<seat>]: <原因>`
+# （pm/nodes/judge.py 的 errors.append 格式）。这是"某位评委真的没出分"的唯一
+# 结构化痕迹——judge_scores 为空既可能是配置单评委，也可能是失败，两义。
+_FAILED_JUDGE_RE = re.compile(r"evaluate#(?P<idx>\d+)\[(?P<seat>[^\]]+)\]")
 
 
 def _revision_delta_lines(state: ReportState) -> list[str]:
