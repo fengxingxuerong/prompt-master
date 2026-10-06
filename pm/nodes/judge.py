@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -568,12 +569,41 @@ def _safe_int(value: Any) -> int:
 
 
 def _is_empty_output_eval(evaluation: dict[str, Any]) -> bool:
-    """该评估结果是否来自"目标模型返回空内容"（无效样本，非真实低分）。
+    """该评估结果是否来自"没真正拿到分"（无效样本，非真实低分）。
 
-    标记由 `pm/nodes/execute.py` 写入：空输出时给 TestRun.error="empty_output"，
-    评分层沿用"调用失败"分支，把原因写进 issues。
+    两种形态，都不是质量读数：
+
+    - **空输出**：目标模型返回空内容。标记由 `pm/nodes/execute.py` 写入
+      （`TestRun.error="empty_output"`），评分层沿用"调用失败"分支，
+      把原因写进 issues。
+    - **调用失败**（2026-10-06 §三十·十一 补）：墙钟预算用尽 / 请求超时 /
+      结构化输出重试全败。这些同样"没拿到分"，但字面量各不相同。
+
+    ⚠️ 原来这里只认 `"empty_output"` 一个词，于是**超时形态没治**：
+    真实跑 `run_88dcfd4d9c29` 的 case#3 两次采样是 7.6 与 1.0，
+    那 1.0 来自 `Request timed out.`（输出全文其实完全合规、三章节齐全），
+    被当成有效读数进了中位数 → `min_score=4.3` → `ci_lower` 掉到 3.56，
+    **一条传输失败绑架了整条臂的达标判定**。
+    与 `_collapse_samples` 注释里那个历史事故（矩阵 A：基线 8 条里 4 条空输出，
+    Δ=+6.02 含此偏差）是同一类病，只是换了形态。
+
+    为什么不抽成结构化字段而继续匹配文本：这些原因串是调用失败分支拼出来的，
+    现场文本比新增一次改签名便宜；判据集中在这一处，且有守卫钉住
+    （`tests/test_failed_sample_not_a_low_score.py`，含 4 种失败形态的参数化）。
     """
-    return any("empty_output" in str(i) for i in (evaluation.get("issues") or []))
+    return any(_INVALID_SAMPLE_MARKERS.search(str(i)) for i in (evaluation.get("issues") or []))
+
+
+# 无效样本的判据：只认**失败类别**的字面量，不认评委评语。
+# `输出确实很差` 这类正常低分一个都不会匹配——真实低分必须留在统计里。
+_INVALID_SAMPLE_MARKERS = re.compile(
+    r"empty_output"  # 目标模型返回空
+    r"|Request timed out"  # 请求超时（客户端侧）
+    r"|墙钟预算.*用尽"  # 墙钟预算耗尽（节点侧）
+    r"|结构化输出失败"  # 重试耗尽仍拿不到合法 JSON
+    r"|Connection error",
+    re.IGNORECASE,
+)
 
 
 def _collapse_samples(evaluations: list[dict[str, Any]]) -> list[dict[str, Any]]:
