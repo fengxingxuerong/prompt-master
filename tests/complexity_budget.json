@@ -4,7 +4,6 @@
   "examples/e2e_round_report.py::analyze": 12,
   "pm/assertions.py::check_assertion": 18,
   "pm/calibration.py::aggregate_history": 12,
-  "pm/calibration.py::render_aggregate": 11,
   "pm/cli/agent_mode.py::agent_subcommand": 11,
   "pm/cli/calibrate.py::_apply_score_form": 17,
   "pm/cli/diffcmd.py::render_text": 16,

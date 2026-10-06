@@ -1151,6 +1151,7 @@ def aggregate_history(
         for r in rounds
         if isinstance(r.get("rep_range_max"), (int, float)) and r.get("rep_threshold")
     ]
+    papers = _paper_identity(rounds)
     return {
         "judge": judge,
         "mode": mode,
@@ -1175,7 +1176,34 @@ def aggregate_history(
             1 for r in rep_rounds if float(r["rep_range_max"]) > float(r["rep_threshold"])
         ),
         "n_rep_rounds": len(rep_rounds),
-        "papers_differ": len({r.get("n") for r in rounds}) > 1,
+        "papers_differ": papers["papers_differ"],
+        "paper_identity": papers,
+    }
+
+
+def _paper_identity(rounds: list[dict[str, Any]]) -> dict[str, Any]:
+    """这几轮用的是不是同一张考卷。判据与漂移侧 `_comparable` 同源：账本里的锚点集指纹。
+
+    条数只是**老记录没有指纹时**的替身，不是身份本身：换掉 5 条锚点再补进 5 条，
+    在"条数"这一格里长得像"没换考卷"，而漂移侧拿着指纹会说"锚点集已更换"。
+    同一本账本、两本读者、相反答案——§二十九 那一类错误换了个漂的对象
+    （上次是尺子，这次是考卷），而产品报告引用的一直是聚合这本读者。见 §三十二。
+    """
+    stamps = [str(r.get("anchors") or "") for r in rounds]
+    unstamped = sum(1 for st in stamps if not st)
+    if unstamped:
+        # 有记录没指纹就不许宣称"同一张考卷"：读不到当相同，等于把"没证据"
+        # 当成"证据表明没变"。退化按条数判，并把退化本身报出去。
+        distinct = len({r.get("n") for r in rounds})
+        mode = "count-fallback"
+    else:
+        distinct = len(set(stamps))
+        mode = "stamp"
+    return {
+        "mode": mode,
+        "distinct_papers": distinct,
+        "unstamped_rounds": unstamped,
+        "papers_differ": distinct > 1,
     }
 
 
@@ -1208,6 +1236,31 @@ def latest_pooled(
         history, judge=judge, mode=scoring_mode(), model=model, rubric=rubric
     )
     return result.get("pooled") if result else None
+
+
+def _paper_identity_lines(agg: dict[str, Any]) -> list[str]:
+    """考卷身份的披露行。单独成函数有两个理由：措辞必须跟着**代码实际比了什么**走，
+    而 `render_aggregate` 的复杂度台账（11）不该被一行披露挤上去——想抬台账先想想
+    是不是该拆函数（`tests/test_complexity_ratchet.py` 正是为此存在）。"""
+    ident = agg.get("paper_identity") or {}
+    if agg.get("papers_differ"):
+        how = (
+            "参与的锚点集指纹不同"
+            if ident.get("mode") == "stamp"
+            else "参与的锚点条数不同（有 "
+            + str(ident.get("unstamped_rounds", 0))
+            + " 轮没有锚点指纹，退化按条数判）"
+        )
+        return [
+            f"- ⚠️ 各轮{how}（换过考卷）：合并读数是对**锚点总体**的估计依然成立，"
+            "但轮间数值对比（含上表的逐轮趋势）不成立。"
+        ]
+    if ident.get("mode") == "count-fallback" and ident.get("unstamped_rounds"):
+        return [
+            f"- ℹ️ 考卷身份走的是退化判据：{ident['unstamped_rounds']} 轮没有锚点指纹，"
+            "这里只比了条数——**n 相同不代表集合相同**，别把这几轮当同一张考卷做趋势比较。"
+        ]
+    return []
 
 
 def render_aggregate(agg: dict[str, Any] | None) -> str:
@@ -1271,11 +1324,7 @@ def render_aggregate(agg: dict[str, Any] | None) -> str:
             f"- 复现极差越线：{agg['rep_threshold_crossings']}/{agg['n_rep_rounds']} 轮"
             "超过分差阈值——判定式「双评委分歧→仲裁」在这些轮里部分读的是评委自己的抖动"
         )
-    if agg.get("papers_differ"):
-        lines.append(
-            "- ⚠️ 各轮参与的锚点条数不同（换过考卷）：合并读数是对**锚点总体**的估计依然成立，"
-            "但轮间数值对比（含上表的逐轮趋势）不成立。"
-        )
+    lines.extend(_paper_identity_lines(agg))
     if mae_ci and mae_ci[1] - mae_ci[0] > AGGREGATE_CI_WIDTH_NOTE:
         lines.append(
             f"- ⚠️ MAE 的 CI 宽 {round(mae_ci[1] - mae_ci[0], 2)}：两次校准的 MAE 差值小于"
