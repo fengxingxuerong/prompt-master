@@ -141,7 +141,7 @@ def optimize_node(state: State) -> dict[str, Any]:
             node,
             {
                 "status": "early_stopped",
-                "early_stop_reason": "优化器返回空内容（端点截断/思考耗尽），无可优化提示词",
+                "early_stop_reason": "优化器返回空内容，未观测到截断/额度证据，根因待查",
                 "errors": ["optimize: 优化器返回空提示词，无法继续优化流程"],
                 "llm_calls": state.get("llm_calls", 0) + calls,
                 "prompt_quality_issues": [{"iteration": 0, "issues": q_report.describe()}],

@@ -93,7 +93,7 @@ def revise_node(state: State) -> dict[str, Any]:
             node,
             {
                 "status": "early_stopped",
-                "early_stop_reason": "修订器返回空内容（端点截断/思考耗尽），保留历史最佳版本",
+                "early_stop_reason": "修订器返回空内容，未观测到截断/额度证据，根因待查",
                 "errors": ["revise: 修订返回空内容，已保留上一版"],
                 "should_revise": False,
                 "llm_calls": state.get("llm_calls", 0) + calls,
