@@ -13,10 +13,12 @@ LLM 客户端工厂 + 鲁棒的结构化输出调用。
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import threading
 import time
 import types
@@ -25,6 +27,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, TypeVar, Union, cast, get_args, get_origin
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 from langchain_core.language_models import BaseChatModel
@@ -423,6 +426,20 @@ SDK_RETRIES = max(0, _int_env("PM_SDK_RETRIES", 0))
 # 的病态形态——那种形态在修复前的上界约 1 小时（3 通道 × 3 SDK × 300s）。
 CALL_BUDGET = max(0.0, _float_env("PM_CALL_BUDGET", 600.0))
 
+# DNS 预解析的墙钟预算（秒）。0 = 关闭预解析（旧行为：解析挂起跟满 timeout）。
+# 为什么必须有这一层（§三十·二十三 实测）：httpx 的 timeout 覆盖 connect/read/write/pool，
+# `socket.getaddrinfo` 在这些阶段**之前**，不受任何 timeout 约束——DNS 挂多久，这一发
+# 就挂多久（实测：声明 timeout=300s，DNS 挂 420s 实跑 420.4s、挂 1800s 实跑 1800.0s；
+# 一次 DNS 挂起让声明 600s 预算的那发 evaluator 实跑 10581s，超 17 倍）。
+# 默认 5s：解析器正常时单次解析毫秒级；5s 还不回的解析器，等下去只会把预算烧完。
+DNS_BUDGET = max(0.0, _float_env("PM_DNS_BUDGET", 5.0))
+
+# 进程内正面缓存：解析成功过的 host:port 不再预解析（重试与后续调用不重复花这笔钱）。
+# 只缓存**成功**：解析报错不缓存也不在这里上抛（见 `resolve_host_bounded`），
+# 解析器的暂时性故障不会在这里被钉死。
+_DNS_RESOLVED: set[str] = set()
+_DNS_RESOLVED_LOCK = threading.Lock()
+
 
 class CallBudgetExceeded(RuntimeError):
     """一次调用的墙钟预算用尽。继承 RuntimeError：调用方现有的兜底路径不用改就能接住。
@@ -446,6 +463,16 @@ class CallBudgetExceeded(RuntimeError):
         }
 
 
+class DnsResolutionTimeout(CallBudgetExceeded):
+    """域名解析在预算内没有返回（§三十·二十三）。
+
+    继承 `CallBudgetExceeded` 而不是 OSError/TimeoutError：调用方现有的
+    "预算耗尽直接上抛"路径不用改就能接住，也**不会**被 `_is_transient_conn_error`
+    判成可重试——解析挂起时重试只会把墙钟再烧一遍，那正是要修掉的形态。
+    消息里"已发 0 次真实请求"是这条错误最有诊断价值的部分：死在了端点之前。
+    """
+
+
 class WallBudget:
     """一次调用的墙钟预算句柄：只在**每次真实发起之前**检查。
 
@@ -459,10 +486,12 @@ class WallBudget:
     在它外面。实测：声明 `timeout=300s`、DNS 挂起 420s ⇒ 实测 **420.4s** 才返回
     （同一台机器上拒绝连接 2.08s、黑洞 300.01s、不可路由 IP 21.05s 都被兜住了）。
     `socket.setdefaulttimeout()` 同样拦不住它。
-    ⇒ 一次 DNS 挂起就能让本预算形同虚设：真实跑 run_aa98d99e66b5 里
+    ⇒ 修复前，一次 DNS 挂起就能让本预算形同虚设：真实跑 run_aa98d99e66b5 里
       声明 600s 预算的那发 evaluator 实际跑了 **10581s**（§三十·二十二·四）。
-    这不是"配置没调好"，是当前实现**没有**这层防护；守卫见
-    tests/test_dns_outside_timeout.py。
+    这层防护由 `_invoke_with_rate_limit_retry` 入口的 **DNS 预解析**补上
+    （`PM_DNS_BUDGET`，默认 5s）：解析挂起就在预算内上抛 `DnsResolutionTimeout`，
+    不再跟着解析器走完。只对显式配置的 base_url 生效，默认端点不预解析
+    —— 权衡见 `_preflight_dns` 的文档字符串。判据见 tests/test_dns_outside_timeout.py。
     """
 
     def __init__(self, role: str, seconds: float):
@@ -592,6 +621,115 @@ def _llm_within_budget(
     return get_llm(role, merged), float(clamped)
 
 
+def _endpoint_host(cfg: LLMConfig) -> tuple[str, int] | None:
+    """这一发真正要连的 (host, port)；没有显式 base_url 时返回 None（权衡见 `_preflight_dns`）。"""
+    if not cfg.base_url:
+        return None
+    parts = urlsplit(cfg.base_url)
+    if not parts.hostname:
+        return None
+    return parts.hostname, parts.port or (443 if parts.scheme == "https" else 80)
+
+
+def _resolve_into_box(box: dict[str, object], host: str, port: int) -> None:
+    """子线程体：getaddrinfo 的结果或异常装进 box。解析挂住时整个线程被遗弃。"""
+    try:
+        box["ok"] = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    except Exception as e:  # noqa: BLE001  # 异常要跨线程带给主线程，类型在这里无关紧要
+        box["error"] = e
+
+
+def resolve_host_bounded(
+    role: str, host: str, port: int, budget_s: float, requests: int = 0
+) -> float:
+    """在 budget_s 秒内把 host:port 解析一次，返回耗时（秒）。§三十·二十三·四 方向 1 的落地。
+
+    三种结局：
+    - **预算内返回** → 记进程内正面缓存，返回耗时。真实请求的 getaddrinfo 会命中
+      OS 解析缓存，不再单独挂一次；
+    - **解析报错**（NXDOMAIN 等）→ 在这里**不上抛**：预解析的旗标/地址族与 SDK 的
+      真实调用不一定一致，在这里失败可能误伤本来能通的端点。让真实请求去产生
+      它本来会产生的错误（异常类型与重试分类都保持原样）；
+    - **挂住超预算** → 上抛 `DnsResolutionTimeout`。这是本函数存在的意义：
+      把「跟着解析器走完」（实测挂 1800s 就真等 1800s）变成「预算内快速失败」。
+
+    ⚠️ 已知上限（§三十·二十三·四 方向 1 原话）：`getaddrinfo` 不可中断，挂住的
+    子线程只能遗弃（daemon，随进程退出），泄漏上限 = 解析器挂住的次数。本函数
+    承诺的是"调用方不再被解析拖住"，不是"把 DNS 修快"。
+    IP 字面量直接跳过：getaddrinfo 对它不发网络包，不值得开线程。
+    """
+    try:
+        ipaddress.ip_address(host)
+        return 0.0
+    except ValueError:
+        pass
+    key = f"{host}:{port}"
+    with _DNS_RESOLVED_LOCK:
+        if key in _DNS_RESOLVED:
+            return 0.0
+    box: dict[str, object] = {}
+    started = time.monotonic()
+    worker = threading.Thread(
+        target=_resolve_into_box,
+        args=(box, host, port),
+        name=f"pm-dns-{host}",
+        daemon=True,
+    )
+    worker.start()
+    worker.join(max(budget_s, 0.1))
+    elapsed = time.monotonic() - started
+    if worker.is_alive():
+        logger.warning(
+            "[%s] DNS 预解析 %s:%d 在 %.1fs 内未返回，按预算快速失败"
+            "（解析挂起不受 timeout 约束，§三十·二十三；已发 %d 次真实请求）",
+            role,
+            host,
+            port,
+            elapsed,
+            requests,
+        )
+        raise DnsResolutionTimeout(
+            role, budget_s, elapsed, requests, f"DNS 解析 {host}:{port} 挂起"
+        )
+    if "error" in box:
+        logger.debug(
+            "[%s] DNS 预解析 %s 报错但不在此上抛（真实请求会原样复现）：%s",
+            role,
+            host,
+            box["error"],
+        )
+        return elapsed
+    with _DNS_RESOLVED_LOCK:
+        _DNS_RESOLVED.add(key)
+    return elapsed
+
+
+def _preflight_dns(
+    role: str,
+    overrides: dict[str, Any] | None,
+    budget: WallBudget | None,
+    counter: list[int] | None,
+) -> None:
+    """发起前把端点域名解析一次（`PM_DNS_BUDGET`，默认 5s，0 = 关闭）。
+
+    **只管显式配置的 base_url**，两个原因：
+    1. 事故形态就是自建端点（§三十·二十二·四 的 run_aa98d99e66b5）；
+    2. 这是单测保持零出网的**构造性保证**——conftest 清空连接配置后 base_url 恒为
+       None，预解析永远不会在测试里开火。默认端点（不配 base_url）的解析挂起仍会
+       跟满 timeout，这是已知且接受的边界；真要兜住，把 base_url 显式写出来。
+    """
+    if DNS_BUDGET <= 0:
+        return
+    host_port = _endpoint_host(build_config(role, overrides))
+    if host_port is None:
+        return
+    host, port = host_port
+    dns_s = DNS_BUDGET if budget is None else min(DNS_BUDGET, budget.remaining())
+    if dns_s <= 0:
+        return  # 预算已尽：让发起前的预算检查去抛它的错，这里不抢戏
+    resolve_host_bounded(role, host, port, dns_s, counter[0] if counter else 0)
+
+
 def _invoke_with_rate_limit_retry(
     role: str,
     invoke_fn: Callable[[Any], Any],  # 接收 llm 实例执行一次调用
@@ -622,6 +760,10 @@ def _invoke_with_rate_limit_retry(
     计数实际发生在最内层 `_invoke_with_conn_retry`（所有重试路径最终都会重新走进它），
     这里只是透传。默认 None 行为不变。
     """
+    # DNS 预解析（§三十·二十三）：httpx 的 timeout 管不到 getaddrinfo，一次解析挂起
+    # 就能让下面所有预算检查形同虚设（实测 600s 预算实跑 10581s）。在进入重试循环
+    # 之前先兜住：挂住就在预算内快速失败，不再跟着解析器走完。
+    _preflight_dns(role, overrides, budget, counter)
     last_exc: Exception | None = None
     wait_deadline = time.monotonic() + max(0.0, RATE_LIMIT_MAX_WAIT)
     if deadline is not None:

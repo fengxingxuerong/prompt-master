@@ -133,10 +133,11 @@ def test_new_knobs_are_documented_in_env_example() -> None:
     这条是"示例与代码分叉"的最小闭环（本仓历史上一次性漏过 11 个 PM_*）。
     """
     example = (Path(__file__).resolve().parent.parent / ".env.example").read_text(encoding="utf-8")
-    for name in ("PM_CALL_BUDGET", "PM_SDK_RETRIES"):
+    for name in ("PM_CALL_BUDGET", "PM_SDK_RETRIES", "PM_DNS_BUDGET"):
         assert name in example, f".env.example 缺 {name}"
     # 而且要说清"0 是什么语义"，否则照抄一个数就以为懂了
     assert "0 = 不设上限" in example
+    assert "0 = 关闭预解析" in example
 
 
 # --------------------------------------------------------------------------
