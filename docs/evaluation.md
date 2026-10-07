@@ -2714,7 +2714,8 @@ case#0 的 `issues` 是**评委评语**（"异常点列表「无异常」填法�
 > - **case#0 形态未覆盖**（·四）：判据拿不到 errors；
 > - 两轮 Δ 符号相反（+0.85 / −0.50）**未归因**：端点负载是第一嫌疑，但没测；
 > - `evaluator` 单次均值 98.5s → 140.6s **未归因**（§三十·十三·三 同款）；
-> - **失败不记账**（§三十·十三·三）本节仍未修，所以"有多少次失败"仍只能翻 errors；
+> - ~~**失败不记账**（§三十·十三·三）~~ → **已于 §三十·十八 修掉**
+  （`failed_calls` / `failed_latency_ms` / `retry_requests` 单列，不并进 `calls`）；
 > - 本节改动**未提交**。
 
 ### 三十·十五、翻案：上一节说的"case#0 漏网"不存在——那个 1.0 是真低分（2026-10-06）
@@ -2968,4 +2969,106 @@ v1~v3 的共同错误：**拿绝对速率当判据**。而速率**跨时段分�
 >   §三十·十六·四 查 `1b234ac88efa` / `e76f9acfefab` 时只看到高速率，
 >   **没有**对应 errors 说明当时到底发生了什么，未查明；
 > - **改提示词加条数上限**（§三十·十六·六）仍未做——它是压"评委写得多"唯一安全的杠杆；
+> - 本节改动**未提交**。
+
+### 三十·十八、失败的调用以前在台账上**不存在**（2026-10-06）
+
+§三十·十三·三 记了个缺口，一直没补：**失败的调用不记账**。
+这一节补上了，而且刻意**不并进 `calls`**。
+
+#### 三十·十八·一、为什么这个缺口比"少个字段"严重
+
+`_record_usage` 只在成功路径调用（`pm/llm.py:609`，原第 655 行）。
+于是 `llm_usage` 里：
+
+| 情况 | 旧台账上的样子 |
+| --- | --- |
+| 真的慢（每次 140s，都成功） | `calls=16, latency=2249s` |
+| 一直失败（429/超时，返回兜底分） | **`完全没有这一条记录** |
+
+⇒ **两种完全不同的故障在台账上长得一模一样**：都表现为"这个角色怎么没调用记录"
+或"怎么这么快"。
+
+本会话已经因此查错了三轮：查错了本账（§三十·十三·一）、
+误判成"偶发长尾"（§三十·十三·二）、误判成"端点排队"（§三十·十二·一）。
+**三次都是因为台账里看不到失败，只能靠 `errors` 数组反推。**
+
+#### 三十·十八·二、为什么不能并进 `calls`
+
+最省事的做法是把失败也 `add()` 进 `calls`。**那样会毁掉已有判据**：
+§三十·十六/·十七 的速率判据（秒/千输出token）是按**成功**调用算的，
+把失败混进分母，输出 token 是 0 的那些会让比值直接爆炸——
+`test_judge_latency_rootcause.py` 6 条会当场失真。
+
+所以**单列三个字段**：
+
+```python
+failures:         dict[str, int]   # failed_calls
+failed_latency_ms: dict[str, int]
+retry_requests:   dict[str, int]
+```
+
+`calls` / `input_tokens` / `output_tokens` / `latency_ms` 的语义**一个字没改**，
+由 `test_snapshot_keeps_success_shape_unchanged` 钉住。
+⇒ 所有历史读数、既有守卫继续有效。
+
+#### 三十·十八·三、记在哪三处
+
+| 位置 | 记什么 | 为什么是它 |
+| --- | --- | --- |
+| `_invoke_with_rate_limit_retry` 的 `except` | 每次失败尝试 | 429/超时/连接错都在这条路上 |
+| 同上，`break` 后 `raise last_exc` | 重试耗尽 | 上面那次已经记过一次，这里**不重复**记 |
+| `structured_call` 通道 B 末尾 | 解析重试耗尽 | 历史上 `结构化输出失败…空内容` 那些 errors 的出处 |
+
+嵌套作用域（并发采样那条路径）里也要并回父账——
+`test_nested_scope_merges_failures_upward` 钉住，否则失败会在嵌套层消失，等于白记。
+
+#### 三十·十八·四、守卫（8 条，**7 条修复前确实红**）
+
+用 `git show HEAD:pm/llm.py` 取修复前版本跑一遍确认（未改仓库任何文件、
+按 bytes 还原、逐字比对通过）：
+
+```
+已写入修复前版本（64145 字节），确认无 add_failure
+修复前：FAILED 7 条
+  test_failure_is_counted_separately_from_success
+  test_retry_requests_are_counted
+  test_nested_scope_merges_failures_upward
+  test_negative_and_none_latency_are_clamped
+  test_rate_limit_exhaustion_is_recorded
+  test_non_rate_limit_failure_is_recorded
+  test_success_after_retry_is_still_a_success
+已还原：True   还原后 exit=0
+```
+
+唯一修复前就绿的是 `test_snapshot_keeps_success_shape_unchanged`——
+它是**兼容性判据**，本来就该一直绿（作用是保证这次改动**没有**动既有语义）。
+
+#### 三十·十八·五、判据本身也踩了一次坑
+
+第一版这 8 条里有 3 条用 `backend.use(structured=...)` 注入"总是 429"的钩子，
+结果**测不到目标代码**——钩子在 `structured_call` 入口就返回了，
+根本走不到我加记账的那段重试循环。失败信息是 `use() got an unexpected keyword
+argument 'structured'`（真实签名是 `use(hook)`）。
+
+⇒ 改版直接调 `_invoke_with_rate_limit_retry`（记账就加在那里），走**真路径**。
+**读代码前别猜 API**——这是本会话"探针不算数"的又一次。
+
+#### 三十·十八·六、这一节**没有**做的事，以及它换来什么
+
+**没做**：把新字段接进报告/CLI 展示。`llm_usage` 已经进了归档
+（`scheduler.py:400`），所以**下一轮真实跑就会带上这三个字段**，
+排障不用再翻 `errors`。但报告里还没显示它们。
+
+⇒ 换来的：以后能直接回答"这轮失败了几次、失败花了多久、重试了几发"，
+**不用再花一次真跑的钱去猜**。这是本会话第一次把"排障要靠猜"这个状态终结掉。
+
+> **未验项**：
+> - **新字段还没在真实跑里出现过**——它们要下一次真实 E2E 才会进归档；
+>   本节的证据全部来自单测（走真重试路径，但不是真端点）；
+> - 新字段**未接进报告与 CLI 展示**（·六）；
+> - `reasoning_tokens` 细分**仍未进台账**（§三十·十六 记的）——
+>   `_tokens_of` 只取合计，要分开得扩 LangChain 响应解析；
+> - `retry_requests` 目前只有 API（`add_retry_request`），
+>   **还没在真实重试路径上被调用**——限流重试那条分支只记了失败次数，没记重试发数；
 > - 本节改动**未提交**。
