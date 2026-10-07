@@ -74,13 +74,12 @@ def test_sample_scores_carry_no_per_sample_evidence() -> None:
             if not isinstance(ss, list) or len(ss) < 2:
                 continue
             checked += 1
-            assert all(
-                isinstance(x, (int, float)) for x in ss
-            ), f"{p.name}: sample_scores 里出现了非数字——判据要重写"
+            assert all(isinstance(x, (int, float)) for x in ss), (
+                f"{p.name}: sample_scores 里出现了非数字——判据要重写"
+            )
             # 逐采样数量最多等于该用例的采样数；且**没有**逐采样的 issues 字段
             assert not any(k.startswith("sample_issues") for k in e), (
-                "若将来给 sample_scores 配了逐采样证据，"
-                "§三十·十四·四 的推理前提就不再是假的"
+                "若将来给 sample_scores 配了逐采样证据，§三十·十四·四 的推理前提就不再是假的"
             )
     if not checked:
         pytest.skip("没有多条采样的用例可查")
