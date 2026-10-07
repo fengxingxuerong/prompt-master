@@ -829,6 +829,31 @@ def _usage_lines(state: ReportState) -> list[str]:
         lines.append(f"| {role} | {calls} | {inp} | {out} | {ms / 1000:.1f}s |")
     lines.append(f"| **合计** | {tot_calls} | {tot_in} | {tot_out} | {tot_ms / 1000:.1f}s |")
     lines.append("")
+    # §三十·十八：失败/重试单列。**不并进上面的 calls** —— 那四个数按成功调用算，
+    # 混进失败会让「秒/千输出token」这类速率判据失真（judge 守卫依赖那个口径）。
+    #
+    # 为什么必须显示：以前失败的调用在台账上完全不存在，于是「真的慢」与「一直失败」
+    # 在这张表上长得一样——本会话已因此查错三轮（查错本账/误判偶发长尾/误判端点排队）。
+    if any(int((usage.get(r) or {}).get("failed_calls", 0) or 0) for r in usage):
+        lines.append("> ⚠️ 上表的「调用次数」只数**成功**的调用。失败/重试另列于下表——")
+        lines.append("> 两者不可相加：相加会得到一个既不是真实请求数、也不是成功数的混合值。")
+        lines.append("")
+        lines.append("| 角色 | 失败次数 | 失败耗时 | 重试请求数 |")
+        lines.append("|---|---|---|---|")
+        tf = tms = tr = 0
+        for role in sorted(usage):
+            row = usage.get(role) or {}
+            f_n = int(row.get("failed_calls", 0) or 0)
+            f_ms = int(row.get("failed_latency_ms", 0) or 0)
+            r_n = int(row.get("retry_requests", 0) or 0)
+            if not (f_n or r_n):
+                continue
+            tf += f_n
+            tms += f_ms
+            tr += r_n
+            lines.append(f"| {role} | {f_n} | {f_ms / 1000:.1f}s | {r_n} |")
+        lines.append(f"| **合计** | {tf} | {tms / 1000:.1f}s | {tr} |")
+        lines.append("")
     # 金额折算：有 PM_PRICE_*_PER_M 才出现。本系统不内置价目表（会过期且错得看不出来），
     # 没配单价时整段不渲染——"没有数"比"看起来很合理的假数"安全。
     from .cost import render_cost_section
