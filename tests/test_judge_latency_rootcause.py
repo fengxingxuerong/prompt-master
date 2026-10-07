@@ -180,8 +180,46 @@ def test_second_seat_degrades() -> None:
     worst = max(r for _, r in bad)
     assert worst >= 5.0, (
         f"已知劣化轮的 evaluator_b 只慢到 {worst:.1f} 倍——"
-        "若降到个位数，说明那个端点已经恢复，"
-        "§三十·十六·七『席位特定劣化』的前提要重查（不是坏事，但要重跑验证）"
+        "若降到个位数，说明那个模型已经恢复，"
+        "§三十·十七『席位特定劣化』的前提要重查（不是坏事，但要重跑验证）"
+    )
+
+
+def test_second_seat_degradation_is_model_not_endpoint() -> None:
+    """钉住：两个评委走**同一个端点**，差别只在模型。
+
+    §三十·十七 我两次把劣化归给"glm-5.2 那个端点"，都错了。
+    `.env` 里 `PM_EVALUATOR_B_BASE_URL` 与 `PM_BASE_URL` 都是
+    `https://token.sensenova.cn/v1` —— 同端点，不同模型。
+    ⇒ 该换的是二号位的**模型**，不是端点。
+
+    ⚠️ 这条**必须读 .env 原文**，不能用 build_config：
+    CI 把 `PM_*_BASE_URL` 全覆盖成同一个死地址（127.0.0.1:9），
+    用 build_config 的话「同端点」恒真 ⇒ 守卫变装饰品。
+    （这个坑踩过一次：改成不同端点跑，守卫仍然绿。）
+    """
+    dotenv = Path(__file__).resolve().parents[1] / ".env"
+    if not dotenv.exists():
+        pytest.skip("本机没有 .env")
+    raw: dict[str, str] = {}
+    for line in dotenv.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            raw[k.strip()] = v.strip()
+
+    ev = raw.get("PM_BASE_URL", "")
+    evb = raw.get("PM_EVALUATOR_B_BASE_URL", "")
+    if not ev or not evb:
+        pytest.skip(".env 里没有显式写这两个 BASE_URL，判据不适用")
+    assert ev == evb, (
+        f"两个评委现在走不同端点（{ev} vs {evb}）——"
+        "若这是有意的（例如为了端点隔离），请把 §三十·十七 的诊断改写成"
+        "『端点差异』，并同步更新这条守卫的意图"
+    )
+    assert raw.get("PM_EVALUATOR_MODEL") != raw.get("PM_EVALUATOR_B_MODEL"), (
+        "两个评委现在用**同一个模型**——那『双评委』其实是同模型两次采样，"
+        "制衡机制不成立。这是另一条更严重的问题，本条只负责提醒"
     )
 
 
