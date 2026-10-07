@@ -32,16 +32,63 @@ def _generate_prompt_with_gate(
 ) -> tuple[str, dict[str, Any], QualityReport, int]:
     """生成提示词并过代码侧质量门（防元话语泄漏）。
 
-    不合格时自动带 hint 重试一次；重试后仍不合格则按原样接受并记录警告
+    不合格时带 hint 重试；重试后仍不合格则按原样接受并记录警告
     （不炸流程，由 evaluate 注入让评估器重点核查）。
 
     返回 (prompt, meta, quality_report, llm_calls)
     """
+
+    # §三十·二十一：**空产出**要额外的重试机会。
+    #
+    # 为什么单列：实测空产出率 **19.7%**（66 轮里 13 轮，§三十·二十），
+    # 而 `optimize` 节点拿到空串就早停——那 13 轮整轮作废、3 万多 token 打水漂。
+    # 判据实测：`check_prompt_quality("")` → ok=False / "提示词为空"，
+    # 所以空串**确实会触发下面那次带 hint 重试**（实测 calls=2）。
+    # 问题在于**只重试一次**：第二次还空就放弃。
+    #
+    # 为什么空产出要再多给机会，而质量问题不给：
+    #   · 质量问题（过长/含元话语）重试一次通常就好了，且反复重试容易把
+    #     提示词越改越偏——「按原样接受并记录警告」是刻意的选择。
+    #   · 空产出**不含任何信息**，重试没有「越改越偏」的风险；
+    #     而 19.7% 的发生率意味着「再试一次」的期望收益很高。
+    #
+    # 成本上限：最多额外 2 次（约 2×100s）。19.7% 里「连空两次」的占比未测，
+    # 所以这里取的是保守值，不是算出来的最优解。
+    _max_empty_retries = 2
     text, meta = llm.plain_call(role, system, user_prompt)
     calls = 1
     prompt = _strip_code_fence(text)
     report = check_prompt_quality(prompt)
+
+    empty_retries = 0
+    while not report.ok and empty_retries < _max_empty_retries and _is_empty_prompt(prompt):
+        empty_retries += 1
+        logger.warning(
+            "[%s] 第 %d 次空产出（%s），追加一次重试机会",
+            role,
+            empty_retries,
+            report.describe(),
+        )
+        # meta 必须一起换掉：重试成功时要报的是**这次**调用的元信息，
+        # 留着第一次那个空产出的 meta 会让"实际花了多久/哪个模型"对不上
+        # （第一版这里漏了赋值，mypy 的 no-any-return 顺带把它揪了出来）。
+        text, meta = llm.plain_call(role, system, user_prompt + retry_hint(report))
+        calls += 1
+        prompt = _strip_code_fence(text)
+        report = check_prompt_quality(prompt)
+
     if report.ok:
+        return prompt, meta, report, calls
+
+    # 空产出已经把额外机会用完了 ⇒ 别再掉进下面的质量门重试。
+    # 不加这句会多发一次（第 4 次）纯重复请求：empty_retries 用满时
+    # 那一支的 `report` 仍然是"提示词为空"，于是下面的带 hint 重试照跑。
+    # 这是被 tests/test_empty_delivery_retry.py::test_empty_retries_are_bounded
+    # 逮到的：它期望 3 次、实测 4 次。
+    if empty_retries >= _max_empty_retries:
+        logger.warning(
+            "[%s] 空产出重试已用满（%d 次），停止：%s", role, empty_retries, report.describe()
+        )
         return prompt, meta, report, calls
 
     logger.warning("[%s] 生成物未过质量门（%s），带 hint 重试", role, report.describe())
@@ -54,6 +101,17 @@ def _generate_prompt_with_gate(
         return prompt2, meta2, report2, calls
     logger.warning("[%s] 重试后仍未过质量门（%s），按原样接受并记录警告", role, report2.describe())
     return prompt2, meta2, report2, calls
+
+
+def _is_empty_prompt(prompt: str) -> bool:
+    """是否「空产出」——与「质量门不过」是不同的判据。
+
+    分开的理由（§三十·二十一）：质量问题重试可能越改越偏，所以只给一次；
+    空产出没有任何内容，重试没有副作用，所以可以多给机会。
+    判据必须用 `strip()` 之后的空值——实测纯空白串同样判「提示词为空」，
+    而 `_strip_code_fence` 剥完可能留下换行。
+    """
+    return not prompt.strip()
 
 
 def _seed_findings(seed: str) -> list[str]:
