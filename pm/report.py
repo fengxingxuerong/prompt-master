@@ -804,6 +804,39 @@ def _run_errors_lines(state: ReportState) -> list[str]:
     return lines
 
 
+def _wasted_delivery_lines(state: ReportState, usage: dict[str, Any]) -> list[str]:
+    """「成功但空」的钱花在哪：把 trace 的 *_empty 事件与台账对起来。
+
+    为什么要有这一段（§三十·十九，真实证据 run_41a833fb9b41）：
+    台账只记**成功**与**失败**两类，而「HTTP 200 但正文是空的」两类都不是。
+    实测那轮 optimizer 花掉 32850 输出 token / 207 秒、台账字段全部正常，
+    可最终提示词是 0 字符——只看用量表完全看不出这轮白烧了。
+    """
+    empties = [
+        t
+        for t in (state.get("trace") or [])
+        if isinstance(t, dict) and str(t.get("event") or "").endswith("_empty")
+    ]
+    if not empties:
+        return []
+    lines = [
+        "> ⚠️ 本轮出现过**「调用成功但交付为空」**：这些调用在台账上属于正常成功"
+        "（HTTP 200、token 照记），所以上面的用量表看不出异常。",
+    ]
+    for t in empties:
+        node = str(t.get("node") or "")
+        role = {"optimize": "optimizer", "evaluate": "evaluator"}.get(node)
+        spent = ""
+        if role and (usage.get(role) or {}):
+            u = usage[role] or {}
+            out_tok = int(u.get("output_tokens") or 0)
+            lat = int(u.get("latency_ms") or 0) / 1000
+            spent = f"，该角色累计已花 {out_tok} 输出 token / {lat:.0f}s"
+        lines.append(f"> - `{t.get('event')}`（node=`{node}`{spent}）")
+    lines.append("")
+    return lines
+
+
 def _usage_lines(state: ReportState) -> list[str]:
     """## 模型用量与耗时（按角色台账）：9 次调用花了多少 token、哪个角色最贵，一眼可见。"""
     usage = state.get("llm_usage") or {}
@@ -854,6 +887,13 @@ def _usage_lines(state: ReportState) -> list[str]:
             lines.append(f"| {role} | {f_n} | {f_ms / 1000:.1f}s | {r_n} |")
         lines.append(f"| **合计** | {tf} | {tms / 1000:.1f}s | {tr} |")
         lines.append("")
+    # §三十·十九：「成功但空」——传输层成功（HTTP 200、token 照记）但**交付为空**。
+    # run_41a833fb9b41 实测：optimizer 烧了 32850 输出 token / 207 秒，台账一切正常，
+    # 而最终提示词 0 字符。这类故障**记账记不到**（它既不是失败也不是成功退出），
+    # 证据在 trace 的 `*_empty` 事件里。只看用量表会以为这轮一切正常。
+    _wasted = _wasted_delivery_lines(state, usage)
+    if _wasted:
+        lines.extend(_wasted)
     # 金额折算：有 PM_PRICE_*_PER_M 才出现。本系统不内置价目表（会过期且错得看不出来），
     # 没配单价时整段不渲染——"没有数"比"看起来很合理的假数"安全。
     from .cost import render_cost_section
