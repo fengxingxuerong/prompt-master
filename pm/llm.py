@@ -453,6 +453,16 @@ class WallBudget:
     在 sleep 前比一次）——一次挂住的调用完全不受它约束，所以那条线管不住卡死。
     这里两件事都管：①发起前看还剩多少，不够就停；②把这一发的客户端 timeout 夹到剩余量，
     免得最后一发冲破预算（预算外最多溢出**一发**，见 test_worst_case_is_bounded_by_the_declared_budget）。
+
+    ⚠️ **管不到域名解析**（2026-10-07 §三十·二十三 实测）。上面那条"最多溢出一发"的上界
+    隐含假设 DNS 立刻返回，而 httpx 的 timeout 只覆盖 connect/read，`socket.getaddrinfo`
+    在它外面。实测：声明 `timeout=300s`、DNS 挂起 420s ⇒ 实测 **420.4s** 才返回
+    （同一台机器上拒绝连接 2.08s、黑洞 300.01s、不可路由 IP 21.05s 都被兜住了）。
+    `socket.setdefaulttimeout()` 同样拦不住它。
+    ⇒ 一次 DNS 挂起就能让本预算形同虚设：真实跑 run_aa98d99e66b5 里
+      声明 600s 预算的那发 evaluator 实际跑了 **10581s**（§三十·二十二·四）。
+    这不是"配置没调好"，是当前实现**没有**这层防护；守卫见
+    tests/test_dns_outside_timeout.py。
     """
 
     def __init__(self, role: str, seconds: float):
