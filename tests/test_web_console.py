@@ -5,9 +5,11 @@
 于是报告里围栏内的 `<img src=x onerror=...>` 会以可执行形态进 DOM，等价于
 任何能提交任务的人都能给控制台投毒（存储型 XSS）。
 
-这里从两层把它钉死：
+这里从三层把它钉死：
 1. 源码层：禁止再出现任何"把 &lt; 还原成 <"的写法，且渲染入口必须是 esc()；
-2. 行为层：本机有 node 时，直接抽出 esc + md2html 真跑一遍典型载荷，
+2. 整页语法层：组装结果里那段 <script> 全文交给 `node --check`（JS 是整段编译的，
+   任一处语法错会让浏览器丢掉整个脚本，而 Python 侧断言全都看不出来）；
+3. 行为层：本机有 node 时，直接抽出 esc + md2html 真跑一遍典型载荷，
    断言输出里除白名单标签外不存在任何原始尖括号（没有 node 则跳过，源码层断言仍生效）。
 """
 
@@ -79,6 +81,45 @@ def test_md2html_escapes_before_rendering():
 def test_console_has_no_external_resources():
     """控制台不引外部资源 —— CSP 才能用 default-src 'self'。"""
     assert not re.search(r"(src|href)\s*=\s*[\"']https?://", WEB_SRC), "控制台引入了外部资源"
+
+
+# --------------------------------------------------------------------------
+# 整页脚本语法（需要 node）
+# --------------------------------------------------------------------------
+def _extract_full_script() -> str:
+    """抽出组装结果里 <script> 段的全文（12 个 JS_* 常量的拼接结果）。"""
+    m = re.search(r'<script nonce="[^"]*">\n([\s\S]*?)\n</script>', WEB_SRC)
+    assert m, "没找到控制台 <script> 段（pm/web 的组装结构变了，本用例需同步更新）"
+    body = m.group(1)
+    # 防"锚点漂了但只截到一小截"：截断的捕获会让语法检查对着半页代码跑，等于没这条闸。
+    assert len(body.splitlines()) > 300, (
+        f"<script> 段只截到 {len(body.splitlines())} 行，捕获可能被提前截断"
+    )
+    return body
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="本机没有 node，跳过整页 JS 语法验证")
+def test_console_script_parses():
+    """整页脚本必须能被 JS 解析器接受。
+
+    为什么单独一条：本文件此前只把 esc/md2html 两个函数交给 node，其余 JS 一行都没被
+    解析过。而 JS 是**整段编译**的——任一处语法错让浏览器在解析阶段就丢掉整个
+    <script>，表现是"页面在、按钮全无反应"，而所有 Python 侧断言（响应头、nonce、
+    源码正则）照样全绿。这类"入口坏了、测的却是被调函数"的形态本仓已踩过一次。
+    """
+    tmp = Path(tempfile.gettempdir()) / "pm_console_script_parse.cjs"
+    tmp.write_text(_extract_full_script(), encoding="utf-8")
+    proc = subprocess.run(
+        [shutil.which("node"), "--check", str(tmp)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",  # 不指定时 Windows 中文机按 GBK 解码 stderr，reader 线程会炸
+        timeout=60,
+    )
+    assert proc.returncode == 0, (
+        f"控制台整页 JS 语法错误（{tmp} 的 file:line 可直接 grep 回 pm/web/_js.py）：\n"
+        f"{proc.stderr[:500]}\n…\n{proc.stderr[-300:]}"
+    )
 
 
 # --------------------------------------------------------------------------
