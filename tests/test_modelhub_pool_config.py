@@ -13,13 +13,17 @@
 
 from __future__ import annotations
 
+import itertools
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 from pm.modelhub import pool as P
 from pm.modelhub.pool import ConfigError, ModelHub
+
+_BUMP_SEQ = itertools.count(1)
 
 
 def _spec(name: str = "a", **kw: Any) -> dict[str, Any]:
@@ -51,10 +55,20 @@ def _write_cfg(
 
 
 def _bump_mtime(path: Path, seconds: float) -> None:
-    import os
+    """把 mtime 往后推 `seconds` 秒，并叠加调用序号 × 1000s 保证落点唯一。
 
+    为什么不能只推固定秒数：`_reload_if_needed` 的触发条件是
+    **`mtime != self._mtime`（不等于）**，而 Windows 的写入时间戳按系统时钟
+    刻度量化（毫秒级）——同一测试里连续两次「写 + 推同样的秒数」，两次写
+    落在同一刻度时，第二次 bump 的落点与缓存值**完全相等**，重载不触发，
+    测的就变成「根本没看文件」。满载实测翻过车（隔离必过、钩子全量跑偶红，
+    test_repaired_config_is_picked_up_on_the_next_reload / test_broken_config_
+    while_running 各红过一次）。每次调用叠 +1000s 的序号偏移后，任意两次
+    bump 的落点至少差 1000s，「撞刻度」这一类由构造消除，不再依赖调度运气。
+    """
     st = path.stat()
-    os.utime(path, (st.st_atime + seconds, st.st_mtime + seconds))
+    offset = seconds + next(_BUMP_SEQ) * 1000.0
+    os.utime(path, (st.st_atime + offset, st.st_mtime + offset))
 
 
 @pytest.fixture
