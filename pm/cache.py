@@ -74,14 +74,26 @@ def _hash(*parts: str) -> str:
 
 
 def key_for_eval(
-    prompt: str, test_input: str, test_output: str, judge_spec: str, extra: str = ""
+    prompt: str,
+    test_input: str,
+    test_output: str,
+    judge_spec: str,
+    extra: str = "",
+    *,
+    sample_index: int = 0,
 ) -> str:
     """评估结果缓存键：被测输出变了就自然失效。
 
     `extra` 必须带上原始需求 / 上下文 / 质量警告（旧版没带：不同 task 只要
     prompt+输入+输出相同就会串用同一份评估结果）。
+
+    `sample_index` 也必须进键（与 `key_for_target` 的 `|s{sample}` 同一先例）。
+    2026-10-09 真端点实测 `run_d01e8a9168d4`：低温端点让 4/4 用例的两次采样输出**字节
+    相同**，第二次评估于是按内容寻址命中第一次的对象（聚合日志"缓存命中 4"= 用例数），
+    极差按构造为 0 ⇒ 报告印 `噪声=0.00`，而它实际含义是"第二次根本没打分"。达标判定看
+    的保守下界建立在噪声项上，所以这不只是报表问题。同序号重跑仍然命中（断点续跑不变）。
     """
-    return _hash("eval", prompt, test_input, test_output, judge_spec, extra)
+    return _hash("eval", prompt, test_input, test_output, judge_spec, f"{extra}|n{sample_index}")
 
 
 def key_for_target(prompt: str, test_input: str, target_model: str, extra: str = "") -> str:

@@ -474,12 +474,16 @@ def _evaluate_one(
         # 规则变了评估结论就会变：不进键就会拿到旧清单的判定
         extra += f"\n<RULES>{rules}"
     extra += key_suffix
+    # 采样序号进键：同一用例的第 2 次采样即使输出字节相同也必须独立评一次，
+    # 否则多次采样量出的极差恒为 0（实测与理由见 pm/cache.py::key_for_eval）。
+    sample_idx = _safe_int(run.get("sample_index"))
     ck = key_for_eval(
         prompt,
         run["test_input"],
         run["output"],
         judge_spec,
         extra=extra,
+        sample_index=sample_idx,
     )
     if cache is not None:
         cached = cache.get(ck)
@@ -530,7 +534,7 @@ def _evaluate_one(
     # 断点续跑命中后该用例永久跳过交叉验证 —— P0 防线会被静默关闭（A1）。
     if cache is not None and len(results) == len(judges):
         cache.put(ck, final_ev.model_dump())
-    final_ev.sample_index = int(run.get("sample_index", 0) or 0)
+    final_ev.sample_index = sample_idx
     return final_ev.model_dump(), n_calls, False
 
 
