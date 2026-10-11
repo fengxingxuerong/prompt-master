@@ -126,6 +126,38 @@ def test_http_json_error_messages_are_actionable(monkeypatch):
         M._http_json("GET", "http://x")
 
 
+def test_http_json_token_header_follows_env(monkeypatch):
+    """PM_API_TOKEN 设了就自动带 X-API-Key，没设就不带。
+
+    读端点（status/report）2026-10-11 起也在 token 保护范围内：MCP 与本机 server
+    共享同一份 .env，不带 key 的转发会被自家门禁 401 挡死。头名经 http.client
+    规范化为 `X-api-key`。"""
+
+    captured: dict[str, Any] = {}
+
+    class _Resp:
+        def read(self) -> bytes:
+            return b"{}"
+
+        def __enter__(self) -> _Resp:
+            return self
+
+        def __exit__(self, *a: Any) -> None:
+            return None
+
+    def fake_urlopen(req: Any, timeout: float = 0) -> _Resp:
+        captured["key"] = req.get_header("X-api-key")
+        return _Resp()
+
+    monkeypatch.setattr(M.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.delenv("PM_API_TOKEN", raising=False)
+    M._http_json("GET", "http://x/api/status/r1")
+    assert captured["key"] is None
+    monkeypatch.setenv("PM_API_TOKEN", "secret-token")
+    M._http_json("GET", "http://x/api/status/r1")
+    assert captured["key"] == "secret-token"
+
+
 # --------------------------------------------------------------------------
 # 3. 计算类 tool：参数 → CLI 参数 的拼装
 # --------------------------------------------------------------------------

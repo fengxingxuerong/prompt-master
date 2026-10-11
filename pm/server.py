@@ -138,7 +138,15 @@ def _maybe_start_calibration_patrol() -> None:
     logger.info("评委校准排程已启动：每 %.1f 小时回测锚点集（%s）", hours, judge)
 
 
-_maybe_start_calibration_patrol()
+# ⚠️ 这里**不**在模块导入时调用它。旧写法是 `_maybe_start_calibration_patrol()` 裸在
+# 文件末尾（原第 141 行），实测后果是"只要 import pm.server 就起线程"：本轮量到
+# 导入前后线程数 1→2。而 import 它的远不止服务进程——CLI 的 submit/wait、MCP 工具、
+# 每个 `from pm import server` 的用例都会拿到一个后台线程，并且它在 uvicorn
+# `--workers N` 下按 worker 数翻倍（N 份排程 = N 倍计费调用）。改挂到 startup 上
+# （见下方 app.router.on_startup），只有真的把服务拉起来才起线程。
+# 接线由 tests/test_patrol.py 的两条用例分别守住：
+#   · 导入期不起线程（子进程真 import 数线程，不靠 mock）；
+#   · TestClient 生命周期内确实起了（摘掉 append 那行它会红）。
 
 # --------------------------------------------------------------------------
 # FastAPI 应用
@@ -180,6 +188,13 @@ def _drain_task_pool() -> None:
 
 
 app.router.on_shutdown.append(_drain_task_pool)
+
+# 校准排程挂 startup（理由见 _maybe_start_calibration_patrol 上方那段注释）。
+# 与上面的停机钩子走同一套机制：`@app.on_event` 已弃用，而 on_startup/on_shutdown
+# 这两个列表是默认 lifespan 真正执行的东西 —— 由 TestClient 的生命周期与 uvicorn
+# 的启停都会触发，不需要自己实现 lifespan（自实现反而要把 on_shutdown 接管过来，
+# 那样 M3.5 的停机排空就得重新证一次）。
+app.router.on_startup.append(_maybe_start_calibration_patrol)
 
 
 # CORS：默认**不开**。这个服务会烧 API 余额，旧版 `allow_origins=["*"]` 等于允许任意网页
@@ -257,7 +272,8 @@ def require_token(x_api_key: str | None = Header(default=None)) -> None:
     expected = os.getenv("PM_API_TOKEN", "").strip()
     if not expected:
         return
-    if x_api_key != expected:
+    # 常量时间比较：字符串 != 可被逐字节计时侧信道分辨出"前缀对了多长"
+    if not x_api_key or not secrets.compare_digest(x_api_key, expected):
         raise HTTPException(status_code=401, detail="缺少或错误的 X-API-Key")
 
 
@@ -439,7 +455,7 @@ async def health() -> dict[str, Any]:
     return {"status": "ok", "service": "prompt-master"}
 
 
-@app.get("/api/history")
+@app.get("/api/history", dependencies=[Depends(require_token)])
 async def history_endpoint() -> JSONResponse:
     """运行历史聚合 + 同任务 Δ 显著性（Web 历史面板的数据源）。
 
@@ -501,7 +517,11 @@ async def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     )
 
 
-@app.get("/api/status/{run_id}", response_model=StatusResponse)
+@app.get(
+    "/api/status/{run_id}",
+    response_model=StatusResponse,
+    dependencies=[Depends(require_token)],
+)
 async def status(run_id: str) -> StatusResponse:
     s = _scheduler.get_status(run_id)
     if s is None:
@@ -509,7 +529,11 @@ async def status(run_id: str) -> StatusResponse:
     return StatusResponse(**s)
 
 
-@app.get("/api/report/{run_id}", response_model=ReportResponse)
+@app.get(
+    "/api/report/{run_id}",
+    response_model=ReportResponse,
+    dependencies=[Depends(require_token)],
+)
 async def report(run_id: str) -> ReportResponse:
     rpt = _scheduler.get_report(run_id)
     if rpt is None:
@@ -537,7 +561,11 @@ async def race(req: RaceRequest, request: Request) -> RaceResponse:
     return RaceResponse(race_id=race_id, message=f"赛马已启动，状态：GET /api/race/{race_id}")
 
 
-@app.get("/api/race/{race_id}", response_model=RaceStatusResponse)
+@app.get(
+    "/api/race/{race_id}",
+    response_model=RaceStatusResponse,
+    dependencies=[Depends(require_token)],
+)
 async def race_status(race_id: str) -> RaceStatusResponse:
     s = _scheduler.get_race_status(race_id)
     if s is None:
@@ -545,7 +573,11 @@ async def race_status(race_id: str) -> RaceStatusResponse:
     return RaceStatusResponse(**s)
 
 
-@app.get("/api/race/{race_id}/report", response_model=RaceReportResponse)
+@app.get(
+    "/api/race/{race_id}/report",
+    response_model=RaceReportResponse,
+    dependencies=[Depends(require_token)],
+)
 async def race_report(race_id: str) -> RaceReportResponse:
     rpt = _scheduler.get_race_report(race_id)
     if rpt is None:

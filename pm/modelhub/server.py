@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sys
 import time
 import uuid
@@ -67,7 +68,8 @@ def _admin_auth(x_api_key: str | None) -> None:
     expected = (os.getenv("PMH_GATEWAY_TOKEN") or "").strip()
     if not expected:
         return
-    if not x_api_key or x_api_key.strip() != expected:
+    # 常量时间比较，同 pm/server.py 的 require_token
+    if not x_api_key or not secrets.compare_digest(x_api_key.strip(), expected):
         raise HTTPException(
             status_code=401, detail="缺少或错误的 X-API-Key / Authorization（管理操作）"
         )
@@ -94,7 +96,7 @@ def _chat_auth(
     # 管理员口令直通
     if not expected:
         return None, "open"
-    if key and key == expected:
+    if key and secrets.compare_digest(key, expected):
         return None, "admin"
     raise HTTPException(status_code=401, detail="缺少或错误的鉴权（vk- 密钥或管理员口令）")
 

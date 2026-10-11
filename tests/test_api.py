@@ -203,6 +203,33 @@ def test_token_required_when_configured(client, monkeypatch):
     assert ok.status_code == 200
 
 
+def test_read_endpoints_require_token_too(client, monkeypatch):
+    """读端点也在 token 保护范围内（H3 收尾）。
+
+    以前只有写端点被挡：设了 token 的部署里，摸到端口的人提交不了任务，
+    却能读任意 run 的任务原文、完整报告、历史聚合与赛马结果——
+    这些同样是数据，且 rest-api.md 旧版还明文写着「读端点不要求」。
+    `/api/health` 与控制台页面本身保持开放（存活探测与浏览器加载）。
+    """
+    monkeypatch.setenv("PM_API_TOKEN", "secret-token")
+    read_paths = (
+        "/api/history",
+        "/api/status/no-such-run",
+        "/api/report/no-such-run",
+        "/api/race/no-such-race",
+        "/api/race/no-such-race/report",
+    )
+    for path in read_paths:
+        r = client.get(path)
+        assert r.status_code == 401, f"{path} 无 key 应 401，实际 {r.status_code}"
+    # 带 key 应穿过鉴权落到资源层：不存在的 run/race 是 404 而不是 401
+    for path in read_paths[1:]:
+        r = client.get(path, headers={"X-API-Key": "secret-token"})
+        assert r.status_code == 404, f"{path} 带正确 key 应 404，实际 {r.status_code}"
+    assert client.get("/api/history", headers={"X-API-Key": "secret-token"}).status_code == 200
+    assert client.get("/api/health").status_code == 200
+
+
 # ---------------------------------------------------------------------------
 # 文档与模型同源：rest-api.md 的字段参考不许漂
 # ---------------------------------------------------------------------------

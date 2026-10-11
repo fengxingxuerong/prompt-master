@@ -66,6 +66,12 @@ def _http_json(
     req = urllib.request.Request(url, data=data, method=method)
     if data is not None:
         req.add_header("Content-Type", "application/json")
+    token = os.getenv("PM_API_TOKEN", "").strip()
+    if token:
+        # status/report 等 GET 2026-10-11 起也在 PM_API_TOKEN 保护范围内；
+        # MCP 与本机 server 共享同一份 .env，转发时自动带上，别让自家工具被自家门禁挡死。
+        # 每次现读（晚绑定）：启动引导晚于 import 是本项目反复踩过的坑。
+        req.add_header("X-API-Key", token)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))

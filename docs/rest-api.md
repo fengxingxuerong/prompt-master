@@ -44,7 +44,14 @@
   从源码与行为两层把它钉住了。
 
 环境变量：
-- `PM_API_TOKEN` —— 设定后写端点需带 `X-API-Key: <token>`（读端点不要求）
+- `PM_API_TOKEN` —— 设定后**所有业务端点**都需带 `X-API-Key: <token>`：写端点
+  （optimize / race）之外，返回任务原文、完整报告、历史聚合与赛马结果的读端点
+  （history / status / report / race 查询）同样受保护——这些也是数据。
+  比较走常量时间（`secrets.compare_digest`）。`/api/health` 与控制台页面本身保持开放
+  （存活探测与浏览器加载）；注意控制台页面的 JS 请求不携带 key，token 保护下的部署里
+  控制台的数据面板会 401——控制台按本地单人开发设计，共享网络部署请用脚本带 key 调 API。
+  MCP 的长任务转发（`pm/mcp_server.py`）不受此影响：它与本机 server 共享同一份
+  `.env`，每次转发现读 `PM_API_TOKEN` 自动附带 `X-API-Key`。
 - `PM_ALLOW_ORIGINS` —— 确实需要跳源调用时才设
 - `PM_TASK_DB` —— 任务/赛马记录的 SQLite 路径；设了才能 `--workers > 1`
 - `PM_FAKE_BACKEND=progress|stall|dispute|unclear` —— 演示模式，无 API Key 也能跑通全流程；
