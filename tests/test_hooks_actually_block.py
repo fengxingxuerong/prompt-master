@@ -62,6 +62,33 @@ PROMPTS = ROOT / "pm" / "prompts.py"
 PY = sys.executable
 
 
+def _hook_venv_python() -> Path | None:
+    """pre-commit 钩子的每条 entry 都直接调**仓库 venv** 解释器
+    （见 `.pre-commit-config.yaml` 开头注释：为的是与 CI 同源钉版本）。
+
+    干净检出（CI 走 setup-python，没有 `.venv`）里这个解释器不存在 ⇒ 钩子
+    根本 run 不起来。那不是"钩子坏了"，是环境没到位 ⇒ 跳过，别把 CI 染红
+    （CI 本来也不跑 pre-commit，它跑的是等价的独立步骤）。
+
+    ⚠️ 不跳过的后果不只是那一条"未改动必须绿"：另两条"必须红"的钩子测试在
+    解释器缺失时会因为 `pre_commit` 报 "Executable ... not found"（rc 恰好
+    非 0）而**假绿**——观测到的"红"来自环境，不是来自钩子在拦东西。
+    """
+    for cand in (
+        ROOT / ".venv" / "Scripts" / "python.exe",  # Windows
+        ROOT / ".venv" / "bin" / "python",  # POSIX
+    ):
+        if cand.exists():
+            return cand
+    return None
+
+
+requires_hook_venv = pytest.mark.skipif(
+    _hook_venv_python() is None,
+    reason="仓库 .venv 不存在（CI 干净检出）——pre-commit 钩子 run 不起来，本组跳过",
+)
+
+
 # ---------------------------------------------------------------------------
 # 工具：安全地"弄坏 → 验 → 还原"
 # ---------------------------------------------------------------------------
@@ -137,6 +164,7 @@ def _break_prompt_rule(text: str) -> str | None:
     return None
 
 
+@requires_hook_venv
 def test_a_broken_prompt_is_actually_blocked(restorer) -> None:
     """prompt-gate：引入一条命中规则 ⇒ 必须红。
 
@@ -157,6 +185,7 @@ def test_a_broken_prompt_is_actually_blocked(restorer) -> None:
     )
 
 
+@requires_hook_venv
 def test_an_untouched_repo_stays_green() -> None:
     """反向对照：不弄坏时必须是绿的。
 
@@ -168,6 +197,7 @@ def test_an_untouched_repo_stays_green() -> None:
     )
 
 
+@requires_hook_venv
 def test_dirty_release_data_is_actually_blocked(restorer) -> None:
     """releases-data-clean：把被跟踪的数据写脏 ⇒ 必须红。
 

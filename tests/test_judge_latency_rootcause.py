@@ -224,18 +224,24 @@ def test_second_seat_degradation_is_model_not_endpoint() -> None:
 
 
 def test_evaluator_max_tokens_is_not_lowered() -> None:
-    """记录现状：上限 32000 没有给模型收口信号。
+    """记录现状：**入库缺省**上限 24000（`.env` 里会再抬到 32000）。
 
     ⚠️ 这是**现状记录**，不是推荐值。调低它有真实风险：
-    `pm/llm.py:838` 明写「思考型模型把 reasoning 计入 max_tokens，
+    `pm/llm.py` 明写「思考型模型把 reasoning 计入 max_tokens，
     触达上限 → 正文额度归零」，2026-09-14 的事故就是
     `evaluator max_tokens=6000` → **33% 的调用正文被截成空**。
-    ⇒ §三十·十六 **不调**这个值，本条只是防止它被悄悄改掉。
-    """
-    from pm.llm import build_config
+    ⇒ §三十·十六 **不调**这个值，本条只是防止**入库的缺省**被悄悄改小。
 
-    cfg = build_config("evaluator")
-    assert cfg.max_tokens >= 32000, (
-        f"evaluator max_tokens 现在是 {cfg.max_tokens}——"
+    判据必须落在**入库常量** `MAX_TOKENS["evaluator"]` 上，不能读
+    `build_config()`：后者会把 `.env` 的 `PM_EVALUATOR_MAX_TOKENS`
+    叠上来（本机是 32000），于是本地 32000 / CI 24000，
+    **同一条测试两地读数不同**——2026-10-11 就是这条把 CI 推红的
+    （干净检出没有 `.env`，`build_config` 取到缺省 24000，断言 ≥32000 挂）。
+    """
+    from pm.llm import MAX_TOKENS
+
+    floor = 24000  # = 入库缺省（pm/llm.py:72）；.env 可再抬，但不入库、CI 看不见
+    assert MAX_TOKENS["evaluator"] >= floor, (
+        f"evaluator 入库缺省 max_tokens 现在是 {MAX_TOKENS['evaluator']}——"
         "若被调小，先确认不会重现 2026-09-14 的正文截断事故"
     )

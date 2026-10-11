@@ -113,9 +113,14 @@ def test_the_real_mock_arms_are_now_excluded() -> None:
     所以这里只要求"认得出"，并**把 mock 臂的多样性显式记下来**：
     判据必须是 `errors` 的前缀，而不是分数或极差的形状。
     """
+    # 依赖**本地真实归档**（logs/ 被 gitignore，干净检出里没有）——判据锚在
+    # docstring 点名的那条真实 mock 臂上：它不在就跳过。同文件其它归档测试
+    # 一律 `skip("归档不在本机")`；唯独本条此前只挡了"一条 run 都没有"，而 CI 里
+    # 其它用例会往 logs/ 落测试用的 run_*.json ⇒ files 非空、mocks 为空、断言必红
+    # （2026-10-11 就是这么把 CI 推红的）。
+    if not (RUNS / "run_081de7650d8c.json").exists():
+        pytest.skip("本地没有真实 mock 归档")
     files = sorted(RUNS.glob("run_*.json"))
-    if not files:
-        pytest.skip("本机没有归档")
     mocks = []
     for p in files:
         try:
