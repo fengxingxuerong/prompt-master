@@ -77,3 +77,8 @@ dist/
 .box-agent-scratch/
 # 工件指针标记（会话工具给产物打的 22 字节 JSON，2026-10-11 出索引）
 *.artifact.json
+
+# 宣传片（AI 视频制作器产物：成片 + Remotion 工程动辄数 GB）
+宣传片/
+# box-agent 会话工作区（demo HTML + QA 截图等会话产物，同 .box-agent/ 先例，不该进版本库）
+小浣熊/
