@@ -309,6 +309,18 @@ def _samples_per_case() -> int:
     return max(1, min(5, n))
 
 
+def _normalize_output(text: str) -> str:
+    """抹掉目标端点自带的包装空白（入库/送评前统一 strip）。
+
+    实测 SenseNova 端点对**每一次** completion 都前缀两个换行 —— 连
+    "只回答一个数字、第一个字符必须是数字"这种极小强约束也返回 "\\n\\n4"。
+    这属于端点/模板级行为，提示词改不动；但评委每次都据此记一条「前导空行」
+    轻微格式瑕疵，噪声重复出现在每一份报告里。入库前 strip 一次即可根除，
+    且不影响断言与缓存键（断言本身已按 strip 口径比对，缓存键不含输出）。
+    """
+    return text.strip()
+
+
 def _run_one_target(
     idx: int,
     case: str,
@@ -339,7 +351,7 @@ def _run_one_target(
                         sample_index=sample,
                         test_input=case,
                         prompt=prompt,
-                        output=cached["output"],
+                        output=_normalize_output(cached["output"]),
                         target_model=cached.get("target_model", target_model),
                         latency_ms=cached.get("latency_ms"),
                         cache_hit=True,
@@ -353,6 +365,7 @@ def _run_one_target(
     t0 = time.time()
     try:
         output, meta = llm.plain_call("target", prompt, case)
+        output = _normalize_output(output)
         # 2026-09-16：**空输出必须显式标记为不可用**，不能当成"得 1 分的真实结果"。
         # 实测（矩阵 A，客服分诊）：target 在推理型模型下 reasoning 吃满 max_tokens 时
         # **不抛异常、只返回空内容**（error=None、latency 58~71s、len=0），基线 8 条里占了 4 条。
