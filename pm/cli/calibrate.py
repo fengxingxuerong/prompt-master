@@ -483,13 +483,31 @@ def _same_cohort(h: dict[str, Any], c: _Cohort) -> bool:
     return h.get("judge") == c.judge and _comparable(h, c)
 
 
+def _has_calib_numbers(h: dict[str, Any]) -> bool:
+    """这条记录带不带 bias/MAE —— 只有带数字的才能当漂移基线。
+
+    账本里混着另一类记录：复现性行只有 `{judge, rep_range_mean, ts}`（09-29 那条就是），
+    量的是"评委与自己比"，本来就没有 bias/mae。`_comparable` 不看这个字段（它管的是"尺子
+    是不是同一把"，判据是锚点条数），会把这行当成基线返回，于是下面那两句硬取 `prev["bias"]`
+    直接 KeyError —— 而 `_save_entry` 排在它后面，结果是一轮 `--repeat 3` 的真实调用
+    （实测 44 发 / 55 分钟）全部打完之后**既没输出也没入账**。展示用的比较不许吃掉实测。
+    """
+    return "bias" in h and "mae" in h
+
+
 def _drift_vs_history(
     history: list[dict[str, Any]], c: _Cohort, analysis: dict[str, Any]
 ) -> dict[str, Any] | None:
-    prev = next((h for h in reversed(history) if _same_cohort(h, c)), None)
+    prev = next(
+        (h for h in reversed(history) if _same_cohort(h, c) and _has_calib_numbers(h)), None
+    )
     # 最近一条同角色记录：只在"没有可比基线、但有不可比记录"时才用来说明原因
     changed = next(
-        (h for h in reversed(history) if h.get("judge") == c.judge and not _comparable(h, c)),
+        (
+            h
+            for h in reversed(history)
+            if h.get("judge") == c.judge and not _comparable(h, c) and _has_calib_numbers(h)
+        ),
         None,
     )
     if prev is not None:
