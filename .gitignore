@@ -72,3 +72,8 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+
+# 会话工作/暂存目录（同 .box-agent/ 先例：智能体会话产物，不该进版本库）
+.box-agent-scratch/
+# 工件指针标记（会话工具给产物打的 22 字节 JSON，2026-10-11 出索引）
+*.artifact.json
