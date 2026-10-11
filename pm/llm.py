@@ -269,24 +269,31 @@ def _env(key: str, default: str = "") -> str:
     return os.getenv(key, default).strip()
 
 
-def _int_env(key: str, default: int) -> int:
+def int_env(key: str, default: int) -> int:
     """整型环境变量容错。
 
     旧版直接 `int(_env(k, "5"))`：`.env` 里写了空值（`PM_TIMEOUT=`）就
     `ValueError: invalid literal for int()`，每次调用都抛，整条流水线全线 failed（A2）。
+    小数串按宽口径解析（`"12.9"` → 12，`test_llm_branches` 钉住的契约）；
+    `int(float())` 对 `"1e999"` 会抛 OverflowError，与 ValueError 一并回退。
+    曾经 pm/scheduler.py 有一份 `int(raw)` 严格版副本——同名不同义，已并到这里。
     """
     raw = _env(key)
     if not raw:
         return default
     try:
         return int(float(raw))
-    except ValueError:
+    except (ValueError, OverflowError):
         logger.warning("环境变量 %s=%r 不是整数，回退默认值 %s", key, raw, default)
         return default
 
 
+# 兼容旧名：test_llm_branches / test_call_budget 按这个名字从本模块取
+_int_env = int_env
+
+
 def _float_env(key: str, default: float) -> float:
-    """浮点环境变量容错，理由同 _int_env。"""
+    """浮点环境变量容错，理由同 int_env。"""
     raw = _env(key)
     if not raw:
         return default
@@ -346,7 +353,7 @@ def _next_key(role: str) -> str:
 # （这两个在 import 期求值，所以必须走容错解析，否则 `PM_RATE_LIMIT_RETRIES=` 空值会让服务根本起不来）
 # max(0, ...) 兜底：负数会让 `range(N+1)` 变成空循环，重试路径在 raise 处拿到
 # None 异常（TypeError）或走进 "unreachable" 断言，把真实错误类型彻底掩盖。
-RATE_LIMIT_RETRIES = max(0, _int_env("PM_RATE_LIMIT_RETRIES", 5))
+RATE_LIMIT_RETRIES = max(0, int_env("PM_RATE_LIMIT_RETRIES", 5))
 RATE_LIMIT_BASE_SLEEP = _float_env("PM_RATE_LIMIT_BASE_SLEEP", 5.0)
 # 单次调用的退避总时长上限（A3）：旧版 5/10/20/40/80 累加可达 155s（单 Key 加倍后 310s），
 # 而通道 A 耗尽后还有通道 B 的 3 次重试各自再跑一轮退避，最坏能阻塞十几分钟。
@@ -408,7 +415,7 @@ _TRANSIENT_CONN_HINTS = (
 )
 # 状态码形态的瞬时故障：网关 5xx 与 408 请求超时。429 明确排除（它走限流通道：退避 + 换 Key）。
 _TRANSIENT_STATUS_CODES = frozenset({408, 500, 502, 503, 504})
-TRANSIENT_CONN_RETRIES = max(0, _int_env("PM_CONN_RETRIES", 2))
+TRANSIENT_CONN_RETRIES = max(0, int_env("PM_CONN_RETRIES", 2))
 TRANSIENT_CONN_BASE_SLEEP = _float_env("PM_CONN_BASE_SLEEP", 1.5)
 
 # 第 0 层重试：openai SDK 自己会重试（`DEFAULT_MAX_RETRIES = 2`），而且是**隐式**的——
@@ -418,7 +425,7 @@ TRANSIENT_CONN_BASE_SLEEP = _float_env("PM_CONN_BASE_SLEEP", 1.5)
 # 现在显式钉成 0：重试决策只留 `_invoke_with_conn_retry`（短退避）与限流层（换 Key）两处，
 # 它们都在墙钟预算的管辖范围内。确需恢复 SDK 层时设 `PM_SDK_RETRIES`，但要清楚那等于
 # 把每发的时长乘以 (1+N) 且不受本模块预算约束。
-SDK_RETRIES = max(0, _int_env("PM_SDK_RETRIES", 0))
+SDK_RETRIES = max(0, int_env("PM_SDK_RETRIES", 0))
 
 # 一次调用（含全部通道、全部重试、全部退避）的墙钟上限。0 = 不设上限（旧行为）。
 # 默认值来自实测分布而不是拍的：历史 trace 里 24 条 >60s 的单调用中最慢 **122.2s**
@@ -893,8 +900,8 @@ def build_config(role: str, overrides: dict[str, Any] | None = None) -> LLMConfi
         base_url=_env(f"PM_{role_u}_BASE_URL") or _env("PM_BASE_URL") or None,
         model=_env(f"PM_{role_u}_MODEL") or _env("PM_MODEL", "gpt-4o-mini"),
         temperature=_float_env(f"PM_{role_u}_TEMPERATURE", TEMPERATURES.get(role, 0.3)),
-        max_tokens=_int_env(f"PM_{role_u}_MAX_TOKENS", MAX_TOKENS.get(role, 2000)),
-        timeout=_int_env("PM_TIMEOUT", 120),
+        max_tokens=int_env(f"PM_{role_u}_MAX_TOKENS", MAX_TOKENS.get(role, 2000)),
+        timeout=int_env("PM_TIMEOUT", 120),
     )
     if overrides:
         for k, v in overrides.items():
@@ -1266,7 +1273,7 @@ def _structured_method() -> str:
 
 def _skip_channel_a(cfg: LLMConfig) -> str | None:
     """该端点是否应直接走文本通道。返回跳过原因（None = 照常尝试）。"""
-    if _int_env("PM_FORCE_JSON_CHANNEL", 0) > 0:
+    if int_env("PM_FORCE_JSON_CHANNEL", 0) > 0:
         return "PM_FORCE_JSON_CHANNEL=1 已强制使用文本通道"
     key = _capability_key(cfg)
     with _UNSUPPORTED_A_LOCK:

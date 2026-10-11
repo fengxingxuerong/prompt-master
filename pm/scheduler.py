@@ -28,17 +28,15 @@ from pathlib import Path
 from typing import Any, cast
 
 from .graph import build_app
+from .llm import int_env as _int_env
 from .llm import usage_scope
+from .paths import (
+    log_dir as _log_dir,  # 唯一实现在 pm/paths.py；测试 monkeypatch 的是本模块这个名字
+)
 from .state import initial_state
 from .store import MemoryStore, RaceRecord, RecordStore, TaskRecord, make_view
 
 logger = logging.getLogger("pm.scheduler")
-
-
-def _log_dir() -> Path:
-    """产物目录（可测性：测试里指到 tmp，不往仓库 logs/ 写东西）。"""
-    raw = os.getenv("PM_LOG_DIR", "").strip()
-    return Path(raw) if raw else Path(__file__).resolve().parent.parent / "logs"
 
 
 # 与 pm.graph._TERMINAL / route_after_evaluate 保持一致：这些状态都视为终态
@@ -413,17 +411,6 @@ class TaskManager:
         except Exception as e:
             logger.exception("任务 %s 失败", run_id)
             self.store.update_task(run_id, status="failed", error=str(e))
-
-
-def _int_env(key: str, default: int) -> int:
-    raw = os.getenv(key, "").strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        logger.warning("环境变量 %s=%r 不是整数，回退默认值 %s", key, raw, default)
-        return default
 
 
 def _build_race_report(

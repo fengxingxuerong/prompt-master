@@ -11,6 +11,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from pm.paths import (
+    log_dir as log_dir,  # re-export：唯一实现在 pm/paths.py（schemas / calibration 局部导入走这里）
+)
 from pm.state import SEED_PROMPT_MAX_CHARS
 
 # 原 run.py 同款：仓库根/logs（拆包后 __file__ 深了两层，改用 parents[2] 回到仓库根）
@@ -19,16 +22,6 @@ _DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
 # 不要拿这个常量再拼 —— 它在 import 时就冻结了，之后设的 `PM_LOG_DIR` 对它无效
 # （2026-09-25 实测：产物落在 tmp，校准账本却写进仓库 logs，同一个变量两种命运）。
 LOG_DIR = Path(os.getenv("PM_LOG_DIR") or _DEFAULT_LOG_DIR)
-
-
-def log_dir() -> Path:
-    """产物目录的**唯一**取法：每次调用都读一遍 `PM_LOG_DIR`。
-
-    晚绑定是有意的：CLI 的启动引导（`load_dotenv()`）与各测试的 env 覆盖都发生在
-    import 之后，import 期算出来的路径必然与运行期不一致。`pm/scheduler.py` 早就这么做了。
-    """
-    raw = os.getenv("PM_LOG_DIR", "").strip()
-    return Path(raw) if raw else _DEFAULT_LOG_DIR
 
 
 def setup_logging(verbose: bool) -> None:

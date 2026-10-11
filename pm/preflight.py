@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .backend import carry_context
-from .llm import _env, _float_env, _int_env, build_config, plain_call
+from .llm import _env, _float_env, build_config, int_env, plain_call
 
 logger = logging.getLogger("pm.preflight")
 
@@ -183,7 +183,7 @@ def preflight_roles() -> list[str]:
 # 2026-09-13 实测端点抖动时 --preflight 直接超掉了测试里 90s 的子进程预算。
 PREFLIGHT_ROLE_TIMEOUT = _float_env("PM_PREFLIGHT_TIMEOUT", 20.0)
 # 预检并发度：角色之间互不依赖，串行跑纯粹是白等（8 角色 × 慢端点可达分钟级）
-PREFLIGHT_CONCURRENCY = _int_env("PM_PREFLIGHT_CONCURRENCY", 8)
+PREFLIGHT_CONCURRENCY = int_env("PM_PREFLIGHT_CONCURRENCY", 8)
 
 
 def _preflight_one(role: str, smoke_prompt: str, max_tokens: int) -> RoleReport:
