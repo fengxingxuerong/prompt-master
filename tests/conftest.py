@@ -200,3 +200,39 @@ def isolate_host_connection_env(monkeypatch: pytest.MonkeyPatch) -> None:
             or up in ("PM_API_KEYS", "PM_PROVIDER")
         ):
             monkeypatch.delenv(k, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_ambient_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """宿主机/CI 环境里的**代理变量**一律清掉（2026-10-12，第三类环境污染）。
+
+    真实事故（本机实测，与上面那些 .env 污染同族、但键名不带 PM_ 前缀）：
+    开发机 Shell 里 `http_proxy=http://127.0.0.1:65018`（Clash 之类）环境下，
+    `tests/test_dns_outside_timeout.py::test_httpx_timeout_does_not_bound_dns`
+    **假红**——httpx 默认 `trust_env=True`，请求被送进代理，探测域名
+    `pm-dns-hang-probe.invalid` 从未经过本地 `socket.getaddrinfo`，
+    "DNS 挂起跟满 timeout"这个前提整个没发生（实测 elapsed 1.14s < 判据 1.5s）。
+    判据没错（库行为没变，§三十·二十三 的结论原样成立），错的是
+    **测试进程继承了与结论无关的环境**：同一个用例，清掉代理变量后 elapsed 1.94s、
+    照设计通过。
+
+    为什么修在 conftest 而不是那个测试文件里：这条失败的形状是
+    "某个用例忘了设 trust_env"，而**以后任何**新建 httpx/urllib 客户端
+    却不关心代理的用例都有同一个雷——code review 防不住"没人想到代理"。
+    清在这里，全部用例默认在无代理环境里跑；真要验代理行为的用例
+    在测试体里自己 setenv（测试体晚于夹具执行，覆盖得动）。
+    大小写都列：Linux（CI）上两个名字是各自独立的键，只清一半就漏一半；
+    Windows 上 `os.environ` 大小写不敏感（实测：给 `http_proxy` 赋值，读到的
+    键是 `HTTP_PROXY`），两条清的是同一个键——留着两条是为了"换到 Linux 还成立"。
+    """
+    for k in (
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ):
+        monkeypatch.delenv(k, raising=False)

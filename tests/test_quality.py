@@ -165,6 +165,45 @@ def test_delivery_skeleton_sections_never_counted():
     assert not any(i.code == "constraint_overload" for i in check_prompt_quality(prompt).issues)
 
 
+def test_markdown_heading_constraint_section_counted():
+    """`## 约束` 这类 Markdown 标题段也是约束段（2026-10-13 修：此前只认 `[约束]`）。
+
+    实测缺口：同一份内容 `## 约束` + 10 条编号 ⇒ count_constraints=0、structure_items=10，
+    预算闸（≤8）对 Markdown 标题式提示词整条失效——而 `structure_items` 的 docstring
+    明写"真实交付物里比方括号更常见"。三条形态（裸标题 / 带全角冒号 / h3）都要认。
+    """
+    body = "\n".join(f"{i}. 约束条目{i}：要求X。" for i in range(1, 4))
+    for head in ("## 约束", "# 约束", "### 约束", "## 约束：", "## 关键约束"):
+        counted = count_constraints(
+            f"## 任务\n分析销售数据。\n{head}\n{body}\n## 输出格式\n1. 第一部分\n"
+        )
+        assert counted["total"] == 3, f"「{head}」未被计入约束语义段：{counted}"
+
+
+def test_markdown_heading_style_has_no_bypass_cost():
+    """绕过成本必须为零（风格版）：把 [约束] 改成 ## 约束 不能躲过预算闸。"""
+    body = "\n".join(f"{i}. 条目{i}" for i in range(1, CONSTRAINT_LIMIT + 2))
+    bracket = count_constraints(f"[角色] 资深数据分析师。\n[约束]\n{body}\n")
+    heading = count_constraints(f"# 角色\n资深数据分析师。\n## 约束\n{body}\n")
+    assert bracket["total"] == heading["total"] == CONSTRAINT_LIMIT + 1
+    assert any(
+        i.code == "constraint_overload"
+        for i in check_prompt_quality(f"# 角色\n资深数据分析师。\n## 约束\n{body}\n").issues
+    ), "标题式的超载必须同样触发 constraint_overload"
+
+
+def test_markdown_delivery_headings_still_excluded():
+    """标题式误杀防线：`## 任务` / `## 输出格式` 的编号是交付物清单，不算约束。"""
+    prompt = (
+        "# 角色\n资深数据分析师，擅长结构化抽取，严格遵守数据完整性规则。\n"
+        "## 任务\n1. 趋势结论\n2. 异常点\n3. 数据说明\n"
+        "## 输出格式\n1. 第一部分\n2. 第二部分\n3. 第三部分\n"
+        "## 边界\n1. 数据缺失时显式标注「数据缺失」。\n"
+    )
+    assert count_constraints(prompt)["total"] == 1, "只应计入 ## 边界 的那 1 条"
+    assert not any(i.code == "constraint_overload" for i in check_prompt_quality(prompt).issues)
+
+
 # --------------------------------------------------------------------------
 # 1c. 元提示词防漂移（评审修复：错别字 / 注入契约）
 # --------------------------------------------------------------------------

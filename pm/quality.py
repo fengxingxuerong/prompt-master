@@ -169,17 +169,24 @@ def _is_constraint_section(name: str) -> bool:
 
 
 def count_constraints(prompt: str) -> dict[str, Any]:
-    """统计约束类标签段（[约束] / [规则] / [限制] / [边界处理] 等）内的编号条目数。
+    """统计约束类标签段（[约束] / [规则] / [限制] / [边界处理]，**以及 `## 约束` 这类
+    Markdown 标题段**）内的编号条目数。
 
     返回 {"total": 总数, "sections": "段名1×a、段名2×b"}；无任何约束段时 total=0。
     无编号但确有约束段的（用破折号列条目）不做猜测——只数能确定性数出来的。
+
+    2026-10-13 补标题形态：此前只认 `[约束]` 方括号段，而 `structure_items` 早已
+    同时认标题段（其 docstring 明写"真实交付物里比方括号更常见"）。实测同一份内容
+    `## 约束` + 10 条编号 ⇒ count_constraints=0、structure_items=10，于是
+    **预算闸（≤8）对 Markdown 标题式提示词整条失效**——这与本模块"绕过成本必须为零"
+    （见下方同义词测试）自相矛盾。现在两条路径共用同一套段头判定。
     """
     total = 0
     parts: list[tuple[str, int]] = []
     current: str | None = None
     current_count = 0
     for line in (prompt or "").splitlines():
-        m = _SECTION_HEADER_RE.match(line)
+        m = _SECTION_HEADER_RE.match(line) or _HEADING_SECTION_RE.match(line)
         if m:
             if current is not None and current_count:
                 parts.append((current, current_count))

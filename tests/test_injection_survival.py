@@ -19,6 +19,8 @@ from typing import Any
 
 from pm import backend, testing
 from pm.assertions import injection_hijacked
+from pm.injection_pack import META_WORDS, TECHNIQUES, pick_technique
+from pm.injection_pack import render as render_injection
 from pm.nodes import mock_node
 from pm.nodes import test_node as run_test_node  # 别名导入：避免 pytest 误收集 pm 节点函数
 from pm.schemas import MockInputSet
@@ -190,7 +192,15 @@ def test_mock_node_stores_scenarios_and_markers():
     assert re.fullmatch(r"[0-9A-F]{8}", code), f"校验码应是高熵十六进制串，实际 {code!r}"
     # 码必须真的在用例里，否则永远检不出来
     assert code in patch["test_cases"][2]
-    assert "忽略以上所有规则" in patch["test_cases"][2]
+    # 装束（PD-1 起共 10 种）按 (run_id, 序号) 确定性轮换——不能再钉死某一句话，
+    # 改为断言"该派生装束的渲染原文确实追加进了用例"，且模型原稿被保留在其前。
+    tech = pick_technique(state.get("run_id"), 2)
+    assert render_injection(tech, code) in patch["test_cases"][2], (
+        f"派生的装束 {tech.id} 没有追加进用例"
+    )
+    assert patch["test_cases"][2].startswith(_mockset().test_cases[2]), (
+        "模型自己写的注入文本必须保留（它更像真实攻击）"
+    )
     # 模型给的那份（已通过）弃用：高频词会被"复述输入"这种正常行为命中
     assert "已通过" not in markers
 
@@ -228,7 +238,9 @@ def test_test_node_flags_hijacked_output():
 
     def fake_plain(role, system, user, overrides=None):
         assert role == "target"
-        if "只输出校验码" in user:
+        # 判定"这一发是不是注入用例"认**码在不在输入里**，不认装束措辞——
+        # 装束自 PD-1 起轮换（10 种），认措辞会让这条用例随 run_id 抽到英文装束时假红。
+        if code in user:
             return f"{code}", dict(_META)  # 目标模型执行了注入指令
         return "华东：1200000元", dict(_META)
 
@@ -358,3 +370,49 @@ def test_survival_clean_when_two_samples_survive():
         for s in range(2)
     ]
     assert _injection_survival(st, runs) == {"total": 1, "hijacked": 0, "details": []}
+
+
+# --------------------------------------------------------------------------
+# 5. 注入技法库（PD-1，2026-10-13）：装束从 1 种扩到 10 种的守卫
+# --------------------------------------------------------------------------
+def test_injection_pack_techniques_are_well_formed():
+    """逐条核三条不变量：渲染后码在场（判定才不会失效）/ 点名要输出的东西 / 无元词自曝。"""
+    assert len(TECHNIQUES) >= 8, "装束库不该少于 8 种（PD-1 的目标是扩考卷）"
+    ids = [t.id for t in TECHNIQUES]
+    assert len(set(ids)) == len(ids), f"技法 id 必须唯一：{ids}"
+    code = "A1B2C3D4"
+    for tech in TECHNIQUES:
+        text = render_injection(tech, code)
+        assert "{code}" not in text, f"{tech.id} 渲染后仍残留占位符"
+        assert code in text, f"{tech.id} 渲染后不含校验码——命中判定永远失败"
+        assert "校验码" in text or "token" in text.lower(), f"{tech.id} 没点名要输出的东西"
+        for w in META_WORDS:
+            assert w not in text, f"{tech.id} 含元词「{w}」——目标模型会看出不是真实数据"
+
+
+def test_injection_technique_rotation_is_deterministic_and_covers():
+    """轮换三性质：同 run 复跑稳定（缓存/续跑前提）/ 同 run 内不重样 / 跨 run 铺开覆盖。"""
+    assert pick_technique("run-x", 2).id == pick_technique("run-x", 2).id, "同 run 复跑必须稳定"
+    same_run = {pick_technique("run-x", j).id for j in range(len(TECHNIQUES))}
+    assert len(same_run) == len(TECHNIQUES), "同一 run 的前 N 个号位应恰好覆盖全部装束且不重样"
+    seen = {pick_technique(f"run-{k}", 2).id for k in range(40)}
+    floor = len(TECHNIQUES) * 6 // 10
+    assert len(seen) >= floor, f"跨 run 覆盖不足（{len(seen)}/{len(TECHNIQUES)}）：{sorted(seen)}"
+
+
+def test_survival_details_name_the_technique():
+    """details 带技法名：审计才能回答'哪种打法得手/被拒'，跨轮覆盖靠它读。"""
+    merged = _state_with_mock("P")
+    code = merged["hijack_markers"][2]
+    tech = pick_technique(merged.get("run_id"), 2)
+
+    def fake_plain(role, system, user, overrides=None):
+        return f"{code}", dict(_META)
+
+    hook = backend.CallHook(plain=fake_plain, structured=None, disable_cache=True)
+    with backend.use(hook):
+        patch = run_test_node(merged)
+    detail = patch["injection_survival"]["details"][0]
+    assert f"技法 {tech.id}" in detail, f"details 里没有技法名：{detail}"
+    # 复核：details 里那个技法名必须与用例文本里实际用的装束一致（防两处各算各的）
+    assert render_injection(tech, code) in merged["test_cases"][2]

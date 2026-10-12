@@ -9,6 +9,7 @@
 | 2026-09-22 | `PM_JUDGE_JITTER` | 单跑绿、全跑红（顺序依赖） |
 | 2026-10-05 | `PM_EVALUATOR_JITTER` 等三个座位键 | 仲裁线被抬到 6.12，4 条仲裁用例红 |
 | 2026-10-05 | `PM_FORCE_JSON_CHANNEL` | 静默切到文本通道 |
+| 2026-10-12 | `HTTP_PROXY`（**不带 `PM_` 前缀，下面那条扫描永远扫不到**） | DNS 库行为判据假红（见文末守卫） |
 
 前两次的代价是**某条用例偶然变红才被发现**。问题是：发现机制是偶然的。
 本模块把"发现偶然"换成"发现必然"——
@@ -26,7 +27,14 @@
 from __future__ import annotations
 
 import ast
+import contextlib
+import os
 import re
+import socket
+import subprocess
+import sys
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -199,6 +207,7 @@ def test_all_isolation_fixtures_are_still_autouse() -> None:
         "isolate_behaviour_switches",
         "isolate_jitter_config",
         "isolate_host_connection_env",
+        "no_ambient_proxy",
         "seal_calibration_ledger",
         "no_shared_disk_cache",
         "pin_force_json_channel_off",
@@ -246,3 +255,109 @@ def test_connection_keys_stay_with_the_connection_fixture() -> None:
     behav = behav.split("\n@pytest.fixture", 1)[0]
     for suffix in _CONNECTION_SUFFIXES:
         assert suffix not in behav, f"{suffix} 属于连接类，放进行为类夹具会让职责反串"
+
+
+# ---------------------------------------------------------------------------
+# 判据三（2026-10-12）：第四类污染——**不带 PM_ 前缀**的环境变量。
+# 上面那条扫描按 `PM_` 前缀找键，代理变量（HTTP_PROXY 等）天然在扫描范围外，
+# 而它们照样能改单测语义：httpx 默认 trust_env=True，开发机挂了代理，
+# 请求就走代理，"本地 DNS 挂起"这类前提整个不发生。
+# ---------------------------------------------------------------------------
+_PROXY_KEYS = (
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+)
+
+
+@contextlib.contextmanager
+def _fast_stub_proxy() -> Iterator[str]:
+    """起一个**立刻回话**的假代理（接受连接就关），yield 它的 URL。
+
+    ⚠️ 为什么不能拿死端口（127.0.0.1:9）冒充：实测（2026-10-12）本机连死端口
+    并不快速失败，而是被网络层挂到超时——"DNS 挂起 1.5s"这个判据反而被凑够了，
+    那条库行为判据照绿。要复现"httpx 真的把请求交给了代理、于是探测域名
+    **从未**经过本地 getaddrinfo"，代理必须是**能立刻答复**的那一个。
+    """
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    port = int(srv.getsockname()[1])
+    stopped = threading.Event()
+
+    def serve() -> None:
+        while not stopped.is_set():
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            conn.close()  # 立刻关：httpx 拿到的是连接错误，不是响应，也不会去解析目标域名
+
+    th = threading.Thread(target=serve, daemon=True)
+    th.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        stopped.set()
+        srv.close()
+
+
+def test_dns_library_behavior_survives_ambient_proxy(tmp_path: Path) -> None:
+    """§三十·二十三 的库行为判据在**带代理的开发机**上必须仍然成立。
+
+    2026-10-12 实测事故：本机 `http_proxy=127.0.0.1:<端口>` 下
+    `test_httpx_timeout_does_not_bound_dns` 假红——httpx 把请求送进代理，
+    探测域名 `pm-dns-hang-probe.invalid` 从未经过本地 `socket.getaddrinfo`，
+    判据（elapsed > 1.5s）量到的是代理回话失败（实测 1.02s）。
+    判据没错（库行为没变），错的是测试进程继承了与结论无关的环境；
+    修法是 conftest 的 `no_ambient_proxy` 夹具。
+
+    CI 上没有代理，直接跑那条用例永远是绿的——所以这条守卫
+    **把事故环境注入子进程**：六个代理键全指向本进程起的假代理，
+    夹具若被删（或不再 autouse），子进程里 httpx 就会把请求交给代理、
+    本地解析整个不发生、用例当场红。它红不了，就等于没人证明过
+    "清代理"这个修复真的兜住了事故环境。
+
+    子进程的临时根显式指到本用例的 tmp_path：仓库根 conftest 在 Windows 上
+    把 pytest 临时根默认设进检出目录（绕开那台机器 %TEMP% 里的坏软链），
+    而临时根不可写的机器上，子进程会死在**与代理无关**的 PermissionError 上
+    ——守卫要量的是代理隔离，不是临时目录（根 conftest 用 setdefault，
+    显式设值它尊重，见其文档字符串的承诺）。
+    """
+    # 临时根要先存在：根 conftest 只在自己**默认**那个路径上 mkdir（setdefault
+    # 之后它认为调用方已经管好了），pytest 建编号目录时又是不带 parents 的 mkdir。
+    sub_tmp = tmp_path / "subprocess-temproot"
+    sub_tmp.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env["PYTEST_DEBUG_TEMPROOT"] = str(sub_tmp)
+    with _fast_stub_proxy() as proxy_url:
+        for k in _PROXY_KEYS:
+            env[k] = proxy_url
+        env["no_proxy"] = env["NO_PROXY"] = ""
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests/test_dns_outside_timeout.py::test_httpx_timeout_does_not_bound_dns",
+                "-q",
+                "--no-header",
+                "-p",
+                "no:cacheprovider",
+            ],
+            cwd=PM_ROOT.parent,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=False,
+        )
+    assert proc.returncode == 0, (
+        "注入 HTTP_PROXY 之后，DNS 库行为判据红了 —— conftest 的 "
+        "no_ambient_proxy 夹具没有兜住 ambient proxy：\n"
+        f"{(proc.stdout or '')[-600:]}\n{(proc.stderr or '')[-300:]}"
+    )

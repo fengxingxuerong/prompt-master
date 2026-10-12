@@ -255,6 +255,58 @@ def test_process_lock_uses_the_sibling_lock_file_and_releases_it(tmp_path: Path)
         pass
 
 
+def _deny_lock_open(monkeypatch: pytest.MonkeyPatch, *, times: int | None) -> dict[str, int]:
+    """把锁文件的 `os.open` 换成"前 times 次报占用"（None = 一直报）。
+
+    只拦名字以 `vkeys.json.lock` 结尾的路径，其余路径放行 —— 全局 patch `os.open`
+    但作用域精确到这一条文件名，别的库调用不受影响。
+    """
+    real_open = os.open
+    state = {"n": 0}
+
+    def flaky_open(path: Any, flags: int, mode: int = 0o777, **kw: Any) -> int:
+        if str(path).endswith("vkeys.json.lock"):
+            state["n"] += 1
+            if times is None or state["n"] <= times:
+                raise BUSY
+        return real_open(path, flags, mode, **kw)
+
+    monkeypatch.setattr(V.os, "open", flaky_open)
+    return state
+
+
+def test_process_lock_backs_off_when_the_lock_file_open_is_transiently_denied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    """锁文件**本身**的 open 也会被瞬态拒绝：被拒一次必须让、必须成功。
+
+    2026-10-13 实测根因（本条就是它的确定性守卫）：两个进程同时创建同一个新锁文件时，
+    一方会在 `os.open(O_CREAT)` 上拿到 EACCES，立刻重试即成功（最小探针 6 轮 2 例）；
+    修复前 `_process_lock` 对这一条没有退避，两进程各发 60 把的压测 5 轮里 2 例
+    签发者当场崩 rc=1，`test_two_processes_do_not_lose_issued_keys` 在全量套件里必红。
+    """
+    path = tmp_path / "vkeys.json"
+    state = _deny_lock_open(monkeypatch, times=1)
+    with V._process_lock(path, timeout=1.0):
+        assert (tmp_path / "vkeys.json.lock").exists(), "退出时必须已建出锁文件"
+    assert state["n"] == 2, f"第一次被拒后必须重试到成功（open 调用 {state['n']} 次）"
+    assert sleeps, "被瞬态拒绝时要按节奏退避，不允许空转刷 CPU"
+
+
+def test_process_lock_surfaces_persistent_open_denial_with_an_explicit_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    """一直打不开要报"打不开跨进程锁文件"并点名路径，不能把裸 EACCES 甩给调用方。"""
+    path = tmp_path / "vkeys.json"
+    _deny_lock_open(monkeypatch, times=None)
+    with (
+        pytest.raises(ConfigError, match="打不开跨进程锁文件"),
+        V._process_lock(path, timeout=0.05),
+    ):
+        pass  # pragma: no cover —— 打得开才会进来，这里断言它进不来
+    assert sleeps, "重试期间必须退避，而不是空转"
+
+
 # --------------------------------------------------------------------------
 # 台账形状：库读到的必须是对象
 # --------------------------------------------------------------------------

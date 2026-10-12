@@ -111,12 +111,31 @@ def _process_lock(path: Path, *, timeout: float = 2.0) -> Iterator[None]:
     盘上只剩 126~151 把（丢 50% 上下），其中 3 轮里 2 轮还有一路直接崩在"文件不可读"上。
     锁挂在同名 `.lock` 文件上（OS 在进程退出时自动释放，所以不需要陈旧检测），
     拿不到就退避重试；超时显式报错，不静默降级成"没锁"。
+
+    2026-10-13 补：**打开锁文件本身**也会竞争 —— 两个进程同时创建同一个新文件时，
+    实测有一方在 `os.open(O_CREAT)` 上拿到瞬态 `PermissionError(13)`，立刻重试就成功
+    （最小探针：两进程各自 open+lock+unlock 200 轮，6 轮里 2 例首个 open 即 EACCES；
+    集成侧同形：两进程各发 60 把的压测 5 轮里 2 例签发者当场崩、`test_two_processes_
+    do_not_lose_issued_keys` 在全量套件里必红）。修前这里没有重试——与读路径
+    `_load_json_or`、写路径 `_atomic_write` 的"瞬时占用退避"是同一类事，它们有、它没有。
+    现在 open 与拿字节锁共用同一个 `timeout` 预算：总等待时间不变，超时给显式错误。
     """
     lock_path = path.with_name(path.name + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+            break
+        except PermissionError:
+            # 瞬态占用（并发创建/杀软索引器）：让一下，别把合法签发者打死。
+            if time.monotonic() >= deadline:
+                raise ConfigError(
+                    f"打不开跨进程锁文件（>{timeout:.1f}s 持续 EACCES）：{lock_path}——"
+                    "查它是不是只读属性或被杀软钉着；别改成无限等"
+                ) from None
+            time.sleep(0.02)
     try:
-        deadline = time.monotonic() + timeout
         while not _try_lock(fd):
             if time.monotonic() >= deadline:
                 raise ConfigError(

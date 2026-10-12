@@ -58,6 +58,9 @@ CSS = """  :root{
   .tab-pane{flex:1;overflow-y:auto;padding:20px 28px;display:none}
   .tab-pane.active{display:block}
   .empty-ws{color:var(--muted);text-align:center;padding:80px 0;font-size:13px}
+  /* 历史面板：同任务跨 run 显著性按评委尺子分代，尺子身份单列一行（§三十一） */
+  .hist-group{margin-bottom:10px}
+  .hist-gen{color:var(--dim);font-family:var(--mono);font-size:11px;margin-top:3px;word-break:break-all}
 
   /* ---- 对话 ---- */
   .chat-flow{display:flex;flex-direction:column;gap:14px;max-width:880px;margin:0 auto;padding-bottom:120px}

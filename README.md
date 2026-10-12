@@ -113,7 +113,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1670 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1693 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）
@@ -156,6 +156,9 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
    文件型的两份台账（`data/vkeys.json`、`data/agents.json`）自 2026-09-25 起有跨进程写锁
    （`pm/modelhub/vkeys.py` 的 `.lock` 句柄）—— 修前实测两个进程各发 150 把密钥，盘上只剩
    126~151 把，3 轮里 2 轮有一路直接崩在"文件不可读"上；现在跨进程各发 60 把是 120/120（3/3 轮）。
+   2026-10-13 又抓到同族的第二形：**锁文件自身的 `os.open`** 在并发创建时会被瞬态
+   `EACCES` 拒（压测 5 轮里 2 例签发者当场崩）——`_process_lock` 的 open 补上与读/写路径
+   同款的退避后，25 轮 ×2 进程 ×60 把零失败。
 4. **版本号只有一个事实源**（2026-09-25 收口）：`pm/__init__.py:__version__` = 2.1.0，
    `pyproject.toml` 走 `dynamic` 读它，REST API 的自报版本也从它取；
    ModelHub 网关是**另一条发布线**（`GATEWAY_VERSION = "1.1.0"`，三处引用同一常量）。

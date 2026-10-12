@@ -536,12 +536,13 @@ async function renderHistory(){
     historyLoaded = true;
     let html = "";
     if(d.task_groups && d.task_groups.length){
-      html += '<h3>同任务跨 run 显著性（Δ 均值 ± 95% CI）</h3>';
+      html += '<h3>同任务跨 run 显著性（Δ 均值 ± 95% CI；按评委尺子分代）</h3>';
       for(const g of d.task_groups){
         const mark = g.significant ? "✅ 显著" : "⚠️ 不显著";
         html += `<div class="hist-group">` +
           `<b>${mark}</b> Δ均值 <b>${g.delta_mean >= 0 ? "+" : ""}${g.delta_mean}</b>` +
           ` CI [${g.delta_ci95[0]}, ${g.delta_ci95[1]}]（n=${g.n_runs}${g.note ? "，" + g.note : ""}）` +
+          `<div class="hist-gen">评委 ${g.judge_gen}</div>` +
           `<div class="u-dim">${g.task}</div></div>`;
       }
       html += "<h3>最近运行</h3>";

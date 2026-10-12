@@ -22,6 +22,7 @@ CI 接线那条线同理：`test_ci_gate_matrix.py` 守的是"windows job 不许
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +40,13 @@ MUTATIONS = [
     ("PM_FAKE_BACKEND 隔离", '("PM_FAKE_BACKEND", ""),'),
     ("PM_CACHE_DIR 落盘目录", 'monkeypatch.setenv("PM_CACHE_DIR", str(tmp_path / "cache"))'),
     ("行为夹具的 autouse", "@pytest.fixture(autouse=True)\ndef isolate_behaviour_switches"),
+    # 2026-10-12：第四类污染是**不带 PM_ 前缀**的代理变量。兜住它的是
+    # test_env_isolation_meta 里那条"注入代理跑子进程"的行为守卫（夹具删掉之后
+    # autouse 清单一样会红，但那只能证明"夹具没了"，证明不了"少清一个键"）。
+    # ⚠️ 锚点必须把 HTTP_PROXY 的**大小写两条一起删**：Windows 上 os.environ
+    #    大小写不敏感（给 http_proxy 赋值读到的是 HTTP_PROXY），只删大写那条
+    #    在本机是空操作——变异测试会拿不到红，反而变成假闸。
+    ("ambient 代理隔离（HTTP_PROXY 大小写两条）", '        "HTTP_PROXY",\n        "http_proxy",'),
 ]
 
 # ---------------------------------------------------------------------------
@@ -205,11 +213,20 @@ def _restore_conftest():
 
 @pytest.mark.parametrize(("label", "anchor"), MUTATIONS, ids=[m[0] for m in MUTATIONS])
 def test_removing_this_isolation_makes_the_meta_test_red(
-    label: str, anchor: str, _restore_conftest: str
+    label: str, anchor: str, _restore_conftest: str, tmp_path: Path
 ) -> None:
     assert anchor in _restore_conftest, f"锚点已变，变异测试失效：{anchor!r}"
     mutated = _restore_conftest.replace(anchor, "", 1)
     CONFTEST.write_text(mutated, encoding="utf-8")
+    # 子进程的临时根显式指到系统临时区（2026-10-12）：仓库根 conftest 默认把
+    # pytest 临时根设进检出目录（那台机器 %TEMP% 有坏软链的修法），而"检出目录里
+    # 临时根不可写"的机器上，子进程会死在**与隔离无关**的 PermissionError 上
+    # ——变异测试要量的是"删掉隔离后元测试红不红"，不是"这台机器能不能写仓库"。
+    # 根 conftest 用 setdefault，显式设值它尊重；CI（Linux）上它本来就不设。
+    sub_tmp = tmp_path / "subprocess-temproot"
+    sub_tmp.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env["PYTEST_DEBUG_TEMPROOT"] = str(sub_tmp)
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", META, "-q", "--no-header", "-p", "no:cacheprovider"],
@@ -217,6 +234,7 @@ def test_removing_this_isolation_makes_the_meta_test_red(
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
             check=False,
         )
     finally:

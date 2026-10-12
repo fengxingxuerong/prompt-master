@@ -24,6 +24,33 @@ _TERMINAL_STATUS = {
     "needs_clarification",
 }
 
+# 没有评委配置记录的归档归到这一桶，**不与任何已知代合并**——
+# "没记录"不等于"同一把尺子"，把两者并起来正是 §十八 那类"代码里分不出实测与配置"的翻版。
+UNKNOWN_GENERATION = "（未记录评委配置）"
+
+
+def _ruler_generation(d: dict[str, Any]) -> str:
+    """这一轮到底用哪把尺子打的分——评委席的模型身份（§十八 / §三十一）。
+
+    为什么 history 也要分代：Δ 虽然在同一次 run 内配对，但**换评委 = 换算尺的刻度与噪声**
+    （flash-lite 把读数挤成常数、放水 +3.7，deepseek-v4-flash 的 MAE 0.88），跨代的 Δ
+    塞进同一个均值，读出来的就是两把尺的算术平均，不代表任何一把。`calibrate --aggregate`
+    早已按 `model×rubric` 分代（§三十一），这一侧一直只按 task 字符串分组——本函数补上缺口。
+
+    身份取自 `judge_health.models`（`pm.nodes.judge._judge_health` 落的 state，run_*.json 里有）；
+    按角色名排序拼串，与字典写入顺序无关。取不到就归 UNKNOWN。
+    """
+    jh = d.get("judge_health")
+    models = jh.get("models") if isinstance(jh, dict) else None
+    if not isinstance(models, dict) or not models:
+        return UNKNOWN_GENERATION
+    return "|".join(f"{role}={models[role]}" for role in sorted(models))
+
+
+def _group_key(r: dict[str, Any]) -> tuple[str, str]:
+    """分组键：**同一任务且同一把尺子**才配对。缺 `judge_gen` 的调用方（脚本 / 单测）按未知代。"""
+    return (r["task"], str(r.get("judge_gen") or UNKNOWN_GENERATION))
+
 
 def _arm_is_trusted(d: dict[str, Any]) -> bool:
     """这一条臂的数据本身可不可信（与"噪声带测不测得出来"无关）。
@@ -107,6 +134,8 @@ def _load_run_history(last: int, include_demo: bool) -> list[dict[str, Any]]:
                 "run_id": d.get("run_id") or f.stem[4:],
                 "mtime": datetime.fromtimestamp(f.stat().st_mtime).strftime("%m-%d %H:%M"),
                 "task": str(d.get("task") or "")[:40],
+                # 这一轮的尺子身份（§三十一）：Δ 只有在同一把尺上才比得。
+                "judge_gen": _ruler_generation(d),
                 "status": d.get("status"),
                 "opt_avg": opt_avg,
                 "opt_lower": agg.get("ci_lower"),
@@ -130,21 +159,24 @@ def _load_run_history(last: int, include_demo: bool) -> list[dict[str, Any]]:
 
 
 def _task_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """按 task 分组做 Δ 的配对统计：均值 ± 1.96×SE，置信区间不含 0 才算显著。
+    """按 (task, 尺子) 分组做 Δ 的配对统计：均值 ± 1.96×SE，置信区间不含 0 才算显著。
 
     独立成函数是因为它是"**哪些臂计入**"这个决定（§三十·一），而
     `_history_command` 只该管渲染。两件事挤在一个函数里时，
     渲染上的任何分支都会顶高统计那段的复杂度台账。
+
+    分组键带尺子身份（§三十一）：同一任务的跨代轮次（评委换型前后）**不配对**——
+    Δ 的刻度与噪声随尺而变，混算出来的均值是两把尺的算术平均，不代表任何一把。
     """
     import math
 
-    groups: dict[str, list[dict[str, Any]]] = {}
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for r in rows:
         if r["delta"] is not None:
-            groups.setdefault(r["task"], []).append(r)
+            groups.setdefault(_group_key(r), []).append(r)
 
     task_stats: list[dict[str, Any]] = []
-    for task, rs in groups.items():
+    for (task, gen), rs in groups.items():
         if len(rs) < 2:
             continue
         deltas = [float(r["delta"]) for r in rs if r["trusted"]]
@@ -158,6 +190,7 @@ def _task_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         task_stats.append(
             {
                 "task": task,
+                "judge_gen": gen,
                 "n_runs": n,
                 "deltas": deltas,
                 "delta_mean": round(mean, 2),
@@ -198,6 +231,8 @@ def _history_command(argv: list[str]) -> int:
                     "runs": rows,
                     "task_groups": task_stats,
                     "method": "同任务 Δ 的均值 ± 1.96×SE；置信区间不含 0 视为显著（小样本粗判）。"
+                    "分组键含评委尺子身份（judge_gen，取自 judge_health.models，§三十一）："
+                    "换评委 = 换算尺，跨代轮次不配对。"
                     "崩溃臂（连接失败/输出不可解析，均分触底）不计入统计但在 "
                     "`task_groups[].excluded_untrusted` 里逐条点名（§三十·一）",
                 },
@@ -221,20 +256,47 @@ def _history_command(argv: list[str]) -> int:
         )
 
     if task_stats:
-        print("\n同任务跨 run 显著性（Δ 均值 ± 95% CI）：")
+        print("\n同任务跨 run 显著性（Δ 均值 ± 95% CI；按评委尺子分代）：")
         for s in task_stats:
-            mark = "✅ 显著" if s["significant"] else "⚠️ 不显著"
-            note = f"（{s['note']}）" if s["note"] else ""
-            print(
-                f"  {mark}  Δ均值 {s['delta_mean']:+.2f}  CI [{s['delta_ci95'][0]:+.2f}, {s['delta_ci95'][1]:+.2f}]"
-                f"  n={s['n_runs']} {note}｜{s['task']}"
-            )
+            print(_stat_line(s))
             # §三十·一：崩掉的臂被排除时必须说出来，不能只报排除后的漂亮数字
             for e in s["excluded_untrusted"]:
                 print(_excluded_line(e))
+        note = _multi_ruler_note(task_stats)
+        if note:
+            print(note)
     else:
         print("\n（暂无同任务 ≥2 次的有效运行——对同一需求多跑几轮，这里会给出 Δ 的显著性判定）")
     return 0
+
+
+def _stat_line(s: dict[str, Any]) -> str:
+    """一个 (task, 尺子) 组的显著性行，带上尺子身份（§三十一）。"""
+    mark = "✅ 显著" if s["significant"] else "⚠️ 不显著"
+    note = f"（{s['note']}）" if s["note"] else ""
+    lo, hi = s["delta_ci95"]
+    return (
+        f"  {mark}  Δ均值 {s['delta_mean']:+.2f}  CI [{lo:+.2f}, {hi:+.2f}]"
+        f"  n={s['n_runs']} {note}｜评委 {s['judge_gen']}｜{s['task']}"
+    )
+
+
+def _multi_ruler_note(task_stats: list[dict[str, Any]]) -> str | None:
+    """同一任务出现在 >1 把尺子上时给一句实话：上面那几行不是一列数。
+
+    它挡的正是 §三十一 那类自欺——把 flash-lite 时代与 deepseek 时代的 Δ 并排看，
+    会读出"评委变好了 / 效果变稳了"，其实只是两把尺的刻度不同。
+    """
+    per_task: dict[str, int] = {}
+    for s in task_stats:
+        per_task[s["task"]] = per_task.get(s["task"], 0) + 1
+    n = sum(1 for c in per_task.values() if c > 1)
+    if not n:
+        return None
+    return (
+        f"  ⚠️ 有 {n} 个任务跨了不止一把尺（评委换型）：上面按尺分列，"
+        "**不同尺的行不能读成一列**——Δ 的刻度与噪声随尺而变。"
+    )
 
 
 def _excluded_line(e: dict[str, Any]) -> str:
