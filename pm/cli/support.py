@@ -23,6 +23,11 @@ _DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
 # （2026-09-25 实测：产物落在 tmp，校准账本却写进仓库 logs，同一个变量两种命运）。
 LOG_DIR = Path(os.getenv("PM_LOG_DIR") or _DEFAULT_LOG_DIR)
 
+# `--cases-file` 的条数上限。放在支撑层而不是写在 if 语句里，是因为现在有两处要读它：
+# 跑批路径拿它**拦**（退出码 2），`check --cases-file` 拿它**提前报**（退出码 1）。
+# 一处改数值、另一处就会悄悄失配 —— 那种"体检说没事、跑起来被拦"的门禁等于没装。
+MAX_SEED_CASES = 8
+
 
 def setup_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
@@ -81,13 +86,52 @@ def _resolve_case_mode(
     静默回退会把一条本意是“规则”的断言变成“字面比对”，后果要到报告里才看得见。
     """
     raw = str(item.get("mode") or item.get("assert_mode") or "").strip()
-    if not raw:
+    return resolve_case_mode(raw, default_mode, index, p)
+
+
+def resolve_case_mode(
+    raw_mode: str, default_mode: str, index: int, p: argparse.ArgumentParser
+) -> str:
+    """`_resolve_case_mode` 的纯字符串内核：跑批路径与 `check --cases-file` 走同一把判据。"""
+    if not raw_mode:
         return default_mode
     try:
-        return assert_mode_arg(raw)
+        return assert_mode_arg(raw_mode)
     except argparse.ArgumentTypeError as e:
         p.error(f"--cases-file 第 {index + 1} 条：{e}")
         return default_mode  # 不可达：p.error 会 SystemExit
+
+
+def read_cases_file(p: argparse.ArgumentParser, path: str) -> list[Any]:
+    """`--cases-file` 的读取与顶层形状校验（跑批与体检两条路径共用一份）。"""
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        p.error(f"--cases-file 读取失败：{e}")
+        raise SystemExit(EXIT_CONFIG) from e  # 不可达：p.error 会 SystemExit
+    if not isinstance(raw, list) or not raw:
+        p.error("--cases-file 需为非空 JSON 数组")
+        raise SystemExit(EXIT_CONFIG)
+    return list(raw)
+
+
+def case_entry_fields(item: Any) -> dict[str, str]:
+    """把一条用例（裸字符串或对象）**只取值**，不做任何判定。
+
+    空 input、mode 合法性、条数上限都由调用方按自己的场景报 —— 跑批要先拦（退出码 2），
+    体检要数着报（退出码 1），两边不能共用同一处报错顺序。
+    """
+    if isinstance(item, str):
+        item = {"input": item}
+    if not isinstance(item, dict):
+        return {"input": "", "expected": "", "mode_raw": "", "scenario": "", "hijack_marker": ""}
+    return {
+        "input": str(item.get("input") or ""),
+        "expected": str(item.get("expected") or ""),
+        "mode_raw": str(item.get("mode") or item.get("assert_mode") or "").strip(),
+        "scenario": str(item.get("scenario") or "").strip(),
+        "hijack_marker": str(item.get("hijack_marker") or "").strip(),
+    }
 
 
 def assert_mode_arg(value: str) -> str:

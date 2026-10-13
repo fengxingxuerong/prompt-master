@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from pm.casesaudit import DEFAULT_MODE
 from pm.state import initial_state
 
 from .agent_mode import agent_subcommand
@@ -27,11 +28,14 @@ from .live_lock import wait_seconds as _live_lock_wait
 from .support import (
     EXIT_CONFIG,
     EXIT_FAILED,
-    _resolve_case_mode,
+    MAX_SEED_CASES,
     _result_exit_code,
     assert_mode_arg,
+    case_entry_fields,
     emit_json_result,
+    read_cases_file,
     read_seed_prompt,
+    resolve_case_mode,
     save_artifacts,
     setup_logging,
 )
@@ -54,7 +58,7 @@ _SUBCOMMAND_HELP = """
   history     运行历史 + 相对基线的 Δ 显著性（--last N / --include-demo / --json）
   calibrate   评委校准：评委分 vs 锚点人工分，--repeat N 测评委自我复现性
   library     达标提示词资产库（--recommend --task-text 找参考 / --export 导出）
-  check       零调用静态体检：拿规则闸当场量你已有的那一版提示词（--prompt-file / --json）
+  check       零调用静态体检：量你已有的那一版提示词，或数一份用例集有几票能否决（--prompt-file / --cases-file / --json）
   diff        零调用差分：两版提示词（或两个 run）之间改了什么、修好几条、又新引入几条
               —— 退出码 1 = 有新引入的规则问题，可直接当 CI 回归门禁
   gate        提示词改动的 CI 回归门禁：自动从 git 取基线，只拦本次「新引入」的规则问题
@@ -274,7 +278,7 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--assert-mode",
-        default="contains",
+        default=DEFAULT_MODE,
         type=assert_mode_arg,
         metavar="MODE",
         help="事实断言模式（配合 --cases-file 的 expected，默认 contains；"
@@ -386,49 +390,41 @@ def _require_task(p: argparse.ArgumentParser, args: argparse.Namespace) -> str:
 
 
 def _load_seed_cases(p: argparse.ArgumentParser, args: argparse.Namespace) -> list[dict[str, Any]]:
-    """--cases-file：读入 → 逐条成案 → 再预检一次 expected 的写法。没给就是空表。"""
+    """--cases-file：读入 → 逐条成案 → 再预检一次 expected 的写法。没给就是空表。
+
+    取值走 `support.case_entry_fields`（与 `check --cases-file` 同一份），
+    校验顺序保持原样：空 input → 条数上限 → mode 合法性 → 全文 rule-like。
+    """
     if not args.cases_file:
         return []
-    raw = _read_cases_file(p, args.cases_file)
+    raw = read_cases_file(p, args.cases_file)
     seed_cases: list[dict[str, Any]] = []
     for i, item in enumerate(raw):
-        if isinstance(item, str):
-            item = {"input": item}
-        if not isinstance(item, dict) or not str(item.get("input") or "").strip():
+        fields = case_entry_fields(item)
+        if not fields["input"].strip():
             p.error(f"--cases-file 第 {i + 1} 条缺少非空 input")
-        if len(seed_cases) >= 8:
+        if len(seed_cases) >= MAX_SEED_CASES:
             # 不能默默丢掉多余用例：n_test_cases 按声明条数做完整性校验（C1），
             # 静默截断会让本轮永远无法判达标，且原因藏在报告角落里
-            p.error(f"--cases-file 最多 8 条用例，当前 {len(raw)} 条；请筛选后再跑")
+            p.error(f"--cases-file 最多 {MAX_SEED_CASES} 条用例，当前 {len(raw)} 条；请筛选后再跑")
         case: dict[str, Any] = {
-            "input": str(item["input"]),
-            "expected": str(item.get("expected") or ""),
+            "input": fields["input"],
+            "expected": fields["expected"],
             # 每条可自带 mode（"mode" 或 "assert_mode"），没写就用全局 --assert-mode：
             # 一份用例集里混着写字面片段与需求规则才是常态
-            "mode": _resolve_case_mode(item, args.assert_mode, i, p),
+            "mode": resolve_case_mode(fields["mode_raw"], args.assert_mode, i, p),
         }
         # 注入存活专项（确定性校验，不经评委）的可选字段：seed 携带时透传给
         # mock_node → case_scenarios / hijack_markers，与 mockgen 路径同口径
         for _opt in ("scenario", "hijack_marker"):
-            if str(item.get(_opt) or "").strip():
-                case[_opt] = str(item[_opt]).strip()
+            if fields[_opt]:
+                case[_opt] = fields[_opt]
         seed_cases.append(case)
     # 用例数以用户提供为准（断言按序号与 expected 对齐）
     args.cases = len(seed_cases)
 
     _reject_rule_like_expected(p, seed_cases)
     return seed_cases
-
-
-def _read_cases_file(p: argparse.ArgumentParser, path: str) -> list[Any]:
-    try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-        p.error(f"--cases-file 读取失败：{e}")
-    if not isinstance(raw, list) or not raw:
-        p.error("--cases-file 需为非空 JSON 数组")
-    items: list[Any] = raw
-    return items
 
 
 def _reject_rule_like_expected(

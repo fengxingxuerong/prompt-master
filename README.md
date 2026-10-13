@@ -43,13 +43,13 @@ python run.py wait <run_id>                     # 轮询到终态，输出结果
 退出码是给 Agent 做分支的协议：`0` 达标交付 / `1` 未达标但已交付 / `2` 参数或配置错误 / `3` 运行失败。
 加 `--json` 时 stdout 恰好一个 JSON 对象，进度全部走 stderr。
 
-## 二、五条能力线
+## 二、能力线
 
 | 线 | 命令 | 说明 |
 |---|---|---|
 | 优化闭环 | `run.py --task`（或 `POST /api/optimize`） | 澄清 → 生成 → 用例 → 执行 → 评估 → 修订，最多 N 轮；带基线对照与成对盲评 |
 | 原稿改进 | 加 `--prompt-file 我的提示词.md` | 不从零生成：对**你已有的那一版**做最小改动（保留术语与字段名），基线臂自动换成原稿，Δ 读作「比你自己的版本好多少」 |
-| 静态体检 | `run.py check --prompt-file x.md --json` | **零调用、零出网**：用优化闭环里那套代码侧规则当场量一份提示词（约束超载 / 抑制型条款 / 元话语泄漏 / 定界符…），退出码 0=无命中 1=有命中 |
+| 静态体检 | `run.py check --prompt-file x.md --json` / `--cases-file y.json` | **零调用、零出网**：用优化闭环里那套代码侧规则当场量一份提示词（约束超载 / 抑制型条款 / 元话语泄漏 / 定界符…）；给 `--cases-file` 时改量一份**用例集**——数清它有几票能否决（`rule` 走评委、空 expected 不执行、expected 就在 input 里的只挡得住丢内容），退出码 0=无命中 1=有命中 |
 | 版本差分 | `run.py diff A B` | **零调用**：两版提示词（或两个 run）之间改了什么 —— 规则得失 / 结构增删 / 逐行 diff；退出码 1=有新引入的规则问题 |
 | 改动门禁 | `run.py gate`（CI 两个 job 都跑） | **零调用**：自动从 git 取基线比 `pm/prompts.py`，**只拦本次新引入的规则失败模式**。判据是增量不是绝对——17 个模板有 16 个天然命中规则，绝对判据会永久假红 |
 | 事实断言 | `--cases-file cases.json --assert-mode rule` | 你给的 `expected` 有一票否决权；`rule` 模式交评委逐条核验，`custom:<名>` 可挂你自己的断言函数 |
@@ -113,7 +113,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1709 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1727 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）

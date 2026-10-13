@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pm.casesaudit import DEFAULT_MODE, audit_cases
 from pm.prompts import WRAPPER_TAGS
 from pm.quality import (
     CONSTRAINT_LIMIT,
@@ -29,7 +30,17 @@ from pm.quality import (
     structure_items,
 )
 
-from .support import _EXIT_PASSED, EXIT_CONFIG, EXIT_UNDELIVERED, setup_logging
+from .support import (
+    _EXIT_PASSED,
+    EXIT_CONFIG,
+    EXIT_UNDELIVERED,
+    MAX_SEED_CASES,
+    assert_mode_arg,
+    case_entry_fields,
+    read_cases_file,
+    resolve_case_mode,
+    setup_logging,
+)
 
 
 def collect_findings(text: str) -> list[dict[str, Any]]:
@@ -101,19 +112,116 @@ def _read_target(p: argparse.ArgumentParser, args: argparse.Namespace) -> tuple[
     return text, source
 
 
+def render_cases(source: str, report: dict[str, Any]) -> str:
+    """用例集体检的人读输出：先给票数，再给逐条命中，最后划清它能说什么、不能说什么。"""
+    stats = report["stats"]
+    findings = report["findings"]
+    lines: list[str] = [
+        f"用例集体检：{source}（{stats['cases']} 条，上限 {stats['max_cases']}）",
+        "",
+        (
+            f"能一票否决的：{stats['veto_capable']} 条"
+            f"（其中 {stats['echo_only']} 条属「expected 就在 input 里」，只挡得住丢内容，挡不住复述）"
+            f"｜写法会被降级成提醒的：{stats['advisory']} 条"
+            f"｜只交评委核验的（rule）：{stats['judge_only']} 条"
+            f"｜空 expected 根本不执行的：{stats['no_assertion']} 条"
+        ),
+        "",
+    ]
+    if findings:
+        lines.append(f"命中 {len(findings)} 条：")
+        lines.append("")
+        for n, f in enumerate(findings, 1):
+            where = f"#{f['case']}" if f.get("case") else "整卷"
+            lines.append(f"{n}. [{f['code']}] {where}：{f['detail']}")
+    else:
+        lines.append("未命中任何结构性问题。")
+    lines.append("")
+    lines.append(
+        "⚠️ 这把尺子说的是「这套考卷有几票能否决」，不是「优化有没有用」。后者只有基线对照一条路"
+        "（`run.py --task … --prompt-file 你的原稿`，Δ 才读得出比你自己好多少），"
+        "而评委那把尺子目前还没对准所有者的标准（README §三）。"
+    )
+    strong = stats["veto_strong_cases"]
+    if stats["veto_strong"] == 0:
+        lines.append(
+            "这份考卷里一票否决强判据为 0 条 ⇒ 达标判定将完全由评委印象分决定；"
+            "想让它能挡住差输出，至少给一条 expected 是输出侧真会出现的字面片段"
+            "（且不要出现在 input 里）。"
+        )
+    elif strong:
+        lines.append(f"强判据落在第 {', '.join(str(i) for i in strong)} 条。")
+    return "\n".join(lines)
+
+
+def _cases_target(p: argparse.ArgumentParser, args: argparse.Namespace) -> dict[str, Any]:
+    """`--cases-file` 模式：取值路径与跑批完全同源（`support.case_entry_fields` 与
+    `support.resolve_case_mode`），所以"体检说没问题"与"跑起来被拦"不会各说一套。"""
+    raw = read_cases_file(p, args.cases_file)
+    cases: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
+        fields = case_entry_fields(item)
+        cases.append(
+            {
+                "input": fields["input"],
+                "expected": fields["expected"],
+                "mode": resolve_case_mode(fields["mode_raw"], args.assert_mode, i, p),
+                "scenario": fields["scenario"],
+            }
+        )
+    return audit_cases(cases, max_cases=MAX_SEED_CASES)
+
+
 def check_command(argv: list[str]) -> int:
-    """`run.py check` 入口。"""
+    """`run.py check` 入口。给 `--cases-file` 时体检的是一份用例集，否则是一份提示词。"""
     p = argparse.ArgumentParser(
         prog="run.py check",
-        description="对一份已有提示词做零调用静态体检（不联网、不花 token）",
+        description="零调用静态体检：一份已有提示词，或一份用例集（不联网、不花 token）",
     )
     p.add_argument("--prompt", help="要体检的提示词正文")
     p.add_argument("--prompt-file", help="从文件读取要体检的提示词")
+    p.add_argument(
+        "--cases-file",
+        help="改体检一份用例集（与 --cases-file 跑批用的是同一条加载路径）",
+    )
+    p.add_argument(
+        "--assert-mode",
+        default=DEFAULT_MODE,
+        type=assert_mode_arg,
+        metavar="MODE",
+        help=f"用例集没写 mode 时的缺省（与 run.py 同一份常量与同一个校验器，默认 {DEFAULT_MODE}）",
+    )
     p.add_argument("--json", action="store_true", help="输出 JSON（智能体消费）")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
 
     setup_logging(args.verbose)
+
+    if args.cases_file:
+        if args.prompt or args.prompt_file:
+            p.error(
+                "--cases-file 与 --prompt/--prompt-file 互斥：一次体检一样东西，退出码才有单一含义"
+            )
+        report = _cases_target(p, args)
+        findings, stats = report["findings"], report["stats"]
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "mode": "cases_check",
+                        "source": args.cases_file,
+                        "ok": not findings,
+                        "findings": findings,
+                        **stats,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print(render_cases(args.cases_file, report))
+        return _EXIT_PASSED if not findings else EXIT_UNDELIVERED
+
     text, source = _read_target(p, args)
     findings = collect_findings(text)
     stats = summarize(text)

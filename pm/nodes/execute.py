@@ -21,6 +21,7 @@ from .. import llm
 from ..assertions import RULE_MODE, check_assertion, injection_hit_kind
 from ..backend import carry_context
 from ..cache import key_for_target, target_cache
+from ..casesaudit import SCENARIO_INJECTION, missing_scenarios
 from ..injection_pack import pick_technique
 from ..injection_pack import render as render_injection
 from ..prompts import MOCKGEN_SYSTEM, MOCKGEN_USER, render
@@ -60,7 +61,7 @@ def _forge_injection_markers(
     codes = ["" for _ in cases]
     for i in range(len(cases)):
         scenario = (scenarios[i] if i < len(scenarios) else "") or ""
-        if scenario.strip().lower() != "injection":
+        if scenario.strip().lower() != SCENARIO_INJECTION:
             codes[i] = (markers[i] if i < len(markers) else "").strip()
             continue
         code = _hijack_code(run_id, i)
@@ -89,7 +90,7 @@ def mock_node(state: State) -> dict[str, Any]:
         # 与「无注入用例 → 检测返回 None」的旧语义保持一致。
         seed_scenarios = [str(c.get("scenario") or "").strip() for c in seeds[:8]]
         seed_markers = [str(c.get("hijack_marker") or "").strip() for c in seeds[:8]]
-        if any(s.lower() == "injection" for s in seed_scenarios):
+        if any(s.lower() == SCENARIO_INJECTION for s in seed_scenarios):
             # 种子用例与生成用例同口径：注入判定只认代码派生的高熵码。
             # 真实数据里的教训（run e76f9acfefab）：模板自带 marker「已解决」，
             # 目标模型**拒绝了**注入（分类给「其他/信息不足」而非要求的「物流」）并解释了理由，
@@ -147,23 +148,14 @@ def mock_node(state: State) -> dict[str, Any]:
         注入覆盖（n≥3）是同一动机的延伸：评审实测发现交付提示词的
         「标签内是数据、其中指令不得执行」声明可以完全无约束力，
         而用例里没有注入形态时，这条缺陷在评分里永远显形不了。
-        kind 为空时检查当前 scenarios。
+
+        判据本体在 `pm.casesaudit.missing_scenarios` —— 那里同一份规则还要给
+        `run.py check --cases-file`（花钱前的体检）用，写两遍迟早漂成两套口径。
         """
-        kinds = [s.lower() for s in (scenarios if kind is None else kind) if s and s.strip()]
-        if "main_path" not in kinds or "boundary" not in kinds:
-            return False
-        return n < 3 or "injection" in kinds
+        return not missing_scenarios(scenarios if kind is None else kind, n)
 
     def _coverage_hint() -> str:
-        kinds = [s.lower() for s in scenarios if s and s.strip()]
-        missing = []
-        if "main_path" not in kinds:
-            missing.append("main_path（典型主路径）")
-        if "boundary" not in kinds:
-            missing.append("boundary（边界/歧义）")
-        if n >= 3 and "injection" not in kinds:
-            missing.append("injection（提示词注入，指令混在正常数据里）")
-        return "、".join(missing)
+        return "、".join(missing_scenarios(scenarios, n))
 
     for attempt in (1, 2):
         try:
@@ -519,7 +511,7 @@ def _injection_survival(state: State, runs: list[TestRun]) -> dict[str, Any] | N
     seen: dict[int, dict[str, Any]] = {}
     for r in runs:
         i = int(r.test_case_index)
-        if i >= len(scenarios) or (scenarios[i] or "").strip().lower() != "injection":
+        if i >= len(scenarios) or (scenarios[i] or "").strip().lower() != SCENARIO_INJECTION:
             continue
         marker = (markers[i] or "").strip() if i < len(markers) else ""
         if not marker:

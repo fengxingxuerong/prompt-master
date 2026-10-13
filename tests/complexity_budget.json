@@ -20,7 +20,7 @@
   "pm/modelhub/streaming.py::stream_upstream": 19,
   "pm/nodes/baseline.py::compare_node": 22,
   "pm/nodes/execute.py::_injection_survival": 11,
-  "pm/nodes/execute.py::mock_node": 21,
+  "pm/nodes/execute.py::mock_node": 17,
   "pm/nodes/judge.py::_build_feedback": 17,
   "pm/nodes/judge.py::_evaluate_one": 16,
   "pm/nodes/judge.py::evaluate_node": 22,

@@ -44,11 +44,22 @@ python run.py check --prompt-file 我的提示词.md --json
 # → {"mode":"prompt_check","ok":false,"findings":[{"code":"constraint_overload",...}],
 #    "constraints":11,"constraint_limit":8,"delimiter_problems":[...],"leak_tags":[...]}
 
+# 同样零调用，改体检一份用例集：先数清它有几票真能挡住差输出，再决定要不要为它花钱
+python run.py check --cases-file case_templates/sales_analysis.json --json
+# → {"mode":"cases_check","ok":false,"findings":[{"code":"echoes","case":1,...}],
+#    "cases":4,"veto_capable":2,"veto_strong":1,"advisory":0,"judge_only":2,"no_assertion":0,
+#    "max_cases":8,"veto_strong_cases":[2]}
+
 # 再决定改不改：交原稿时不再从零生成，而是做最小改动（保留原稿术语与字段名）
 python run.py --task "..." --prompt-file 我的提示词.md --json      # submit 子命令同参数
 ```
 
 - `--prompt` / `--prompt-file` 互斥；长度 8–20000 字（原稿会作为基线臂进每条用例的每次调用）。
+- `--cases-file` 与 `--prompt*` 互斥（一次体检一样东西，退出码才有单一含义）；取值与 mode 解析
+  走跑批同一条路径（`pm/cli/support.py`），所以"体检说没问题"与"跑起来被拦（退出码 2）"不会各说一套。
+  ⚠️ 它给的是**否决票数**，不是"优化有没有用"：后者只有基线对照一条路。实测仓库自带的 5 份模板
+  各有 2/4 条是 `rule`（交评委），其中两份的强判据是 **0 条**——这就是"连原始需求都能拿 8.25 分"的
+  结构成因，也是它比跑完一整轮（34~57 次调用 / 34~67 分钟）便宜的地方。
 - **`--task` 仍然必填**：用例只按需求命题，原稿不参与出题，否则考卷会偏袒原稿自己。
 - 交原稿时**基线臂自动换成原稿**，报告头与 Δ 表头都会写明跑的是哪一臂；
   此时 Δ 读作「比你自己的版本好多少」，不再是「比把需求直接喂给模型好多少」。
