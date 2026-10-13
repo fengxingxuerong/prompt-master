@@ -129,6 +129,48 @@ def prompt_diff(before: str, after: str) -> str:
 
 
 @mcp.tool()
+def cases_check(cases_json: str, assertion_mode: str = "contains") -> str:
+    """零调用体检一份**用例集**：数清它有几票真能挡住差输出（不联网、不花 token）。
+
+    Args:
+        cases_json: JSON 数组字符串，与 `optimize_submit` 的 `cases_json` 同一份格式：
+            [{"input": "...", "expected": "...", "mode": "exact|contains|regex|rule|custom:<名>",
+              "scenario": "main_path|boundary|injection"}]
+        assertion_mode: 单条没写 mode 时的缺省（与 run.py 的 --assert-mode 同一个默认值）
+
+    为什么值得单独一个工具：产品的"用例区分度不足"告警原本只在**烧完之后**才出现
+    （`pm/report.py`：基线均分 ≥8.0 才印），一轮实测 34~57 次真实调用 / 34~67 分钟。
+    这里把那笔账提前：四桶分区（能否决 / 会被降级成提醒 / 只交评委 / 空 expected 不执行）
+    加上"expected 就在本条 input 里"的点名 —— 那种断言只测「别丢内容」，复读输入的输也能过。
+
+    ⚠️ 它给的是否决票数，不是"优化有没有用"：后者只有基线对照一条路（`optimize_submit`
+    带 `seed_prompt` 时 Δ 才读得出比你自己好多少）。
+    """
+    try:
+        payload = json.loads(cases_json)
+    except json.JSONDecodeError as e:
+        return json.dumps(
+            {"mode": "cases_check", "ok": False, "error": f"cases_json 不是合法 JSON：{e}"},
+            ensure_ascii=False,
+        )
+    if not isinstance(payload, list) or not payload:
+        return json.dumps(
+            {"mode": "cases_check", "ok": False, "error": "cases_json 需为非空 JSON 数组"},
+            ensure_ascii=False,
+        )
+    import tempfile
+    from pathlib import Path as _P
+
+    with tempfile.TemporaryDirectory() as d:
+        f = _P(d) / "cases.json"
+        f.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        result = _run_cli_json(
+            ["check", "--cases-file", str(f), "--assert-mode", assertion_mode, "--json"]
+        )
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def estimate_cost(task: str, cases: int = 3, max_iter: int = 3, fast: bool = False) -> str:
     """预估一次优化任务的 LLM 调用次数区间。不联网、不需要 Key，提交前的预算闸门。
 

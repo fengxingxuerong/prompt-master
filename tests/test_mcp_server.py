@@ -5,7 +5,7 @@
 
 测试策略（不联网、不起子进程）：
   · `_run_cli_json` / `_http_json` 两个底层函数：monkeypatch 掉 subprocess / urlopen
-  · 9 个 tool：只验证「参数 → 调用参数」的拼装正确性（这是最容易写错的部分）
+  · 全部 tool：只验证「参数 → 调用参数」的拼装正确性（这是最容易写错的部分）
     —— 真正的业务逻辑在 run.py / server.py 里，各有自己的测试
 
 关键安全性质（必须锁住）：
@@ -568,3 +568,129 @@ def test_module_entry_actually_starts_the_server():
     init = next((p for p in payloads if "result" in p), None)
     assert init, f"没有 initialize 响应：{payloads}"
     assert init["result"]["serverInfo"]["name"], "响应里没有服务名，客户端无法确认挂载成功"
+
+
+# --------------------------------------------------------------------------
+# cases_check：第三个零调用工具（花钱之前先量考卷）
+# --------------------------------------------------------------------------
+def test_cases_check_routes_through_the_cases_file_flag(capture_cli):
+    out = M.cases_check(
+        json.dumps([{"input": "问：1+1？", "expected": "2", "mode": "contains"}]),
+        assertion_mode="rule",
+    )
+    cmd = capture_cli[0]
+    assert "check" in cmd, cmd
+    i = cmd.index("--cases-file")
+    assert cmd[i + 1].endswith(".json"), "用例集没落成 .json 文件"
+    assert cmd[cmd.index("--assert-mode") + 1] == "rule", "缺省 mode 没透传下去"
+    assert cmd[-1] == "--json"
+    assert json.loads(out) == {}
+
+
+def test_cases_check_writes_the_array_outside_the_repo(monkeypatch):
+    """中转文件必须落在系统临时目录并被清理（`prompt_diff` 同一条性质）。
+
+    那条的先例值得记住：`TemporaryDirectory()` 是在临时目录**下再建子目录**，
+    把判据写成 `dirname(path) == gettempdir()` 会把正确实现判红。
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    seen: dict[str, str] = {}
+
+    def fake_run(cmd: list[str], **kw: Any) -> Any:
+        idx = cmd.index("--cases-file")
+        seen["path"] = cmd[idx + 1]
+        seen["content"] = Path(cmd[idx + 1]).read_text(encoding="utf-8")
+        return _fake_proc("{}")
+
+    monkeypatch.setattr(M.subprocess, "run", fake_run)
+    payload = [{"input": "原始需求 A", "expected": "结论"}, {"input": "边界 B", "mode": "rule"}]
+    M.cases_check(json.dumps(payload, ensure_ascii=False))
+    assert json.loads(seen["content"]) == payload, "数组在中转时被改写了（键序/编码都不该动）"
+    assert not os.path.exists(seen["path"]), "临时文件没清理 —— 可能写进了仓库"
+    assert os.path.dirname(seen["path"]).startswith(tempfile.gettempdir())
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["不是 JSON", '{"input": "对象不是数组"}', "[]", ""],
+    ids=["非JSON", "对象", "空数组", "空串"],
+)
+def test_cases_check_answers_bad_input_instead_of_raising(bad: str) -> None:
+    """`cases_json` 由客户端现拼，坏输入是**预期内**的：回结构化错误，别抛栈。
+
+    抛异常时客户端只看到一个 tool error，读不到"该改成什么"；这里的文案直接给契约。
+    """
+    out = json.loads(M.cases_check(bad))
+    assert out["mode"] == "cases_check" and out["ok"] is False
+    assert "数组" in out["error"] or "JSON" in out["error"], out
+
+
+def test_documented_mcp_tool_count_matches_the_live_registry() -> None:
+    """工具数抄在两个文档里，而"注册了几个"没人量（2026-10-13 实测：
+    指南写 9、README 写 12、注册器 12 —— 三份复印件三种说法）。
+
+    判据取**真实注册表**（起子进程发 `tools/list`），不是数源码里的装饰器：
+    装饰器漏写 / 名字拼错 / FastMCP 没收下，源码计数都看不出来。
+    """
+    import re
+    from pathlib import Path as _P
+
+    root = _P(__file__).resolve().parents[1]
+    frames = [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "probe", "version": "0"},
+            },
+        },
+        {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    ]
+    proc = subprocess.run(
+        [sys.executable, "-m", "pm.mcp_server"],
+        cwd=str(root),
+        input="\n".join(json.dumps(f) for f in frames) + "\n",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    listed = None
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            frame = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if frame.get("id") == 2 and "result" in frame:
+            listed = frame["result"]["tools"]
+    assert listed is not None, f"tools/list 没回帧：rc={proc.returncode} {proc.stderr[-300:]}"
+    live = {t["name"] for t in listed}
+
+    guide_text = (root / "docs" / "agent-cli-guide.md").read_text(encoding="utf-8")
+    copies = {
+        "README.md": re.search(
+            r"MCP 接入（(\d+) 个工具", (root / "README.md").read_text(encoding="utf-8")
+        ),
+        "docs/agent-cli-guide.md": re.search(r"暴露 (\d+) 个 MCP 工具", guide_text),
+    }
+    stale = {
+        k: (v.group(1) if v else "读不到")
+        for k, v in copies.items()
+        if v is None or int(v.group(1)) != len(live)
+    }
+    assert not stale, f"注册表里是 {len(live)} 个工具，但这些文档写的不是这个数：{stale}"
+
+    unlisted = sorted(n for n in live if f"`{n}`" not in guide_text)
+    assert not unlisted, f"这些工具有注册、却没在指南的工具表里点名：{unlisted}"

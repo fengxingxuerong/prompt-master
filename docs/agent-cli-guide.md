@@ -145,7 +145,7 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 
 ### 三之二·附二：MCP 接入（智能体标准协议）
 
-`python -m pm.mcp_server`（stdio 传输）暴露 9 个 MCP 工具，OpenClaw / Claude Code / Cursor /
+`python -m pm.mcp_server`（stdio 传输）暴露 13 个 MCP 工具，OpenClaw / Claude Code / Cursor /
 任何 MCP 客户端可直接挂载：
 
 ```json
@@ -156,7 +156,9 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 |---|---|---|
 | `estimate_cost` | 本地计算 | 提交前预算闸门（调用数区间） |
 | `prompt_check` | subprocess 调 CLI | 零调用静态体检一份已有提示词（`run.py check --json` 同口径） |
-| `run_history` / `library_recommend` / `library_export` / `calibrate_judge` | subprocess 调 CLI | 与 `run.py --json` 单一口径，永不出现两套行为 |
+| `cases_check` | subprocess 调 CLI | 零调用体检一份**用例集**：四桶分区 + 点名"expected 就在 input 里"的那几条（`run.py check --cases-file` 同口径） |
+| `prompt_diff` | subprocess 调 CLI | 零调用差分两版提示词：改了什么、新引入几条事故模式（`run.py diff` 同口径） |
+| `run_history` / `library_recommend` / `library_export` / `calibrate_judge` / `calibrate_aggregate` | subprocess 调 CLI | 与 `run.py --json` 单一口径，永不出现两套行为 |
 | `optimize_submit` / `optimize_status` / `optimize_wait` / `optimize_report` | 转发常驻 server | 10~30 分钟的长任务必须外置到 server（stdio 进程随客户端会话生死） |
 
 依赖钉 `mcp==1.30.0`（**必须 <2**：mcp 2.x 会把 starlette 顶到与 fastapi 0.115 冲突的版本，
