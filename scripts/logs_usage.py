@@ -20,6 +20,15 @@ import json
 import sys
 from pathlib import Path
 
+# 与 run.py 同一套引导（同一个 helper，不在这里另写一份 reconfigure）：
+# 报表里有 ⚠️（U+26A0）这类 GBK 码页放不下的字符，中文 Windows 控制台上直接 print
+# 会在**报表末尾**抛 UnicodeEncodeError —— 一份"告诉你哪些能删"的工具自己先崩，
+# 而 CI 的 windows runner 默认码页是 UTF-8，抓不到（2026-10-13 本机实测）。
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from pm.bootstrap import ensure_utf8_stdio  # noqa: E402
+
 # 可回收 = 可再生 / 纯死重；证据类 = 被文档按 id 引用过，别删。
 RECLAIMABLE_DIRS = ("venv", "site-packages", "__pycache__", ".pytest_cache")
 RECLAIMABLE_SUFFIXES = ("_cache.json",)
@@ -83,6 +92,7 @@ def reclaimable_dirs(root: Path) -> list[tuple[int, str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    ensure_utf8_stdio()  # 必须早于任何 print / argparse 报错
     ap = argparse.ArgumentParser(description="logs/ 只读用量审计（从不删除，只给建议）")
     ap.add_argument("--root", default="logs", help="审计根目录（默认 logs/）")
     ap.add_argument("--json", action="store_true", help="stdout 恰好一个 JSON 对象")

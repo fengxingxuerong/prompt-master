@@ -15,9 +15,38 @@ import sys
 from pm.bootstrap import ensure_utf8_stdio
 
 
-def test_ensure_utf8_stdio_noop_on_non_windows():
-    # 在非 Windows 上必须是安全的无操作（CI/开发机多为 Linux）
-    ensure_utf8_stdio()  # 不抛错即通过
+def test_already_utf8_streams_are_left_alone():
+    """判据是"这条流能不能装下要印的东西"，不是操作系统。
+
+    原来这条叫 `noop_on_non_windows`，配的是 `if os.name != "nt": return` —— 那句
+    等于假设"非 Windows 一定是 UTF-8"，而 `scripts/logs_usage.py` 那次 CI 绿、本机红
+    正是这个假设的产物（GH 的 windows runner 缺省码页就是 UTF-8，没人替用户崩过）。
+    """
+
+    class _Stream:
+        def __init__(self, encoding):
+            self.encoding = encoding
+            self.calls = []
+
+        def reconfigure(self, **kw):
+            self.calls.append(kw)
+
+    out, err = _Stream("utf-8"), _Stream("UTF8")
+    orig = (sys.stdout, sys.stderr)
+    sys.stdout, sys.stderr = out, err
+    try:
+        ensure_utf8_stdio()
+    finally:
+        sys.stdout, sys.stderr = orig
+    assert out.calls == [] and err.calls == [], f"已经是 UTF-8 的流被改了：{out.calls}{err.calls}"
+
+    gbk_out = _Stream("gbk")
+    sys.stdout, sys.stderr = gbk_out, _Stream("gbk")
+    try:
+        ensure_utf8_stdio()
+    finally:
+        sys.stdout, sys.stderr = orig
+    assert gbk_out.calls == [{"encoding": "utf-8"}], "非 UTF-8 的流没被纠正，cp936 事故会重演"
 
 
 def test_run_entry_survives_gbk_redirect(tmp_path):

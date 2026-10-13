@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import sys
 import time as _time_mod
 from pathlib import Path
@@ -359,9 +358,21 @@ def test_feature_enabled_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------- bootstrap
 
 
-def test_ensure_utf8_stdio_noop_outside_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(os, "name", "posix")
-    ensure_utf8_stdio()  # 直接返回，不应触碰任何流
+def test_ensure_utf8_stdio_skips_streams_without_reconfigure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没有 reconfigure 的流（被包过的 stdout）必须原样放过，不抛错。
+
+    原名 `noop_outside_windows`，靠 `os.name == "posix"` 走捷径 —— 引导改成看流的
+    编码之后那个分支已经不存在了，留着它等于给一条不存在的路写覆盖。
+    """
+
+    class _Opaque:
+        encoding = None  # 无 reconfigure：只能跳过
+
+    monkeypatch.setattr(sys, "stdout", _Opaque())
+    monkeypatch.setattr(sys, "stderr", _Opaque())
+    ensure_utf8_stdio()  # 不抛错即通过
 
 
 def test_ensure_utf8_stdio_reconfigure_failure_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:

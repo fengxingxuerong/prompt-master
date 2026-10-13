@@ -18,6 +18,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# 与 run.py 同一套引导：本渲染器打印 ⚠✅❌，中文 Windows 控制台（cp936）放不下会在
+# 报表中途 print 时抛 UnicodeEncodeError。判据见 tests/test_console_gbk_entry.py。
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from pm.bootstrap import ensure_utf8_stdio
+
 # 输入里出现金额/数字，却整段判成"数据缺失" —— P1-2 过度泛化的信号
 _AMOUNT_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:万|亿|元|块|美元)")
 _MISSING_RE = re.compile(r"数据缺失|无数据|未提供")
@@ -225,6 +231,7 @@ def render(path: Path, rep: dict) -> str:
 
 
 if __name__ == "__main__":
+    ensure_utf8_stdio()
     p = Path(sys.argv[1]) if len(sys.argv) > 1 else _newest_run()
     state = _load(p)
     rep = analyze(state)

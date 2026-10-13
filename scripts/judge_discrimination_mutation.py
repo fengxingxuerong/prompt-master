@@ -16,6 +16,11 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "pm" / "calibration.py"
 TESTS = "tests/test_discrimination.py"
 
+# 与 run.py 同一套引导：下面的 ✓ 在中文 Windows 控制台（cp936）上放不下。
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from pm.bootstrap import ensure_utf8_stdio  # noqa: E402
+
 MUTATIONS: dict[str, tuple[bytes, bytes]] = {
     "M1 AUC 恒 0.5（判别力失明）": (
         b"    return (wins + 0.5 * ties) / (len(pos) * len(neg))",
@@ -59,6 +64,7 @@ def run_suite() -> tuple[int, str]:
 
 
 def main() -> int:
+    ensure_utf8_stdio()  # 必须早于任何 print
     original = TARGET.read_bytes()
     h0 = hashlib.sha1(original).hexdigest()
     rc, summary = run_suite()

@@ -35,9 +35,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 # 中文 Windows 上 stdout 缺省是 cp936：表头里的"⇒/≥"一重定向就 UnicodeEncodeError，
-# 脚本还没出数就崩（入口层的编码问题，与被测逻辑无关）。
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+# 脚本还没出数就崩（入口层的编码问题，与被测逻辑无关）。走与 run.py 同一个 helper，
+# 不在这里另写一份 reconfigure —— 两份引导迟早漂成两种行为。
+from pm.bootstrap import ensure_utf8_stdio  # noqa: E402
+
+ensure_utf8_stdio()
 
 TIMEOUT = float(os.environ.get("PM_PROBE_TIMEOUT", "1"))
 HANG = float(os.environ.get("PM_PROBE_HANG", "3"))

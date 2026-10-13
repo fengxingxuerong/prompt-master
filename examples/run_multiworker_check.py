@@ -24,6 +24,14 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+# 与 run.py 同一套引导：下面的 ✅❌ 在中文 Windows 控制台（cp936）上放不下，
+# print 会抛 UnicodeEncodeError 把一次好好的跨进程验证判成失败。
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from pm.bootstrap import ensure_utf8_stdio
 
 PORT_SUBMIT = sys.argv[1] if len(sys.argv) > 1 else "8096"
 PORT_QUERY = sys.argv[2] if len(sys.argv) > 2 else "8095"
@@ -37,6 +45,7 @@ def get(url: str):
 
 
 def main() -> int:
+    ensure_utf8_stdio()  # 必须早于任何 print
     # 1) 向 A 提交任务
     body = json.dumps(
         {"task": "让 AI 分析销售数据", "n_test_cases": 1, "max_iterations": 1}

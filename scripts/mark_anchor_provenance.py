@@ -26,8 +26,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+# 与 run.py 同一个编码引导（报表打印 ⇒/⚠️，cp936 放不下）——不再这里手写 reconfigure。
+from pm.bootstrap import ensure_utf8_stdio  # noqa: E402
+
+ensure_utf8_stdio()
 
 DIR = ROOT / "judge_calibration"
 FORM = DIR / "score_form.csv"
