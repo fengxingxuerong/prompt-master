@@ -123,3 +123,31 @@ def test_the_running_session_actually_has_a_writable_temp_root() -> None:
     import shutil as _sh
 
     _sh.rmtree(probe, ignore_errors=True)
+
+
+def test_release_suites_with_their_own_ini_reuse_the_root_chooser() -> None:
+    """自带 `pytest.ini` 的 releases 套件必须**复用**仓根的"先探再选"，不许把路径写死。
+
+    成因（2026-10-14 实测）：`releases/{lobster,triage}/pytest.ini` 里那行
+    `addopts = --basetemp=.pytest_tmp` 把 rootdir 切到本目录（仓根 conftest 因此收不到），
+    又把临时根写死在被宿主打坏 ACL 的那个目录里 ⇒ 本机各红 17/38 条，全卡在 setup。
+    换成加载仓根选择器之后：lobster 18 passed rc=0、triage 46 passed rc=0。
+    判据只有一份（conftest 里 exec 仓根那份文件），所以这里查的是"别退回写死"。
+    """
+    inis = sorted((ROOT / "releases").glob("*/pytest.ini"))
+    assert inis, "releases/*/pytest.ini 一个都不在了，这条守卫该跟着退场"
+    for ini in inis:
+        config_lines = [
+            line.strip()
+            for line in ini.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        joined = " ".join(config_lines)
+        assert "basetemp" not in joined, f"{ini} 又把临时根写死了：{config_lines}"
+        sibling = ini.parent / "conftest.py"
+        assert sibling.is_file(), (
+            f"{ini.parent} 自带 pytest.ini ⇒ rootdir 在这里，仓根 conftest 够不到；"
+            "必须自己接上仓根的临时根判据，否则下一次 ACL 事故还是整套卡 setup"
+        )
+        body = sibling.read_text(encoding="utf-8")
+        assert "choose_temp_root" in body and "conftest.py" in body, f"{sibling} 没复用仓根选择器"
