@@ -171,6 +171,26 @@ def test_run_available_reads_env_at_call_time(monkeypatch: pytest.MonkeyPatch) -
 # ---------------------------------------------------------------------------
 # 2. 窗口层（真 Tk：抓线程安全那一形）
 # ---------------------------------------------------------------------------
+class BillablePathTriedToRun(AssertionError):
+    """用例走到了"会真花钱"的那条路。"""
+
+
+@pytest.fixture(autouse=True)
+def _block_the_billable_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """桌面端所有用例默认**封死**④的真跑路径。
+
+    真事故（2026-10-14 23:04）：④改走可中止的 `run_cli_json_live` 之后，一条只 patch 了
+    `run_cli_json` 的用例把真子进程放了出去 —— 它跑了约 70 秒才被手工掐掉，
+    而那一轮只在结束时落盘，所以**具体发了几发无法从磁盘还原**。
+    要测这条路径的用例必须自己显式替换 `desktop.run_cli_json_live`（见 abort 那组）。
+    """
+
+    def blocked(*args: object, **kwargs: object) -> None:
+        raise BillablePathTriedToRun("用例没替换 run_cli_json_live 就走到了真跑路径")
+
+    monkeypatch.setattr(desktop, "run_cli_json_live", blocked)
+
+
 @pytest.fixture(scope="module")
 def tk_root():
     """整个模块共用**一个** Tk 根。
@@ -186,7 +206,10 @@ def tk_root():
         pytest.skip(f"这台机器开不出 Tk 窗口：{e}")
     root.withdraw()  # 不在测试机上闪一个真窗口
     yield root
-    root.destroy()
+    # **故意不 destroy**：销毁 Tcl 解释器之后，后面用例的 GC 会碰到 Tcl 留下的对象，
+    # 本机实测在整套里抛 Windows fatal exception 0x80000003，直接把 pytest 进程带走
+    # （崩在假后端闭环的 pathlib.glob 里，看着像那套用例坏了 —— 单独跑怎么都复现不出来，
+    # 只有整套 + --cov 才撞）。解释器跟着进程结束就够，剩下那点内存不是我们要付的代价。
 
 
 @pytest.fixture()
@@ -447,6 +470,7 @@ def test_act_report_after_a_run_uses_the_same_cli_path(
     app, pump = app_and_pump
     fake = _FakeForward({"status": "passed", "run_id": "abc123def456", "report": "# 交付报告"})
     monkeypatch.setattr(desktop, "run_cli_json", fake)
+    monkeypatch.setattr(desktop, "run_cli_json_live", _live_stub(fake))
     monkeypatch.setattr(desktop, "run_available", lambda: True)
     monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: True)
     app.model.delete(0, "end")
@@ -483,8 +507,9 @@ def test_app_main_builds_the_window_and_enters_the_loop(monkeypatch: pytest.Monk
             calls.append("mainloop")
 
     class _FakeApp:
-        def __init__(self, root: object) -> None:
+        def __init__(self, root: object, scale: float | None = None) -> None:
             calls.append("app")
+            calls.append(f"scale:{scale}")
 
         def select_tab(self, key: str) -> None:
             calls.append("tab:" + key)
@@ -492,7 +517,7 @@ def test_app_main_builds_the_window_and_enters_the_loop(monkeypatch: pytest.Monk
     monkeypatch.setattr(desktop.tk, "Tk", _Root)
     monkeypatch.setattr(desktop, "App", _FakeApp)
     assert desktop.app_main([]) == 0
-    assert calls == ["app", "tab:check", "mainloop"], calls
+    assert calls == ["app", "scale:None", "tab:check", "mainloop"], calls
 
 
 def test_app_main_opens_the_requested_tab(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -503,7 +528,7 @@ def test_app_main_opens_the_requested_tab(monkeypatch: pytest.MonkeyPatch) -> No
             calls.append("mainloop")
 
     class _FakeApp:
-        def __init__(self, root: object) -> None:
+        def __init__(self, root: object, scale: float | None = None) -> None:
             pass
 
         def select_tab(self, key: str) -> None:
@@ -838,3 +863,208 @@ def test_preflight_costs_real_calls_so_it_asks_first(
     pump(0.8)
     assert seen.get("args") == ["--preflight"]
     assert "退出码 0" in str(app.panes["run"].get("1.0", "end"))
+
+
+def _live_stub(fake: _FakeForward):
+    """把 `run_cli_json_live` 换成"记录 register/可被 terminate"的替身。"""
+
+    class _Proc:
+        def __init__(self) -> None:
+            self.terminated = False
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    def live(args, register, timeout=None):
+        proc = _Proc()
+        register(proc)
+        result = fake(args, timeout=timeout)
+        register(None)
+        live.last_proc = proc  # type: ignore[attr-defined]
+        return result
+
+    return live
+
+
+def test_the_billable_guard_actually_blocks() -> None:
+    """总闸不是摆设：不替换 `run_cli_json_live` 直接调它，必须当场炸。"""
+
+    def call_live() -> None:
+        desktop.run_cli_json_live(["--task", "x"], lambda p: None)
+
+    with pytest.raises(BillablePathTriedToRun):
+        call_live()
+
+
+def test_abort_terminates_the_child_and_reports_it(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """④跑得起来也停得下来：中止必须真的 terminate 子进程，并让状态行说清楚。"""
+    app, pump = app_and_pump
+    fake = _FakeForward({"status": "passed", "run_id": "deadbeef1234"})
+    monkeypatch.setattr(desktop, "run_cli_json_live", _live_stub(fake))
+    monkeypatch.setattr(desktop, "run_available", lambda: True)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: True)
+    app._fill(app.in_task, "让 AI 分析销售数据并给出趋势结论")
+    app.act_run()
+    pump(1.2)
+    assert app.last_run_id == "deadbeef1234"
+    calls: list[str] = []
+    app.run_proc = type("P", (), {"terminate": lambda self: calls.append("terminated")})()
+    app.act_abort()
+    assert calls == ["terminated"], "中止按钮没真掐子进程"
+    assert "中止" in str(app.status_lbl.cget("text"))
+
+
+def test_second_submit_is_refused_while_one_is_running(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """一轮在跑时再点"提交"必须被挡 —— 否则一次误点就是两份钱。"""
+    app, pump = app_and_pump
+    fake = _FakeForward({"status": "passed", "run_id": "x1"})
+    monkeypatch.setattr(desktop, "run_cli_json_live", _live_stub(fake))
+    monkeypatch.setattr(desktop, "run_available", lambda: True)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: True)
+    app._fill(app.in_task, "让 AI 分析销售数据并给出趋势结论")
+    app.run_proc = object()  # 模拟"已经有一轮在跑"
+    app.act_run()
+    pump(0.5)
+    assert fake.calls == [], "在跑的时候又提交了一轮"
+    assert "已经有一轮在跑" in str(app.status_lbl.cget("text"))
+
+
+def test_slow_first_action_does_not_land_in_the_second_pane(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """串台回归：先点①（慢）再点⑤（快），①的结果必须仍落在①的窗格里。
+
+    早先版本在**回投时**才读 self.ok_target，于是慢的那个会画到后点的那个窗格里，
+    而且没有任何报错 —— 用户看到的是"门禁给出了提示词命中"这种张冠李戴。
+    """
+    app, pump = app_and_pump
+
+    def slow(args: list[str], timeout: float | None = 60.0) -> dict[str, Any]:
+        if args[:1] == ["check"]:
+            time.sleep(0.6)
+            return dict(CHECK_PAYLOAD)
+        return dict(GATE_PAYLOAD)
+
+    monkeypatch.setattr(desktop, "run_cli_json", slow)
+    app._fill(app.in_check, "一份会被命中的提示词")
+    app.act_check()
+    pump(0.1)  # 让①先在线程里飞着
+    app.act_gate()
+    pump(2.5)
+    assert "命中 2 条" in str(app.panes["check"].get("1.0", "end")), "①的结果没回到①"
+    shown_ledger = str(app.panes["ledger"].get("1.0", "end"))
+    assert "门禁" in shown_ledger or "通过" in shown_ledger or "新引入" in shown_ledger
+    assert "命中 2 条" not in shown_ledger, "①的结果串进了⑤的窗格"
+
+
+def test_copy_and_save_take_the_current_pane(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    app, pump = app_and_pump
+    fake = _FakeForward(GATE_PAYLOAD)
+    monkeypatch.setattr(desktop, "run_cli_json", fake)
+    app.nb.select(4)  # 复制/另存取的是**当前**标签的窗格
+    app.act_gate()
+    pump(1.2)
+    app.act_copy_pane()
+    assert "已复制" in str(app.status_lbl.cget("text"))
+    assert app.root.clipboard_get().startswith("新引入 3 条")  # GATE_PAYLOAD 是 ok=False 的那份
+    target = tmp_path / "gate.txt"
+    monkeypatch.setattr(desktop.filedialog, "asksaveasfilename", lambda **k: str(target))
+    app.act_save_pane()
+    assert "判据是增量不是绝对" in target.read_text(encoding="utf-8")
+
+
+def test_closing_with_a_run_in_flight_asks_and_cleans_up(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """关窗时若还有真任务在跑：必须问，且拒绝就不关（Windows 上父进程退出不管孩子）。"""
+    app, _pump = app_and_pump
+    asked: list[str] = []
+    killed: list[str] = []
+    app.run_proc = type("P", (), {"terminate": lambda self: killed.append("k")})()
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: False)
+    monkeypatch.setattr(app.root, "destroy", lambda: asked.append("destroyed"))
+    app.on_close()
+    assert killed == [], "用户说不关，就不该掐任务"
+    assert asked == [], "用户说不关，窗口不该被销毁"
+
+
+def test_guard_fixture_is_autouse_or_someone_will_delete_it_quietly() -> None:
+    """总闸必须保持 autouse —— 这条是"守卫自己别烂掉"的守卫（照 test_env_isolation_meta 的先例）。"""
+    from pathlib import Path as _P
+
+    src = _P(__file__).read_text(encoding="utf-8")
+    i = src.index("def _block_the_billable_path")
+    assert "@pytest.fixture(autouse=True)" in src[max(0, i - 200) : i], "计费总闸不再是 autouse"
+
+
+def test_a_crash_inside_the_worker_shows_up_instead_of_hanging_forever(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """线程里抛的不是那四类异常时，也必须把错误显示出来。
+
+    真事故形状：只捕 (ForwardError, TemplateNotFound, OSError, ValueError) 时，
+    渲染函数里一个 TypeError 就把线程带走，界面永远停在"进行中…"。
+    """
+    app, pump = app_and_pump
+
+    def boom(args: list[str], timeout: float | None = 60.0) -> dict[str, Any]:
+        raise TypeError("渲染侧自己写错了")
+
+    monkeypatch.setattr(desktop, "run_cli_json", boom)
+    app._fill(app.in_check, "一份提示词")
+    app.act_check()
+    pump(1.2)
+    shown = str(app.panes["check"].get("1.0", "end"))
+    assert "TypeError" in shown, f"异常被静默吞掉了：{shown!r}"
+    assert "失败" in str(app.status_lbl.cget("text"))
+
+
+def test_keyboard_shortcuts_switch_tabs_and_fire_the_current_action(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Alt+1..5 切标签、Ctrl+Enter 跑当前标签的主动作：鼠标不在手边时界面仍要能用。"""
+    app, pump = app_and_pump
+    fake = _FakeForward(GATE_PAYLOAD)
+    monkeypatch.setattr(desktop, "run_cli_json", fake)
+    app.root.event_generate("<Alt-5>")
+    pump(0.3)
+    assert int(app.nb.index("current")) == 4, "Alt+5 没切到⑤"
+    app.root.event_generate("<Control-Return>")
+    pump(1.2)
+    # ⑤ 上没"唯一主动作"，Ctrl+Enter 约定跑第一个按钮（历史与 Δ）
+    assert fake.calls and fake.calls[0][0] == "history", f"Ctrl+Enter 打错了命令：{fake.calls}"
+
+
+def test_closing_without_a_run_cleans_the_temp_dir(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """没在跑就直接关：临时目录要清掉（①②③⑤ 落过文件），窗口要真销毁。"""
+    app, _pump = app_and_pump
+    kept = app.tmpdir.name
+    closed: list[str] = []
+    monkeypatch.setattr(app.root, "destroy", lambda: closed.append("x"))
+    app._tmp_write("seed.md", "一份临时正文")
+    app.on_close()
+    assert closed == ["x"]
+    assert not Path(kept).exists(), f"临时目录没清：{kept}"
+
+
+def test_save_dialog_cancel_writes_nothing(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, pump = app_and_pump
+    fake = _FakeForward(GATE_PAYLOAD)
+    monkeypatch.setattr(desktop, "run_cli_json", fake)
+    monkeypatch.setattr(desktop.filedialog, "asksaveasfilename", lambda **k: "")
+    app.nb.select(4)
+    app.act_gate()
+    pump(1.2)
+    app.act_save_pane()
+    assert "没有可保存" not in str(app.status_lbl.cget("text"))
+    assert "已保存" not in str(app.status_lbl.cget("text"))

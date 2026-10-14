@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -118,3 +119,40 @@ def list_templates() -> list[dict[str, Any]]:
             count = 0
         out.append({"name": name, "cases": count})
     return out
+
+
+def run_cli_json_live(
+    args: list[str],
+    register: Callable[[subprocess.Popen[str] | None], None],
+    timeout: float | None = None,
+) -> Any:
+    """`run_cli_json` 的可中止版：把 `Popen` 交给 `register`，UI 才按得下"中止"。
+
+    为什么单独一条而不是给 `run_cli_json` 加参数：秒级调用不需要这个形状，
+    只有④那种"一轮 60 分钟、70~80 次真调用"的才需要 —— 让简单路径保持简单。
+    加固项与 `_spawn_cli` 逐条相同（list 参数、stdin=DEVNULL、PYTHONIOENCODING、退出码 0~3）。
+    """
+    proc = subprocess.Popen(
+        [sys.executable, str(RUN_PY), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(ROOT),
+        stdin=subprocess.DEVNULL,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    register(proc)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    finally:
+        register(None)
+    if proc.returncode not in OK_EXIT_CODES:
+        raise ForwardError(f"run.py 退出码异常 {proc.returncode}：{(err or '')[-300:]}")
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError as e:
+        raise ForwardError(
+            f"run.py 没有给出合法 JSON（{e}）；stderr 尾部：{(err or '')[-300:]}"
+        ) from e

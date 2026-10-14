@@ -178,6 +178,8 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 | ④ 闭环 | `run.py --task [--prompt-file ①的正文] [--cases-file ②的模板或粘贴内容] [--assert-mode] [--samples] [--fast]`，提交前先 `--dry-run` 报价，确认后提交；`--preflight` 单独按钮 | 报价零调用，提交与预检真调用 |
 | ⑤ 账本 | `run.py history --json` / `calibrate --aggregate --json` / `library --recommend --task-text … --json` / `gate --json` | 全零调用 |
 
+桌面端自己的接口纪律（都有用例钉着）：**结果落在哪个窗格在派发时定死**（回投时才读全局状态会串台）；worker 线程里**不摸 widget**、也不弹模态框（报价回主线程再弹）；线程里抛任何异常都要显示出来，不许静默停在"进行中…"；④那一轮持有真子进程句柄，**中止**与**关窗**都会 terminate 它（Windows 上父进程退出不管孩子，不掐就是继续烧钱）；一轮在跑时第二次提交被拒。计费路径 `run_cli_json_live` 在测试里由 autouse 总闸封死 —— 有过一次用例把真任务放了出去。
+
 ⑤ 那四个读数回答的是「这套仪表现在可信吗」，不是「这次优化成功了吗」——界面上把 `estimable=False`、`papers_differ`、被排除的崩溃臂这些**否定性**标记原样显示出来，字段名对着当场 JSON 抄（第一版凭记忆写了 `r`/`decision_agree`，界面印出三个 `None`）。
 
 `python run.py panel`（缺省只绑 `127.0.0.1:8765`，自动开浏览器；`--no-browser` 只起服务）。

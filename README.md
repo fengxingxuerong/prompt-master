@@ -41,6 +41,7 @@ python run.py wait <run_id>                     # 轮询到终态，输出结果
 # 3b) 想要一个能点的小窗口（插件形态，零调用三张卡不需要 Key）
 python run.py panel                             # 只绑 127.0.0.1:8765，自动开浏览器
 python run.py desktop                           # 原生桌面窗口（Tkinter 标准库）：不开浏览器、不起服务
+#   Alt+1..5 切标签、Ctrl+Enter 跑当前标签；底部有 复制结果 / 另存结果… / 中止（④在跑时可掐真子进程）
 #   体检 / 考卷有几票 / 两版差分 = 当场出判定；④优化闭环没 Key 会置灰并写明原因
 ```
 
@@ -119,7 +120,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1815 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1827 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）

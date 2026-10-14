@@ -647,3 +647,41 @@ def test_run_cli_text_shares_the_same_hardening(monkeypatch) -> None:
     assert "shell" not in captured["kw"]
     assert captured["kw"].get("stdin") is subprocess.DEVNULL
     assert captured["kw"]["env"]["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_run_cli_json_live_can_actually_be_killed(monkeypatch, tmp_path) -> None:
+    """中止不是"调了一下 terminate"就算数：要真把一个 OS 进程掐掉、并当场拿回控制权。
+
+    用一个会挂 30 秒的假 run.py —— 真子进程、真句柄，但不花一分钱。
+    """
+    import threading
+    import time
+
+    slow = tmp_path / "slow_run.py"
+    slow.write_text("import time\ntime.sleep(30)\nprint('{}')\n", encoding="utf-8")
+    monkeypatch.setattr(fwd, "RUN_PY", slow)
+
+    held: dict[str, object] = {}
+    box: dict[str, object] = {}
+
+    def register(proc: object) -> None:
+        held["proc"] = proc
+
+    def call() -> None:
+        try:
+            fwd.run_cli_json_live(["x"], register, timeout=60.0)
+        except BaseException as e:  # noqa: BLE001 - 中止后必然抛，正是要看的
+            box["exc"] = e
+
+    t = threading.Thread(target=call, daemon=True)
+    t.start()
+    time.sleep(1.0)
+    proc = held.get("proc")
+    assert proc is not None, "register 没拿到子进程句柄 —— 中止按钮是死的"
+    t0 = time.monotonic()
+    proc.terminate()  # type: ignore[attr-defined]
+    t.join(15)
+    assert not t.is_alive(), "terminate 之后调用还没返回，中止按钮救不了场"
+    assert time.monotonic() - t0 < 12, f"掐进程耗时异常：{time.monotonic() - t0:.1f}s"
+    assert isinstance(box.get("exc"), fwd.ForwardError), f"中止应报成转发失败，实得 {box}"
+    assert held.get("proc") is None, "register(None) 没被调用，UI 会一直以为还在跑"

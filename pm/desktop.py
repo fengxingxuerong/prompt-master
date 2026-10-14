@@ -23,6 +23,7 @@ import queue
 import sys
 import tempfile
 import threading
+import time
 import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
@@ -35,12 +36,14 @@ from pm.cliforward import (
     TemplateNotFound,
     list_templates,
     run_cli_json,
+    run_cli_json_live,
     run_cli_text,
     template_path,
 )
 
 APP_TITLE = "PromptMaster · 桌面面板"
 WIN_GEOMETRY = "780x660"
+MIN_GEOMETRY = (720, 560)  # 小于这个尺寸控件会被挤到看不见，别让它缩
 BG = "#171a21"
 CARD = "#1f2430"
 INK = "#e6e9ef"
@@ -303,25 +306,33 @@ def run_available() -> bool:
 class App:
     """主窗口：四个标签 + 底部状态灯。耗时动作一律 worker 线程 + 队列回投。"""
 
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: tk.Tk, scale: float | None = None) -> None:
         self.root = root
-        self.q: queue.Queue[tuple[str, str, list[str]]] = queue.Queue()
-        self.ok_target = "check"
-        self.err_target = "check"
-        self.last_run_id = ""
+        # 队列项 = (种类, 标签/载荷, 要显示的行, **结果该落进哪个窗格**)。
+        # 窗格必须在**派发时**定死：早先版本回投时才读 self.ok_target，
+        # 于是"先点①（慢）再点⑤（快）"会把①的结果画进⑤的窗格里 —— 串台且没有任何报错。
+        self.q: queue.Queue[tuple[str, str, list[str], str]] = queue.Queue()
         self.panes: dict[str, tk.Text] = {}
+        self.last_run_id = ""
+        self.run_proc: Any = None  # ④那一轮的真子进程；非 None = 正在烧钱
+        self.inflight = 0
+        self.aborted = False
         root.title(APP_TITLE)
         root.geometry(WIN_GEOMETRY)
+        root.minsize(*MIN_GEOMETRY)
         root.configure(bg=BG)
+        if scale:
+            # 高 DPI 屏上 Tk 的默认换算有时偏小；给一个显式出口而不是猜系统 DPI
+            root.tk.call("tk", "scaling", float(scale))
         self._style()
         self._header()
         nb = ttk.Notebook(root)
         nb.pack(fill="both", expand=True, padx=12, pady=(0, 6))
-        self.nb: Any = nb  # typeshed 里 ttk.Notebook.select 是无签名的，标成 Any 才不撞 strict
-        # 顺序即 _tab_* 的添加顺序：--tab 靠它把键翻译成标签下标
+        self.nb: Any = nb  # typeshed 里 ttk.Notebook.select 无签名，标 Any 才不撞 strict
+        # 顺序即 _tab_* 的添加顺序：--tab 与键盘 Alt+N 都靠它
         self.tab_keys = ("check", "cases", "diff", "run", "ledger")
-        # ④/⑤ 要把界面上的正文与用例集落成文件再交给 CLI；生命周期跟着 App 走，
-        # 不能在窗口开着时就删（子进程还在读它）。
+        # ④/⑤ 要把界面上的正文与用例集落成文件再交给 CLI；生命周期跟着窗口走，
+        # 关窗时显式清（只靠 TemporaryDirectory 的 finalizer 会在子进程还在读时炸）。
         self.tmpdir = tempfile.TemporaryDirectory(prefix="pm-desktop-")
         self._tab_check(nb)
         self._tab_cases(nb)
@@ -329,8 +340,42 @@ class App:
         self._tab_run(nb)
         self._tab_ledger(nb)
         self._footer()
+        self._keys()
+        root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._probe_async()
         root.after(120, self._drain)
+
+    def _keys(self) -> None:
+        """键盘路径：Alt+1..5 切标签，Ctrl+Enter 跑当前标签的主动作。
+
+        为什么不是 Enter：三个标签的主输入框是多行 Text，Enter 必须是换行。
+        """
+
+        def binder(k: str) -> Callable[[object], None]:
+            def handler(_event: object) -> None:
+                self.select_tab(k)
+
+            return handler
+
+        for idx, key in enumerate(self.tab_keys, start=1):
+            self.root.bind(f"<Alt-{idx}>", binder(key))
+        self.root.bind(
+            "<Control-Return>",
+            lambda _e: self._run_active_action(),
+        )
+
+    def _run_active_action(self) -> None:
+        try:
+            current = self.tab_keys[int(self.nb.index("current"))]
+        except (TypeError, ValueError, IndexError):  # pragma: no cover - 索引只会是 0..4
+            return
+        {
+            "check": self.act_check,
+            "cases": self.act_cases_tpl,
+            "diff": self.act_diff,
+            "run": self.act_run,
+            "ledger": self.act_history,
+        }[current]()
 
     # ---- 外观 ----
     def _style(self) -> None:
@@ -441,7 +486,12 @@ class App:
         self.led_key = tk.Label(bar, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9))
         self.led_key.pack(side="left", padx=(14, 0))
         self.status_lbl = tk.Label(bar, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9))
-        self.status_lbl.pack(side="right")
+        self.status_lbl.pack(side="left", padx=12)
+        ttk.Button(bar, text="中止", width=6, command=self.act_abort).pack(side="right")
+        ttk.Button(bar, text="另存结果…", width=10, command=self.act_save_pane).pack(
+            side="right", padx=6
+        )
+        ttk.Button(bar, text="复制结果", width=9, command=self.act_copy_pane).pack(side="right")
 
     def select_tab(self, key: str) -> None:
         """按 `--tab` 停在指定标签；未知键由 argparse 的 choices 挡住，这里不再兜底。"""
@@ -451,13 +501,29 @@ class App:
         w.configure(text=("● " if good else "× ") + text, fg=OK if good else BAD)
 
     # ---- 线程调度 ----
-    def _spawn(self, label: str, work: Callable[[], list[str]]) -> None:
-        def runner() -> None:
-            try:
-                self.q.put(("ok", label, work()))
-            except (ForwardError, TemplateNotFound, OSError, ValueError) as e:
-                self.q.put(("err", label, [str(e)]))
+    def _spawn(self, label: str, work: Callable[[], list[str]], target: str) -> None:
+        """把耗时动作丢进守护线程；**窗格在派发时定死**，回投只认队列里那份。"""
 
+        def runner() -> None:
+            t0 = time.monotonic()
+            try:
+                lines = work()
+                self.q.put(("ok", f"{label} · {time.monotonic() - t0:.1f}s", lines, target))
+            except (ForwardError, TemplateNotFound, OSError, ValueError) as e:
+                self.q.put(("err", label, [str(e)], target))
+            except Exception as e:  # noqa: BLE001 - 兜底必须宽：静默死线程比报错难查得多
+                # 真事故形状（2026-10-14）：只捕四类异常时，渲染函数里一个 TypeError
+                # 就把线程带走，界面永远停在"进行中…"，用户只能关窗口猜。
+                self.q.put(
+                    (
+                        "err",
+                        label,
+                        [f"{type(e).__name__}: {e}", "（这不是判据失败，是界面自己的错）"],
+                        target,
+                    )
+                )
+
+        self.inflight += 1
         self._status(label + " 进行中…")
         threading.Thread(target=runner, daemon=True, name=f"pm-desktop-{label}").start()
 
@@ -465,21 +531,22 @@ class App:
         drained = False
         while True:
             try:
-                kind, label, lines = self.q.get_nowait()
+                kind, label, lines, target = self.q.get_nowait()
             except queue.Empty:
                 break
             drained = True
             if kind == "led":
                 self._apply_probe(lines)
             elif kind == "confirm":
-                # 报价在 worker 线程跑的，确认框必须在主线程弹（label 里带 argv 的 JSON）
+                # 报价在 worker 线程跑的，确认框必须回主线程弹（label 里带 argv 的 JSON）
                 self._confirm_run(json.loads(label), lines)
-            elif kind == "err":
-                self._status(label + " 失败", BAD)
-                self._show(self.err_target, lines)
             else:
-                self._status(label + " 完成", OK)
-                self._show(self.ok_target, lines)
+                self.inflight = max(0, self.inflight - 1)
+                if kind == "err":
+                    self._status(label + " 失败", BAD)
+                else:
+                    self._status(label + " 完成", OK)
+                self._show(target, lines)
         if not drained:
             self.root.after(120, self._drain)
         else:
@@ -510,8 +577,9 @@ class App:
                 note = "" if ok else f"mode={d.get('mode')!r}"
             except (ForwardError, OSError, ValueError) as e:
                 ok, note = False, str(e)[:160]
+            # led 不落脚格，target 位留空
             self.q.put(
-                ("led", "probe", ["1" if ok else "0", "1" if run_available() else "0", note])
+                ("led", "probe", ["1" if ok else "0", "1" if run_available() else "0", note], "")
             )
 
         threading.Thread(target=work, daemon=True, name="pm-desktop-probe").start()
@@ -538,12 +606,13 @@ class App:
 
     def act_check(self) -> None:
         text = self.in_check.get("1.0", "end").rstrip()
-        self.ok_target = self.err_target = "check"
         if not text:
             self._status("先把要体检的提示词贴进来", BAD)
             return
         self._spawn(
-            "体检", lambda: render_check(run_cli_json(["check", "--prompt", text, "--json"]))
+            "体检",
+            lambda: render_check(run_cli_json(["check", "--prompt", text, "--json"])),
+            target="check",
         )
 
     def act_load_check(self) -> None:
@@ -580,7 +649,6 @@ class App:
 
     def act_cases_tpl(self) -> None:
         name = self.tpl.get()
-        self.ok_target = self.err_target = "cases"
         if not name:
             self._status("先选一个模板", BAD)
             return
@@ -589,11 +657,11 @@ class App:
             lambda: render_cases(
                 run_cli_json(["check", "--cases-file", str(template_path(name)), "--json"])
             ),
+            target="cases",
         )
 
     def act_cases_paste(self) -> None:
         raw = self.in_cases.get("1.0", "end").strip()
-        self.ok_target = self.err_target = "cases"
         if not raw:
             self._status("粘贴区是空的", BAD)
             return
@@ -610,7 +678,7 @@ class App:
                 f.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
                 return render_cases(run_cli_json(["check", "--cases-file", str(f), "--json"]))
 
-        self._spawn("考卷体检", work)
+        self._spawn("考卷体检", work, target="cases")
 
     # ---- 标签③：差分 ----
     def _tab_diff(self, nb: ttk.Notebook) -> None:
@@ -636,7 +704,6 @@ class App:
     def act_diff(self) -> None:
         a = self.in_a.get("1.0", "end").rstrip()
         b = self.in_b.get("1.0", "end").rstrip()
-        self.ok_target = self.err_target = "diff"
         if not a or not b:
             self._status("两版都要填", BAD)
             return
@@ -648,7 +715,7 @@ class App:
                 pb.write_text(b, encoding="utf-8")
                 return render_diff(run_cli_json(["diff", str(pa), str(pb), "--json"]))
 
-        self._spawn("差分", work)
+        self._spawn("差分", work, target="diff")
 
     # ---- 标签④：闭环 ----
     def _tab_run(self, nb: ttk.Notebook) -> None:
@@ -743,27 +810,25 @@ class App:
         self.panes["ledger"] = self._text_pane(tab, 14)
 
     def act_history(self) -> None:
-        self.ok_target = self.err_target = "ledger"
         argv = ["history", "--json", "--last", self._hist_last()]
-        self._spawn("历史与 Δ", lambda: render_history(run_cli_json(argv)))
+        self._spawn("历史与 Δ", lambda: render_history(run_cli_json(argv)), target="ledger")
 
     def act_calibrate(self) -> None:
-        self.ok_target = self.err_target = "ledger"
         argv = ["calibrate", "--aggregate", "--json"]
-        self._spawn("评委仪表", lambda: render_calibrate(run_cli_json(argv)))
+        self._spawn("评委仪表", lambda: render_calibrate(run_cli_json(argv)), target="ledger")
 
     def act_library(self) -> None:
-        self.ok_target = self.err_target = "ledger"
         text = self.in_libq.get("1.0", "end").strip()
         if len(text) < 4:
             self._status("先在输入框写一句任务描述", BAD)
             return
         argv = ["library", "--recommend", "--task-text", text, "--json"]
-        self._spawn("资产库检索", lambda: render_library(run_cli_json(argv)))
+        self._spawn("资产库检索", lambda: render_library(run_cli_json(argv)), target="ledger")
 
     def act_gate(self) -> None:
-        self.ok_target = self.err_target = "ledger"
-        self._spawn("改动门禁", lambda: render_gate(run_cli_json(["gate", "--json"])))
+        self._spawn(
+            "改动门禁", lambda: render_gate(run_cli_json(["gate", "--json"])), target="ledger"
+        )
 
     def _hist_last(self) -> str:
         try:
@@ -829,11 +894,10 @@ class App:
         return False
 
     def act_estimate(self) -> None:
-        self.ok_target = self.err_target = "run"
         if not self._need_task():
             return
         argv = self._run_argv(["--dry-run"])
-        self._spawn("预算估计", lambda: render_dry_run(run_cli_json(argv)))
+        self._spawn("预算估计", lambda: render_dry_run(run_cli_json(argv)), target="run")
 
     def act_run(self) -> None:
         """提交前先**当场报价**：确认框里写的是这次参数下的预估区间，不是固定文案。
@@ -841,7 +905,6 @@ class App:
         报价本身也是一次 CLI 调用，所以在 worker 线程跑；确认框回主线程弹
         （`_drain` 的 "confirm" 分支）。报价失败不拦提交，但会在框里明说。
         """
-        self.ok_target = self.err_target = "run"
         if not self._need_task():
             return
         if not run_available():
@@ -856,9 +919,9 @@ class App:
                     lines = render_dry_run(run_cli_json(quote_argv))
                 except (ForwardError, TemplateNotFound, OSError, ValueError) as e:
                     lines = [f"报价失败：{e}", COST_NOTE]
-                self.q.put(("confirm", json.dumps(argv, ensure_ascii=False), lines))
+                self.q.put(("confirm", json.dumps(argv, ensure_ascii=False), lines, "run"))
             except Exception as e:  # noqa: BLE001 - 后台线程不许把异常丢给解释器
-                self.q.put(("err", "预算估计", [f"{type(e).__name__}: {e}"]))
+                self.q.put(("err", "预算估计", [f"{type(e).__name__}: {e}"], "run"))
 
         self._status("提交前先报价…")
         threading.Thread(target=runner, daemon=True, name="pm-desktop-quote").start()
@@ -869,16 +932,22 @@ class App:
             self._status("已取消，未产生任何调用")
             return
 
+        if self.run_proc is not None:
+            self._status("已经有一轮在跑了 —— 先中止它", BAD)
+            return
+
         def work() -> list[str]:
-            d = run_cli_json(argv, timeout=LONG_RUN_TIMEOUT)
+            def register(proc: Any) -> None:
+                self.run_proc = proc  # 只存句柄，不碰 widget
+
+            d = run_cli_json_live(argv, register, timeout=LONG_RUN_TIMEOUT)
             self.last_run_id = str(d.get("run_id") or "")
             return render_run(d)
 
-        self._spawn("优化闭环", work)
+        self._spawn("优化闭环", work, target="run")
 
     def act_preflight(self) -> None:
         """逐角色冒烟：真调用（约 9 发），所以也要确认。"""
-        self.ok_target = self.err_target = "run"
         if not run_available():
             self._status("没配 Key：预检没有意义", BAD)
             return
@@ -888,16 +957,79 @@ class App:
         self._spawn(
             "端点预检",
             lambda: render_preflight(*run_cli_text(["--preflight"], timeout=PREFLIGHT_TIMEOUT)),
+            target="run",
         )
 
+    def act_abort(self) -> None:
+        """中止④那一轮：子进程还在打真端点，每分钟都在花钱。"""
+        proc = self.run_proc
+        if proc is None:
+            self._status("没有在跑的任务")
+            return
+        self.aborted = True
+        try:
+            proc.terminate()
+            self._status("已请求中止，等它收尾…", BAD)
+        except OSError as e:  # pragma: no cover - terminate 失败极罕见
+            self._status(f"中止失败：{e}", BAD)
+
+    def _current_pane_key(self) -> str:
+        try:
+            return self.tab_keys[int(self.nb.index("current"))]
+        except (TypeError, ValueError, IndexError):
+            return "check"
+
+    def act_copy_pane(self) -> None:
+        """把当前窗格的文本塞进剪贴板：结果常常要贴进别处，选中文本复制太慢。"""
+        text = str(self.panes[self._current_pane_key()].get("1.0", "end")).rstrip()
+        if not text:
+            self._status("这个窗格还是空的")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self._status(f"已复制 {len(text)} 字", OK)
+
+    def act_save_pane(self) -> None:
+        key = self._current_pane_key()
+        text = str(self.panes[key].get("1.0", "end")).rstrip()
+        if not text:
+            self._status("没有可保存的内容")
+            return
+        path = filedialog.asksaveasfilename(
+            title="保存窗格内容",
+            defaultextension=".txt",
+            filetypes=[("文本", "*.txt"), ("Markdown", "*.md"), ("所有文件", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(text + "\n", encoding="utf-8")
+        except OSError as e:
+            self._status(f"写不出去：{e}", BAD)
+            return
+        self._status(f"已保存 {path}", OK)
+
+    def on_close(self) -> None:
+        """关窗前拦一道：④正在烧钱时，直接关窗口**不会**杀掉子进程（Windows 上
+        父进程退出不管孩子），那一轮会继续把调用打完。所以要么中止、要么明确放行。"""
+        if self.run_proc is not None:
+            if not messagebox.askyesno(
+                "有任务在跑",
+                "④那一轮还在打真端点。关闭会中止它（已花掉的调用不退还）。\n现在关闭并中止？",
+            ):
+                return
+            self.act_abort()
+        self.tmpdir.cleanup()
+        self.root.destroy()
+
     def act_report(self) -> None:
-        self.ok_target = self.err_target = "run"
         if not self.last_run_id:
             self._status("还没有 run_id（先提交一轮）", BAD)
             return
         self._spawn(
             "取报告",
             lambda: [str(run_cli_json(["report", self.last_run_id]).get("report", ""))],
+            target="run",
         )
 
     def _fill(self, w: tk.Text, text: str) -> None:
@@ -914,14 +1046,21 @@ def _build_parser() -> argparse.ArgumentParser:
     prog = Path(sys.argv[0]).name
     p = argparse.ArgumentParser(
         prog=f"{prog} desktop",
-        description="PromptMaster 原生桌面窗口（Tkinter）：体检 / 考卷有几票 / 两版差分 / 优化闭环",
-        epilog="零调用三张卡不需要 Key；④要 Key 或 PM_FAKE_BACKEND。窗口只在本机，不开任何端口。",
+        description="PromptMaster 原生桌面窗口（Tkinter）：体检 / 考卷 / 差分 / 闭环 / 账本",
+        epilog="①②③⑤ 全零调用不需要 Key；④要 Key 或 PM_FAKE_BACKEND。窗口只在本机，不开任何端口。",
     )
     p.add_argument(
         "--tab",
-        choices=("check", "cases", "diff", "run"),
+        # ⑤账本一度漏在 choices 之外：五个标签里有一个永远开不了
+        choices=("check", "cases", "diff", "run", "ledger"),
         default="check",
-        help="启动后停在哪个标签（①体检 / ②考卷 / ③差分 / ④闭环）",
+        help="启动后停在哪个标签（①体检 / ②考卷 / ③差分 / ④闭环 / ⑤账本）",
+    )
+    p.add_argument(
+        "--scale",
+        type=float,
+        default=None,
+        help="Tk 的像素换算（tk scaling）；高 DPI 屏上字太小或太大时才需要设",
     )
     return p
 
@@ -930,7 +1069,7 @@ def app_main(argv: list[str] | None = None) -> int:
     """入口：解析参数 → 建窗口 → 进主循环。Tk 必须在主线程，所以没有 --workers 这类参数。"""
     args = _build_parser().parse_args(sys.argv[2:] if argv is None else argv)
     root = tk.Tk()
-    app = App(root)
+    app = App(root, scale=args.scale)
     app.select_tab(args.tab)
     root.mainloop()
     return 0
