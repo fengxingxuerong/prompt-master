@@ -766,6 +766,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
     import pm.cli.gatecmd as gcmd
     import pm.cli.history as hist
     import pm.cli.library as lib
+    import pm.cli.panelcmd as pcmd
 
     seen: list[str] = []
 
@@ -784,6 +785,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(dcmd, "diff_command", spy("diff"))
     monkeypatch.setattr(gcmd, "gate_command", spy("gate"))
     monkeypatch.setattr(lib, "_library_command", spy("library"))
+    monkeypatch.setattr(pcmd, "panel_command", spy("panel"))
 
     # 分发函数用的是模块级名字，替换后要重新加载才生效
     import importlib
@@ -794,7 +796,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
         assert fresh._dispatch_subcommand("status", []) == 0
         assert fresh._dispatch_subcommand("report", []) == 0
         assert fresh._dispatch_subcommand("wait", []) == 0
-        for cmd in ("history", "calibrate", "check", "diff", "gate", "library"):
+        for cmd in ("history", "calibrate", "check", "diff", "gate", "library", "panel"):
             assert fresh._dispatch_subcommand(cmd, []) == 0
     finally:
         importlib.reload(cli_main)
@@ -807,6 +809,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
         "gate",
         "history",
         "library",
+        "panel",
     ], f"有子命令没走到实现：{seen}"
     # submit/status/report/wait 四个共用 agent 分支
     assert seen.count("agent") == 4, f"agent 分支应被调用 4 次，实得 {seen.count('agent')}"

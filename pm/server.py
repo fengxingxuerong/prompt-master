@@ -28,12 +28,13 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from . import __version__ as PKG_VERSION
+from .netguard import CSP_NONCE_PLACEHOLDER, render_csp, require_token
 from .ratelimit import SlidingWindowLimiter, parse_rate_limit_env
 from .scheduler import TaskManager
 from .state import SEED_PROMPT_MAX_CHARS
@@ -214,30 +215,9 @@ else:
 # --------------------------------------------------------------------------
 # 安全响应头
 # --------------------------------------------------------------------------
-# 控制台是零外部依赖的单页（CSS/JS/canvas 全内联，无任何 CDN 请求），所以能上
-# `default-src 'self'`：即便有人往报告里塞了 <img src=外部地址>，外联也会被浏览器掐掉。
-#
-# `script-src` / `style-src` 用**逐响应 nonce** 而不是 'unsafe-inline'：
-# 'unsafe-inline' 一旦打开，注入进来的内联脚本照样能跑，等于把 CSP 降级成"只防外联"。
-# 代价是控制台自己也不能用内联事件属性（onclick=...）与 style 属性 —— 那部分已改成
-# data-* + 事件委托与工具类（见 pm/web.py），所以这里可以不给 'unsafe-inline'。
-CSP_NONCE_PLACEHOLDER = "__CSP_NONCE__"
-
-
-def render_csp(nonce: str) -> str:
-    return (
-        "default-src 'self'; "
-        f"script-src 'self' 'nonce-{nonce}'; "
-        f"style-src 'self' 'nonce-{nonce}'; "
-        "img-src 'self' data:; "
-        "connect-src 'self'; "
-        "font-src 'self' data:; "
-        "object-src 'none'; "
-        "base-uri 'none'; "
-        "form-action 'self'; "
-        "frame-ancestors 'none'"
-    )
-
+# CSP 文案与 token 鉴权都在 `pm/netguard.py`（面板要挂同一个 app，就得共用同一份实现；
+# 留两份"逐响应 nonce + 常量时间比较"迟早漂）。这里只保留 server 独有的两件事：
+# /docs 那类走 CDN 的页面豁免，以及给所有响应补基础安全头。
 
 # Swagger UI / ReDoc 从 CDN 拉静态资源，套 strict CSP 会白屏 —— 这几个路径跳过 CSP，
 # 其余安全头照给（它们是 HTML 页面，值得防嵌套与嗅探）。
@@ -261,20 +241,6 @@ async def _security_headers(request: Request, call_next: Any) -> Response:
     if not request.url.path.startswith(_CSP_EXEMPT_PATHS):
         resp.headers.setdefault("Content-Security-Policy", render_csp(nonce))
     return resp
-
-
-def require_token(x_api_key: str | None = Header(default=None)) -> None:
-    """可选的静态 token 鉴权：设了 `PM_API_TOKEN` 就强制校验。
-
-    服务默认能启动就能烧钱，没有任何访问控制是不安全的（H3）。
-    未设 `PM_API_TOKEN` 时保持旧行为（本地开发不碍事），但会记一条告警。
-    """
-    expected = os.getenv("PM_API_TOKEN", "").strip()
-    if not expected:
-        return
-    # 常量时间比较：字符串 != 可被逐字节计时侧信道分辨出"前缀对了多长"
-    if not x_api_key or not secrets.compare_digest(x_api_key, expected):
-        raise HTTPException(status_code=401, detail="缺少或错误的 X-API-Key")
 
 
 if not os.getenv("PM_API_TOKEN", "").strip():
@@ -583,3 +549,13 @@ async def race_report(race_id: str) -> RaceReportResponse:
     if rpt is None:
         raise HTTPException(status_code=404, detail=f"race_id {race_id} 不存在或报告未生成")
     return RaceReportResponse(race_id=race_id, report=rpt)
+
+
+# --------------------------------------------------------------------------
+# 插件面板（`run.py panel` 的入口页 + 三个零调用端点）
+# --------------------------------------------------------------------------
+# 挂在同一个 app 上而不是另起服务：CSP/逐响应 nonce、PM_API_TOKEN、安全头、限流、
+# 调度器都只有一份。路由本体在 pm/panel.py，判据仍由它 subprocess 打 run.py 产生。
+from .panel import router as _panel_router  # noqa: E402
+
+app.include_router(_panel_router)

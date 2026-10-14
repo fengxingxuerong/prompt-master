@@ -63,6 +63,9 @@ _SUBCOMMAND_HELP = """
               —— 退出码 1 = 有新引入的规则问题，可直接当 CI 回归门禁
   gate        提示词改动的 CI 回归门禁：自动从 git 取基线，只拦本次「新引入」的规则问题
               —— 退出码 1 = 有新引入（CI 该红）；2 = 门禁自己没跑起来；默认对象 pm/prompts.py
+  panel       本地插件面板（浏览器小窗口）：体检 / 考卷有几票 / 两版差分三张卡零调用可用，
+              ④优化闭环那张要 Key —— 没 Key 就置灰并写明原因
+              —— 缺省只绑 127.0.0.1:8765（与常驻服务的 8080 分开），--no-browser 只起服务
 
 本地无 Key 路径：
   {prog} --selftest                               图拓扑与控制流自检（秒级）
@@ -82,6 +85,7 @@ _SUBCOMMANDS = (
     "check",
     "diff",
     "gate",
+    "panel",
 )
 
 
@@ -113,6 +117,11 @@ def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
         return diff_command(argv)
     if cmd == "gate":
         return gate_command(argv)
+    if cmd == "panel":
+        # 延迟 import：panelcmd 拉 uvicorn，而 `--help` 与所有零调用子命令都不该为它变重
+        from .panelcmd import panel_command
+
+        return panel_command(argv)
     return _library_command(argv)
 
 

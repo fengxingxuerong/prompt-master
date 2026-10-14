@@ -37,9 +37,13 @@ python run.py --task "让 AI 分析销售数据" --prompt-file 我的提示词.m
 python run_server.py &                          # REST + Web 控制台 + MCP 同源，:8080
 python run.py submit --task "……"                # 秒回 run_id
 python run.py wait <run_id>                     # 轮询到终态，输出结果 JSON
+
+# 3b) 想要一个能点的小窗口（插件形态，零调用三张卡不需要 Key）
+python run.py panel                             # 只绑 127.0.0.1:8765，自动开浏览器
+#   体检 / 考卷有几票 / 两版差分 = 当场出判定；④优化闭环没 Key 会置灰并写明原因
 ```
 
-`python run.py --help` 会列出全部参数与**子命令**（`submit/status/report/wait/history/calibrate/library/check/diff/gate`）。
+`python run.py --help` 会列出全部参数与**子命令**（`submit/status/report/wait/history/calibrate/library/check/diff/gate/panel`）。
 退出码是给 Agent 做分支的协议：`0` 达标交付 / `1` 未达标但已交付 / `2` 参数或配置错误 / `3` 运行失败。
 加 `--json` 时 stdout 恰好一个 JSON 对象，进度全部走 stderr。
 
@@ -55,6 +59,7 @@ python run.py wait <run_id>                     # 轮询到终态，输出结果
 | 事实断言 | `--cases-file cases.json --assert-mode rule` | 你给的 `expected` 有一票否决权；`rule` 模式交评委逐条核验，`custom:<名>` 可挂你自己的断言函数 |
 | 资产与记忆 | `run.py library` / `run.py history` | 达标提示词可按任务相似度检索、导出；history 给 Δ 与显著性 |
 | 评委可信度 | `run.py calibrate [--repeat N]` | 锚点人工分 vs 评委分（MAE/偏置/排序一致性）+ 评委自我复现性极差 |
+| 插件面板 | `run.py panel`（浏览器小窗口，只绑 127.0.0.1:8765） | 把上面三条**零调用**能力（体检 / 考卷有几票 / 两版差分）做成能点开就用的形状：判据仍由面板 subprocess 打同一条 CLI 产生，面板只负责渲染；④优化闭环要 Key，没 Key 就整卡置灰并把原因写在界面上 |
 
 MCP 接入（13 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
 
@@ -113,7 +118,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1734 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1775 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）

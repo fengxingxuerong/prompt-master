@@ -163,3 +163,35 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 
 依赖钉 `mcp==1.30.0`（**必须 <2**：mcp 2.x 会把 starlette 顶到与 fastapi 0.115 冲突的版本，
 实测装完 pm.server 直接 import 失败）。
+
+### 三之二·附三：插件面板（人类入口，Agent 不需要它）
+
+`python run.py panel`（缺省只绑 `127.0.0.1:8765`，自动开浏览器；`--no-browser` 只起服务）。
+
+它是**同一批判据的另一张脸**，不是第二套判定：面板的三个 POST 端点全部 subprocess 打
+`run.py check / check --cases-file / diff`，与 MCP 的 `prompt_check` / `cases_check` /
+`prompt_diff` 同一条路。这条"面板不许自己产生判定"由
+`tests/test_panel.py::test_cases_check_endpoint_equals_the_cli_for_every_template`
+（五份自带模板逐个把面板读数与当场 CLI 读数对齐）钉住 —— 面板改了渲染也不会让判据跟着变。
+
+| 卡 | 端点 | 要不要 Key |
+|---|---|---|
+| ① 提示词体检 | `POST /api/panel/check` | 不要（零调用、零出网） |
+| ② 考卷有几票 | `POST /api/panel/cases-check`（`template` 或粘贴 `cases`） | 不要 |
+| ③ 两版差分 | `POST /api/panel/diff` | 不要 |
+| ④ 优化闭环 | 复用 `POST /api/optimize` + `GET /api/status/{run_id}` + `/api/report/{run_id}` | 要（没 Key 整卡置灰并写明原因） |
+
+Agent 侧要点三件：
+
+- **`GET /api/panel/capabilities` 是自检不是装饰**：它的 `cli_ok` 来自**当场真跑一发**
+  `run.py check`（进程内缓存 60 秒），所以"路由注册成功但转发是坏的"不会被读成就绪。
+- **模板名是白名单**：`template` 只认 `case_templates/` 里当场列举得到的名字。
+  贴 `../../.env` 会得到 404 —— 这条有守卫用例，别把它改成"看起来没 `..` 就放行"。
+- **设了 `PM_API_TOKEN` 时三个 POST 要带 `X-API-Key`**：面板把 token 存在 sessionStorage
+  并显示 401 的下一步动作。富控制台（`GET /`）目前**没有**输入 token 的地方，
+  设了 token 之后它的提交会 401 —— 要人类界面就用面板，或别设 token。
+
+界面本身的安全约束与富控制台逐条相同（零外部资源、无内联事件属性与 style 属性、
+逐响应 nonce、进 `innerHTML` 的文本先过 `esc()`），所以 `/panel` 的 CSP 是
+`default-src 'self'` 且 `frame-ancestors 'none'` —— **它不能被 iframe 嵌进别的应用**，
+"插件"的含义是一条命令起一个本地小窗口，不是可嵌入组件。

@@ -17,6 +17,12 @@
 | `GET /api/race/{race_id}` | 赛马进度（完成数 / 各任务状态） |
 | `GET /api/race/{race_id}/report` | 赛马横向对比报告（评分总览表 + 各任务完整报告） |
 | `GET /api/health` | 健康检查 |
+| `GET /panel` | **插件面板**（单 HTML 小窗口：体检 / 考卷有几票 / 两版差分三张零调用卡 + ④优化闭环） |
+| `GET /api/panel/capabilities` | 面板首屏自检：转发通不通（**当场真跑一发 CLI**，缓存 60 秒）、要不要 token、有没有 Key |
+| `GET /api/panel/templates` | `case_templates/` 的当场列举（只给名字与条数） |
+| `POST /api/panel/check` | 提示词体检：subprocess 打 `run.py check --prompt … --json` |
+| `POST /api/panel/cases-check` | 考卷体检：`template`（白名单名）或粘贴 `cases` 正文，打同一条 CLI 判据 |
+| `POST /api/panel/diff` | 两版差分：临时文件中转，打 `run.py diff --json` |
 
 启动：`python run_server.py [--host 127.0.0.1] [--port 8080]`，交互式文档在 `http://localhost:8080/docs`。
 
@@ -50,6 +56,10 @@
   比较走常量时间（`secrets.compare_digest`）。`/api/health` 与控制台页面本身保持开放
   （存活探测与浏览器加载）；注意控制台页面的 JS 请求不携带 key，token 保护下的部署里
   控制台的数据面板会 401——控制台按本地单人开发设计，共享网络部署请用脚本带 key 调 API。
+  面板（`/panel`）是这一条的例外：它的「连接」卡有 token 输入框（只存 sessionStorage），
+  请求会自动附 `X-API-Key`，401 时把下一步动作写在界面上。`/panel`、
+  `/api/panel/capabilities`、`/api/panel/templates` 三个读接口不设门禁（前者是 HTML、
+  后两者只回布尔/版本号与本地文件名），三个计算类 POST 一律走 `require_token`。
   MCP 的长任务转发（`pm/mcp_server.py`）不受此影响：它与本机 server 共享同一份
   `.env`，每次转发现读 `PM_API_TOKEN` 自动附带 `X-API-Key`。
 - `PM_ALLOW_ORIGINS` —— 确实需要跳源调用时才设

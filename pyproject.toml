@@ -147,7 +147,7 @@ strict = true
 [[tool.mypy.overrides]]
 # pydantic BaseModel 因 follow_imports=skip 被判 Any，继承它的模型类只能豁免
 # disallow_subclassing_any；模型字段本身均已完整标注
-module = ["pm.schemas", "pm.llm", "pm.assertions", "pm.server", "pm.modelhub.server"]
+module = ["pm.schemas", "pm.llm", "pm.assertions", "pm.server", "pm.modelhub.server", "pm.panel"]
 disallow_subclassing_any = false
 
 [[tool.mypy.overrides]]
@@ -155,5 +155,7 @@ disallow_subclassing_any = false
 # 被装饰函数本身均已完整标注；只放开装饰器这一项，其余 strict 规则照常。
 # pm.modelhub.server 于 2026-09-25 补进来：同样是 FastAPI 路由写法，但建 modelhub
 # 目录时漏了这步 ⇒ 18 条 untyped-decorator 一直挂在 CI 上（HEAD 是红的）。
-module = ["pm.server", "pm.mcp_server", "pm.schemas", "pm.modelhub.server"]
+# pm.panel 于 2026-10-14 补进来：同一种 APIRouter 写法，第一次 mypy 就报 9 条 ——
+# 别再以为是面板的代码坏了，是这张名单又一次先于新文件（本仓第三次踩同一形）。
+module = ["pm.server", "pm.mcp_server", "pm.schemas", "pm.modelhub.server", "pm.panel"]
 disallow_untyped_decorators = false
