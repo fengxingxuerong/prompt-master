@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -307,18 +308,24 @@ def test_run_without_key_refuses_before_spending_anything(
     assert "没配 Key" in str(app.status_lbl.cget("text"))
 
 
-def test_cancelled_confirmation_sends_nothing(
+def test_cancelled_confirmation_sends_no_billable_call(
     app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """取消 ⇒ 只有**零调用的报价**那一发，没有任何计费提交。
+
+    断言写成"一次都没打"会是错的：提交前必须先跑 `--dry-run` 把预估区间放进确认框，
+    那一发不花钱。所以这里查的是"有没有非 dry-run 的那一发"。
+    """
     app, pump = app_and_pump
     monkeypatch.setattr(desktop, "run_available", lambda: True)
     monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: False)
-    fake = _FakeForward({"status": "passed"})
+    fake = _FakeForward({"status": "passed", "estimated_llm_calls": {"min": 1, "max": 2}})
     monkeypatch.setattr(desktop, "run_cli_json", fake)
     app._fill(app.in_task, "让 AI 分析销售数据并给出趋势结论")
     app.act_run()
-    pump(0.6)
-    assert fake.calls == [], "点了取消就是没花钱"
+    pump(1.5)
+    assert fake.calls, "提交前应该先跑一次报价"
+    assert all("--dry-run" in c for c in fake.calls), f"取消后出现了计费提交：{fake.calls}"
     assert "已取消" in str(app.status_lbl.cget("text"))
 
 
@@ -530,3 +537,304 @@ def test_desktop_help_exits_instead_of_opening_a_window() -> None:
     assert proc.returncode == 0, proc.stderr[-300:]
     assert "run.py desktop" in proc.stdout
     assert "--tab" in proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# 深化后的接口：④的参数面 与 ⑤账本
+# ---------------------------------------------------------------------------
+HISTORY_PAYLOAD = {
+    "method": "配对 t 区间",
+    "n_runs": 2,
+    "runs": [
+        {
+            "run_id": "a1",
+            "mtime": "10-13 23:52",
+            "task": "分诊",
+            "status": "passed",
+            "delta": 2.15,
+            "llm_calls": 74,
+            "demo": False,
+            "trusted": True,
+        },
+        {
+            "run_id": "b2",
+            "mtime": "10-13 22:44",
+            "task": "分诊",
+            "status": "failed",
+            "delta": None,
+            "llm_calls": 0,
+            "demo": False,
+            "trusted": False,
+        },
+    ],
+    "task_groups": [
+        {
+            "task": "写一个提示词做分诊",
+            "judge_gen": "evaluator=deepseek-v4-flash@0.1",
+            "n_runs": 2,
+            "deltas": [1.0, 2.15],
+            "delta_mean": 1.57,
+            "delta_ci95": [0.45, 2.7],
+            "significant": True,
+            "excluded_untrusted": [{"run_id": "c3", "delta": -4.81, "opt_avg": 2.9}],
+            "note": "样本少",
+        },
+        {
+            "task": "另一把尺的任务",
+            "judge_gen": "UNKNOWN",
+            "n_runs": 1,
+            "deltas": [0.1],
+            "delta_mean": 0.1,
+            "delta_ci95": [],
+            "significant": False,
+            "excluded_untrusted": [],
+            "note": None,
+        },
+    ],
+}
+
+CALIB_PAYLOAD = {
+    "aggregate": {
+        "judge": "evaluator",
+        "mode": "impression",
+        "rounds_used": 1,
+        "n_rep_rounds": 1,
+        "papers_differ": True,
+        "paper_identity": {"mode": "stamp", "distinct_papers": 2, "papers_differ": True},
+        "rounds": [
+            {
+                "ts": "2026-10-10 03:02:44",
+                "n": 11,
+                "mae": 0.88,
+                "bias": 0.29,
+                "decision_kappa": 0.814,
+                "rep_range_max": 1.8,
+            }
+        ],
+        "dispersion": {"mae": {"min": 0.88, "max": 0.88, "range": 0.0, "n_rounds": 1}},
+        "pooled": {
+            "n_rounds": 1,
+            "n_pairs": 11,
+            "n_anchors": 11,
+            "mae": 0.882,
+            "mae_ci95": [0.41, 1.35],
+            "bias": 0.291,
+            "bias_ci95": [-0.6, 1.09],
+            "owner_anchors": 11,
+            "ai_proxy_anchors": 0,
+            "by_human_source": {"owner": {"n_anchors": 11, "bias": 0.291, "mae": 0.882}},
+            "decision": {
+                "n": 11,
+                "line": 8.0,
+                "agree": 0.909,
+                "kappa": 0.814,
+                "n_lenient": 1,
+                "n_strict": 0,
+                "usable": True,
+            },
+            "discrimination": {
+                "n": 11,
+                "auc": 0.875,
+                "trivial_accuracy": 0.636,
+                "loo_gain_vs_trivial": 0.182,
+                "estimable": False,
+            },
+        },
+    }
+}
+
+
+LIBRARY_PAYLOAD = {
+    "task_text": "让 AI 分析销售数据",
+    "recommendations": [
+        {
+            "run_id": "aa98d99e66b5",
+            "similarity": 0.25,
+            "avg_score": 8.37,
+            "task": "写一个提示词，让 AI 分析销售数据并给出趋势结论",
+            "prompt_chars": 2137,
+        },
+    ],
+}
+
+GATE_PAYLOAD = {
+    "mode": "prompt_gate",
+    "paths": ["pm/prompts.py"],
+    "base": "6bfc5721b2d65b541a6f",
+    "base_how": "自动探测（origin/main）",
+    "skipped": False,
+    "skip_reason": "",
+    "changed": ["模板X"],
+    "unchanged_count": 16,
+    "added_templates": [],
+    "removed_templates": [],
+    "notes": ["某条说明"],
+    "regressed": True,
+    "ok": False,
+    "introduced_total": 3,
+}
+
+
+def test_render_history_shows_delta_and_excluded_arms() -> None:
+    out = _text(desktop.render_history(HISTORY_PAYLOAD))
+    assert "最近 2 轮" in out and "配对 t 区间" in out
+    assert "[不可采信]" in out
+    assert "显著" in out and "n=2" in out and "CI [0.45, 2.7]" in out
+    assert "已排除崩臂 c3" in out
+    assert "不同尺的行不能读成一列" in out
+    assert "不是「更好」的证据" in out, "Δ 的语义必须在界面上说清"
+
+
+def test_render_calibrate_names_what_the_instrument_measures() -> None:
+    """字段名对着 `run.py calibrate --aggregate --json` 的当场输出写。
+
+    第一版按想象的 `r` / `decision_agree` 写，界面印出三个 None —— 那既不是"没数据"
+    也不是"数据坏了"，纯粹是抄件写错，所以这里连 CI 区间与不可估警告一起钉。
+    """
+    out = _text(desktop.render_calibrate(CALIB_PAYLOAD))
+    assert "MAE 0.882 [0.41, 1.35]" in out
+    assert "bias 0.291 [-0.6, 1.09]" in out
+    assert "κ 0.814" in out and "AUC 0.875" in out
+    assert "亲判 11 · AI 代判 0" in out
+    assert "判别力不可估" in out, "estimable=False 必须说出来，别让 AUC 看着像结论"
+    assert "考卷不是同一张" in out, "papers_differ 时必须警告别横比聚合值"
+    assert "评委相对人工锚点的偏差" in out and "不提供一键烧钱" in out
+    assert "None" not in out, f"还有没对上的字段名：{out}"
+
+
+def test_render_library_and_gate() -> None:
+    lib = _text(desktop.render_library(LIBRARY_PAYLOAD))
+    assert "aa98d99e66b5" in lib and "相似度 0.25" in lib
+    assert "词面重合" in lib
+    gate = _text(desktop.render_gate(GATE_PAYLOAD))
+    assert "新引入 3 条" in gate and "origin/main" in gate
+    assert "判据是增量不是绝对" in gate
+
+
+def test_render_preflight_passes_the_table_through() -> None:
+    out = _text(desktop.render_preflight("角色 | 冒烟\nclarifier | ✅", 0))
+    assert "退出码 0" in out and "clarifier" in out
+
+
+def _argv_of(app: desktop.App, extra: list[str]) -> list[str]:
+    app._fill(app.in_task, "让 AI 分析销售数据并给出趋势结论")
+    return app._run_argv(extra)
+
+
+def test_run_argv_defaults(app_and_pump: tuple[desktop.App, Any]) -> None:
+    app, _pump = app_and_pump
+    argv = _argv_of(app, [])
+    assert argv[:2] == ["--task", "让 AI 分析销售数据并给出趋势结论"]
+    assert "--json" in argv and "--cases" in argv and "--samples" in argv
+    assert "--fast" not in argv and "--prompt-file" not in argv and "--cases-file" not in argv
+    assert "--assert-mode" not in argv, "没给用例集时不该传断言模式"
+
+
+def test_run_argv_seed_mode_uses_tab_one_as_the_draft(
+    app_and_pump: tuple[desktop.App, Any],
+) -> None:
+    """勾「把①的正文当原稿改」→ 落文件传 `--prompt-file`（Δ 的语义随之变成"比你自己好多少"）。"""
+    app, _pump = app_and_pump
+    app._fill(app.in_check, "我已有的一版提示词正文")
+    app.seed_var.set(True)
+    argv = _argv_of(app, [])
+    assert "--prompt-file" in argv
+    path = Path(argv[argv.index("--prompt-file") + 1])
+    assert path.read_text(encoding="utf-8") == "我已有的一版提示词正文"
+
+
+def test_run_argv_wires_tab_two_into_the_run(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """②选模板或粘 JSON 都能成为④的用例集，并带上断言模式。"""
+    app, _pump = app_and_pump
+    monkeypatch.setattr(desktop, "template_path", lambda name: Path(f"/tmp/{name}"))
+    app.run_cases.set("support_triage.json")
+    app.assert_mode.set("rule")
+    argv = _argv_of(app, [])
+    assert "--cases-file" in argv and str(Path("/tmp/support_triage.json")) in argv
+    assert argv[argv.index("--assert-mode") + 1] == "rule"
+
+    app.run_cases.set(desktop.PASTED)
+    app._fill(app.in_cases, '[{"input":"a","expected":"b"}]')
+    argv2 = _argv_of(app, [])
+    p2 = Path(argv2[argv2.index("--cases-file") + 1])
+    assert "expected" in p2.read_text(encoding="utf-8")
+
+
+def test_run_argv_fast_preset_does_not_pass_contending_flags(
+    app_and_pump: tuple[desktop.App, Any],
+) -> None:
+    """快速档自带单采样 1 轮：再传显式值就是两个来源抢同一个开关。"""
+    app, _pump = app_and_pump
+    app.fast_var.set(True)
+    argv = _argv_of(app, [])
+    assert "--fast" in argv and "--samples" not in argv and "--max-iter" not in argv
+
+
+def test_ledger_buttons_call_the_right_cli(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """⑤四个按钮各自打到对应子命令，且都不带计费参数。"""
+    app, pump = app_and_pump
+    fake = _FakeForward(
+        {
+            "runs": [],
+            "task_groups": [],
+            "aggregate": {},
+            "recommendations": [],
+            "ok": True,
+            "mode": "prompt_gate",
+        }
+    )
+    monkeypatch.setattr(desktop, "run_cli_json", fake)
+    app.act_history()
+    app.act_calibrate()
+    app.act_gate()
+    app._fill(app.in_libq, "让 AI 分析销售数据")
+    app.act_library()
+    pump(1.5)
+    heads = [c[0] for c in fake.calls]
+    assert heads == ["history", "calibrate", "gate", "library"], heads
+    assert fake.calls[0][:2] == ["history", "--json"]
+    assert fake.calls[1][:3] == ["calibrate", "--aggregate", "--json"]
+    assert fake.calls[2] == ["gate", "--json"]
+    assert "--task-text" in fake.calls[3]
+
+
+def test_ledger_refuses_short_library_query(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, pump = app_and_pump
+    fake = _FakeForward({})
+    monkeypatch.setattr(desktop, "run_cli_json", fake)
+    app._fill(app.in_libq, "短")
+    app.act_library()
+    pump(0.4)
+    assert fake.calls == []
+    assert "任务描述" in str(app.status_lbl.cget("text"))
+
+
+def test_preflight_costs_real_calls_so_it_asks_first(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """预检打的是真端点（约 9 发）：没确认一发都不许打；没 Key 时连确认框都不该弹。"""
+    app, pump = app_and_pump
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(desktop, "run_available", lambda: True)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: False)
+
+    def spy_text(args: list[str], timeout: float | None = 120.0) -> tuple[str, int]:
+        seen["args"] = list(args)
+        return "clarifier | ✅", 0
+
+    monkeypatch.setattr(desktop, "run_cli_text", spy_text)
+    app.act_preflight()
+    pump(0.4)
+    assert seen == {}, "取消预检却还是打了真端点"
+
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: True)
+    app.act_preflight()
+    pump(0.8)
+    assert seen.get("args") == ["--preflight"]
+    assert "退出码 0" in str(app.panes["run"].get("1.0", "end"))

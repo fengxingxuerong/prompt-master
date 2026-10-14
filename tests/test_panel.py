@@ -625,3 +625,25 @@ def test_broken_template_json_is_counted_as_zero_cases(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(fwd, "TEMPLATE_DIR", tmp_path)
     body = TestClient(server_mod.app).get("/api/panel/templates").json()
     assert {t["name"]: t["cases"] for t in body["templates"]} == {"bad.json": 0, "good.json": 1}
+
+
+def test_run_cli_text_shares_the_same_hardening(monkeypatch) -> None:
+    """`--preflight` 这类只打表格的入口走 run_cli_text —— 它必须走同一个 `_spawn_cli`。
+
+    否则会出现"JSON 那条不许用 shell，文本那条偷偷用了"这种半边加固。
+    """
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = list(cmd)
+        captured["kw"] = dict(kw)
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=1, stdout="clarifier | ✅", stderr=""
+        )
+
+    monkeypatch.setattr(fwd.subprocess, "run", fake_run)
+    out, code = fwd.run_cli_text(["--preflight"])
+    assert out == "clarifier | ✅" and code == 1, "退出码要原样递给界面（0 才算全绿）"
+    assert "shell" not in captured["kw"]
+    assert captured["kw"].get("stdin") is subprocess.DEVNULL
+    assert captured["kw"]["env"]["PYTHONIOENCODING"] == "utf-8"

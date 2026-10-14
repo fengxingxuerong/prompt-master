@@ -35,6 +35,7 @@ from pm.cliforward import (
     TemplateNotFound,
     list_templates,
     run_cli_json,
+    run_cli_text,
     template_path,
 )
 
@@ -57,6 +58,10 @@ HONESTY_NOTE = "「优化后更好」按本项目判据（盲评≥3/4 且 Δ>�
 # 这里给整轮留够墙钟，None = 由子进程自己决定何时结束。
 LONG_RUN_TIMEOUT: float | None = None
 SHORT_TIMEOUT = 60.0
+# 预检最坏会撞满单发墙钟预算（PM_CALL_BUDGET），留 20 分钟余量
+PREFLIGHT_TIMEOUT = 1200.0
+NO_CASES = "（不指定 · 让 mockgen 生成）"
+PASTED = "（用②粘贴的内容）"
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +167,132 @@ def render_run(d: dict[str, Any]) -> list[str]:
     return lines
 
 
+def render_history(d: dict[str, Any]) -> list[str]:
+    """⑤ 历史：逐轮读数 + 同任务跨轮 Δ 显著性（按评委尺子分代）。"""
+    lines = [f"最近 {d.get('n_runs')} 轮 · 口径 {d.get('method') or '—'}", ""]
+    for r in d.get("runs") or []:
+        delta = r.get("delta")
+        lines.append(
+            f"{r.get('mtime')}  {r.get('run_id')}  {r.get('status')}  "
+            f"Δ {delta if delta is not None else '—'}  调用 {r.get('llm_calls')}"
+            + ("  [演示]" if r.get("demo") else "")
+            + ("" if r.get("trusted", True) else "  [不可采信]")
+        )
+    groups = d.get("task_groups") or []
+    if groups:
+        lines += ["", "同任务跨轮 Δ（按评委尺子分代 —— 不同尺的行不能读成一列）："]
+        for g in groups:
+            ci = g.get("delta_ci95") or []
+            mark = "显著" if g.get("significant") else "不显著"
+            head = f"· {str(g.get('task'))[:34]}…  Δ均值 {g.get('delta_mean')} {mark} n={g.get('n_runs')}"
+            lines.append(head + (f" CI [{ci[0]}, {ci[1]}]" if len(ci) == 2 else ""))
+            for ex in g.get("excluded_untrusted") or []:
+                lines.append(f"    已排除崩臂 {ex.get('run_id')}（Δ {ex.get('delta')}）")
+            if g.get("note"):
+                lines.append(f"    {g['note']}")
+    lines += ["", "Δ 是「相对基线臂」的自评分差，不是「更好」的证据；结论看盲评那一列。"]
+    return lines
+
+
+def render_calibrate(d: dict[str, Any]) -> list[str]:
+    """⑤ 评委仪表：聚合读数 + 三句"这个数能不能信"。
+
+    字段名全部对着 `run.py calibrate --aggregate --json` 的**当场输出**写
+    （第一版我按想象的 `r`/`decision_agree` 写，界面直接印出三个 None ——
+    字段名只能从命令输出抄，不能照文档或凭记忆）。
+    """
+    agg = d.get("aggregate") or d
+    pooled = agg.get("pooled") or {}
+    dec = pooled.get("decision") or {}
+    disc = pooled.get("discrimination") or {}
+    src = pooled.get("by_human_source") or {}
+    owner, proxy = src.get("owner") or {}, src.get("ai_proxy") or {}
+    lines = [
+        f"评委 {agg.get('judge')} · 打分口径 {agg.get('mode')} · 聚合 {agg.get('rounds_used')} 轮"
+        f"（复现轮 {agg.get('n_rep_rounds')}）",
+        "",
+        f"配对 {pooled.get('n_pairs')} / 锚点 {pooled.get('n_anchors')}"
+        f"（亲判 {owner.get('n_anchors', 0)} · AI 代判 {proxy.get('n_anchors', 0)}）",
+        f"MAE {pooled.get('mae')}{_fmt_ci(pooled.get('mae_ci95'))} · "
+        f"bias {pooled.get('bias')}{_fmt_ci(pooled.get('bias_ci95'))}",
+        f"过线一致率 {dec.get('agree')} · κ {dec.get('kappa')} · 偏松 {dec.get('n_lenient')} / "
+        f"偏严 {dec.get('n_strict')}（线 {dec.get('line')}）",
+        f"判别力 AUC {disc.get('auc')} · 平凡基线准确率 {disc.get('trivial_accuracy')} · "
+        f"留一折净增益 {disc.get('loo_gain_vs_trivial')}",
+        "",
+    ]
+    if dec.get("usable") is False:
+        lines.append("⚠️ 过线一致性当前**不可估**（格子样本不足），别把上面那行读成「评委坏了」。")
+    if disc.get("estimable") is False:
+        lines.append("⚠️ 判别力不可估：AUC 的置信区间覆盖 0.5，这条线现在量不出东西。")
+    if agg.get("papers_differ"):
+        pi = agg.get("paper_identity") or {}
+        lines.append(
+            f"⚠️ 这几轮的考卷不是同一张（{pi.get('distinct_papers')} 张卷），聚合值别横比。"
+        )
+    lines += [
+        "这是「评委相对人工锚点的偏差」，不是「评委能力」；样本 <5 条只作方向性参考。",
+        "跑真复现（--repeat N）要打端点、花真钱，本窗口不提供一键烧钱。",
+    ]
+    rounds = agg.get("rounds") or []
+    if rounds:
+        lines += ["", "逐轮："]
+        for r in rounds:
+            lines.append(
+                f"· {r.get('ts')}  n={r.get('n')}  MAE {r.get('mae')}  bias {r.get('bias')}  "
+                f"κ {r.get('decision_kappa')}  复现极差 {r.get('rep_range_max')}"
+            )
+    disp = agg.get("dispersion") or {}
+    if disp:
+        bits = [f"{k} 极差 {v.get('range')}" for k, v in disp.items() if isinstance(v, dict)]
+        lines.append("轮间离散：" + " · ".join(bits))
+    return lines
+
+
+def _fmt_ci(ci: Any) -> str:
+    if not ci or len(ci) != 2:
+        return ""
+    return f" [{ci[0]}, {ci[1]}]"
+
+
+def render_library(d: dict[str, Any]) -> list[str]:
+    """⑤ 资产库：按任务相似度检索已达标提示词。"""
+    recs = d.get("recommendations") or []
+    lines = [f"任务「{str(d.get('task_text'))[:40]}」的相似资产 {len(recs)} 条", ""]
+    for r in recs:
+        lines.append(
+            f"· {r.get('run_id')}  相似度 {r.get('similarity')}  自评分 {r.get('avg_score')}  "
+            f"{r.get('prompt_chars')} 字"
+        )
+        lines.append(f"  {str(r.get('task'))[:110]}")
+    if not recs:
+        lines.append("库里没有相似任务（或还没有达标资产入库）。")
+    lines += ["", "相似度是词面重合，不是语义等价；取用前自己读一遍。"]
+    return lines
+
+
+def render_gate(d: dict[str, Any]) -> list[str]:
+    """⑤ 改动门禁：只拦本次新引入的规则问题（零调用）。"""
+    lines = [
+        "通过：没有新引入" if d.get("ok") else f"新引入 {d.get('introduced_total')} 条 —— CI 该红",
+        f"基线 {str(d.get('base'))[:12]}（{d.get('base_how')}）· 对象 {'、'.join(d.get('paths') or [])}",
+        f"模板 {d.get('unchanged_count')} 个未变 · 改动 {len(d.get('changed') or [])} 个 · "
+        f"新增 {len(d.get('added_templates') or [])} · 删除 {len(d.get('removed_templates') or [])}",
+    ]
+    if d.get("skipped"):
+        lines.append(f"本轮被跳过：{d.get('skip_reason')}")
+    for note in d.get("notes") or []:
+        lines.append(f"· {str(note)[:200]}")
+    lines += ["", "判据是增量不是绝对：17 个模板里 16 个天然命中规则，绝对判据会永久假红。"]
+    return lines
+
+
+def render_preflight(stdout: str, code: int) -> list[str]:
+    """⑤ 端点预检：它本来就是一张给人看的表，原样转过来，不在 UI 侧另编一套口径。"""
+    head = f"退出码 {code}（0 = 全部角色可达）"
+    return [head, "", *stdout.rstrip().splitlines()[-40:]]
+
+
 def run_available() -> bool:
     """能不能跑闭环：有 `PM_FAKE_BACKEND` 或有 Key。晚绑定现读，别缓存（Key 可以运行时补）。"""
     if (os.getenv("PM_FAKE_BACKEND") or "").strip():
@@ -188,11 +319,15 @@ class App:
         nb.pack(fill="both", expand=True, padx=12, pady=(0, 6))
         self.nb: Any = nb  # typeshed 里 ttk.Notebook.select 是无签名的，标成 Any 才不撞 strict
         # 顺序即 _tab_* 的添加顺序：--tab 靠它把键翻译成标签下标
-        self.tab_keys = ("check", "cases", "diff", "run")
+        self.tab_keys = ("check", "cases", "diff", "run", "ledger")
+        # ④/⑤ 要把界面上的正文与用例集落成文件再交给 CLI；生命周期跟着 App 走，
+        # 不能在窗口开着时就删（子进程还在读它）。
+        self.tmpdir = tempfile.TemporaryDirectory(prefix="pm-desktop-")
         self._tab_check(nb)
         self._tab_cases(nb)
         self._tab_diff(nb)
         self._tab_run(nb)
+        self._tab_ledger(nb)
         self._footer()
         self._probe_async()
         root.after(120, self._drain)
@@ -336,6 +471,9 @@ class App:
             drained = True
             if kind == "led":
                 self._apply_probe(lines)
+            elif kind == "confirm":
+                # 报价在 worker 线程跑的，确认框必须在主线程弹（label 里带 argv 的 JSON）
+                self._confirm_run(json.loads(label), lines)
             elif kind == "err":
                 self._status(label + " 失败", BAD)
                 self._show(self.err_target, lines)
@@ -518,32 +656,120 @@ class App:
         nb.add(tab, text="④ 优化闭环")
         ttk.Label(
             tab,
-            text=f"{COST_NOTE}。\n{HONESTY_NOTE} —— 界面给的是自评分 Δ 与成对盲评，请看结论别只看分数。",
+            text=f"{COST_NOTE}.\n{HONESTY_NOTE} —— 界面给的是自评分 Δ 与成对盲评，请看结论别只看分数。",
             style="Muted.TLabel",
             wraplength=700,
             justify="left",
         ).pack(anchor="w", pady=(10, 6))
         self.in_task = self._input(tab, 3)
         self.in_task.pack(fill="x")
-        row = ttk.Frame(tab)
-        row.pack(fill="x", pady=(6, 0))
-        ttk.Label(row, text="目标模型").pack(side="left")
-        self.model = ttk.Entry(row, width=22)
+
+        r1 = ttk.Frame(tab)
+        r1.pack(fill="x", pady=(6, 0))
+        ttk.Label(r1, text="目标模型").pack(side="left")
+        self.model = ttk.Entry(r1, width=20)
         self.model.pack(side="left", padx=6)
-        ttk.Label(row, text="用例").pack(side="left")
-        self.cases_n = ttk.Spinbox(row, from_=1, to=8, width=4)
+        ttk.Label(r1, text="用例").pack(side="left")
+        self.cases_n = ttk.Spinbox(r1, from_=1, to=8, width=4)
         self.cases_n.set("4")
         self.cases_n.pack(side="left", padx=4)
-        ttk.Label(row, text="最大迭代").pack(side="left")
-        self.iter_n = ttk.Spinbox(row, from_=0, to=10, width=4)
+        ttk.Label(r1, text="最大迭代").pack(side="left")
+        self.iter_n = ttk.Spinbox(r1, from_=0, to=10, width=4)
         self.iter_n.set("2")
         self.iter_n.pack(side="left", padx=4)
-        ttk.Button(row, text="先报价（零调用）", command=self.act_estimate).pack(
-            side="left", padx=(10, 0)
+        ttk.Label(r1, text="采样").pack(side="left")
+        self.samples_n = ttk.Spinbox(r1, from_=1, to=5, width=4)
+        self.samples_n.set("2")
+        self.samples_n.pack(side="left", padx=4)
+
+        r2 = ttk.Frame(tab)
+        r2.pack(fill="x", pady=(6, 0))
+        ttk.Label(r2, text="用例集").pack(side="left")
+        self.run_cases = ttk.Combobox(
+            r2,
+            width=30,
+            state="readonly",
+            values=[NO_CASES, PASTED] + [t["name"] for t in list_templates()],
         )
-        ttk.Button(row, text="提交任务", command=self.act_run).pack(side="left", padx=6)
-        ttk.Button(row, text="取报告", command=self.act_report).pack(side="left")
-        self.panes["run"] = self._text_pane(tab, 10)
+        self.run_cases.set(NO_CASES)
+        self.run_cases.pack(side="left", padx=6)
+        ttk.Label(r2, text="断言").pack(side="left")
+        self.assert_mode = ttk.Combobox(
+            r2, width=9, state="readonly", values=["contains", "exact", "regex", "rule"]
+        )
+        self.assert_mode.set("contains")
+        self.assert_mode.pack(side="left", padx=4)
+        self.seed_var = tk.BooleanVar(value=False)
+        self.fast_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(r2, text="把①的正文当原稿改", variable=self.seed_var).pack(
+            side="left", padx=(8, 0)
+        )
+        ttk.Checkbutton(r2, text="快速档", variable=self.fast_var).pack(side="left", padx=6)
+
+        r3 = ttk.Frame(tab)
+        r3.pack(fill="x", pady=(8, 0))
+        ttk.Button(r3, text="先报价（零调用）", command=self.act_estimate).pack(side="left")
+        ttk.Button(r3, text="端点预检（真调用）", command=self.act_preflight).pack(
+            side="left", padx=6
+        )
+        ttk.Button(r3, text="提交任务", command=self.act_run).pack(side="left")
+        ttk.Button(r3, text="取报告", command=self.act_report).pack(side="left", padx=6)
+        self.panes["run"] = self._text_pane(tab, 8)
+
+    # ---- 标签⑤：账本与仪表（四个按钮全零调用） ----
+    def _tab_ledger(self, nb: ttk.Notebook) -> None:
+        tab = ttk.Frame(nb)
+        nb.add(tab, text="⑤ 账本与仪表")
+        ttk.Label(
+            tab,
+            text="这四个按钮都不花一分钱：读的是本地账本与运行归档。\n"
+            "它们回答的是「这套仪表现在可信吗」，不是「这次优化成功了吗」。",
+            style="Muted.TLabel",
+            wraplength=700,
+            justify="left",
+        ).pack(anchor="w", pady=(10, 6))
+        row = ttk.Frame(tab)
+        row.pack(fill="x")
+        ttk.Button(row, text="历史与 Δ", command=self.act_history).pack(side="left")
+        ttk.Button(row, text="评委仪表", command=self.act_calibrate).pack(side="left", padx=6)
+        ttk.Button(row, text="资产库检索", command=self.act_library).pack(side="left")
+        ttk.Button(row, text="改动门禁", command=self.act_gate).pack(side="left", padx=6)
+        ttk.Label(row, text="历史条数").pack(side="left", padx=(10, 2))
+        self.hist_n = ttk.Spinbox(row, from_=5, to=200, width=5)
+        self.hist_n.set("40")
+        self.hist_n.pack(side="left")
+        self.in_libq = self._input(tab, 2)
+        self.in_libq.pack(fill="x", pady=(8, 0))
+        self.panes["ledger"] = self._text_pane(tab, 14)
+
+    def act_history(self) -> None:
+        self.ok_target = self.err_target = "ledger"
+        argv = ["history", "--json", "--last", self._hist_last()]
+        self._spawn("历史与 Δ", lambda: render_history(run_cli_json(argv)))
+
+    def act_calibrate(self) -> None:
+        self.ok_target = self.err_target = "ledger"
+        argv = ["calibrate", "--aggregate", "--json"]
+        self._spawn("评委仪表", lambda: render_calibrate(run_cli_json(argv)))
+
+    def act_library(self) -> None:
+        self.ok_target = self.err_target = "ledger"
+        text = self.in_libq.get("1.0", "end").strip()
+        if len(text) < 4:
+            self._status("先在输入框写一句任务描述", BAD)
+            return
+        argv = ["library", "--recommend", "--task-text", text, "--json"]
+        self._spawn("资产库检索", lambda: render_library(run_cli_json(argv)))
+
+    def act_gate(self) -> None:
+        self.ok_target = self.err_target = "ledger"
+        self._spawn("改动门禁", lambda: render_gate(run_cli_json(["gate", "--json"])))
+
+    def _hist_last(self) -> str:
+        try:
+            return str(max(5, min(200, int(self.hist_n.get()))))
+        except ValueError:
+            return "40"
 
     def _ints(self) -> tuple[int, int]:
         try:
@@ -551,13 +777,49 @@ class App:
         except ValueError:
             return 4, 2
 
-    def _argv(self, extra: list[str]) -> list[str]:
+    def _samples(self) -> int:
+        try:
+            return max(1, min(5, int(self.samples_n.get())))
+        except ValueError:
+            return 2
+
+    def _tmp_write(self, name: str, text: str) -> str:
+        """把界面上的正文落成文件交给 CLI —— 判据在 CLI 那边，这里不自己解析。"""
+        f = Path(self.tmpdir.name) / name
+        f.write_text(text, encoding="utf-8")
+        return str(f)
+
+    def _run_argv(self, extra: list[str]) -> list[str]:
+        """**主线程**读 widget、拼参数（worker 线程不许摸 widget，见模块文档第 2 条）。
+
+        两处刻意的"不传"：
+        - 勾了快速档就不传 `--samples/--max-iter`：快速档自带单采样 1 轮，
+          再传显式值等于两个来源抢同一个开关，读结果的人分不清哪个生效；
+        - 没选用例集就不传 `--assert-mode`：它只对 `--cases-file` 的 expected 有意义。
+        """
         task = self.in_task.get("1.0", "end").strip()
         cases, iters = self._ints()
-        argv = [*extra, "--task", task, "--json", "--cases", str(cases), "--max-iter", str(iters)]
+        argv = [*extra, "--task", task, "--json", "--cases", str(cases)]
+        if not self.fast_var.get():
+            argv += ["--max-iter", str(iters), "--samples", str(self._samples())]
         model = self.model.get().strip()
         if model:
             argv += ["--target-model", model]
+        if self.fast_var.get():
+            argv.append("--fast")
+        src = self.run_cases.get()
+        if src == PASTED:
+            raw = self.in_cases.get("1.0", "end").strip()
+            if raw:
+                argv += ["--cases-file", self._tmp_write("cases.json", raw)]
+        elif src and src != NO_CASES:
+            argv += ["--cases-file", str(template_path(src))]
+        if "--cases-file" in argv:
+            argv += ["--assert-mode", self.assert_mode.get()]
+        if self.seed_var.get():
+            seed = self.in_check.get("1.0", "end").rstrip()
+            if seed:
+                argv += ["--prompt-file", self._tmp_write("seed.md", seed)]
         return argv
 
     def _need_task(self) -> bool:
@@ -570,23 +832,42 @@ class App:
         self.ok_target = self.err_target = "run"
         if not self._need_task():
             return
-        argv = self._argv(["--dry-run"])  # 主线程取值：worker 线程里不许摸 widget
+        argv = self._run_argv(["--dry-run"])
         self._spawn("预算估计", lambda: render_dry_run(run_cli_json(argv)))
 
     def act_run(self) -> None:
+        """提交前先**当场报价**：确认框里写的是这次参数下的预估区间，不是固定文案。
+
+        报价本身也是一次 CLI 调用，所以在 worker 线程跑；确认框回主线程弹
+        （`_drain` 的 "confirm" 分支）。报价失败不拦提交，但会在框里明说。
+        """
         self.ok_target = self.err_target = "run"
         if not self._need_task():
             return
         if not run_available():
-            self._status("没配 Key：④不可用（①②③不受影响）", BAD)
+            self._status("没配 Key：④不可用（①②③⑤不受影响）", BAD)
             return
-        if not messagebox.askyesno(
-            "确认提交", f"{COST_NOTE}。\n{HONESTY_NOTE}。\n\n现在提交这一轮？"
-        ):
+        argv = self._run_argv([])
+        quote_argv = [*argv, "--dry-run"]
+
+        def runner() -> None:
+            try:
+                try:
+                    lines = render_dry_run(run_cli_json(quote_argv))
+                except (ForwardError, TemplateNotFound, OSError, ValueError) as e:
+                    lines = [f"报价失败：{e}", COST_NOTE]
+                self.q.put(("confirm", json.dumps(argv, ensure_ascii=False), lines))
+            except Exception as e:  # noqa: BLE001 - 后台线程不许把异常丢给解释器
+                self.q.put(("err", "预算估计", [f"{type(e).__name__}: {e}"]))
+
+        self._status("提交前先报价…")
+        threading.Thread(target=runner, daemon=True, name="pm-desktop-quote").start()
+
+    def _confirm_run(self, argv: list[str], quote: list[str]) -> None:
+        body = "\n".join(quote)
+        if not messagebox.askyesno("确认提交", f"{body}\n\n{HONESTY_NOTE}。\n\n现在提交这一轮？"):
             self._status("已取消，未产生任何调用")
             return
-
-        argv = self._argv([])  # 同上：进线程之前把 widget 的值全部读成普通变量
 
         def work() -> list[str]:
             d = run_cli_json(argv, timeout=LONG_RUN_TIMEOUT)
@@ -595,13 +876,28 @@ class App:
 
         self._spawn("优化闭环", work)
 
+    def act_preflight(self) -> None:
+        """逐角色冒烟：真调用（约 9 发），所以也要确认。"""
+        self.ok_target = self.err_target = "run"
+        if not run_available():
+            self._status("没配 Key：预检没有意义", BAD)
+            return
+        if not messagebox.askyesno("确认预检", "逐角色打一次真实端点（约 9 次调用），现在跑？"):
+            self._status("已取消，未产生任何调用")
+            return
+        self._spawn(
+            "端点预检",
+            lambda: render_preflight(*run_cli_text(["--preflight"], timeout=PREFLIGHT_TIMEOUT)),
+        )
+
     def act_report(self) -> None:
         self.ok_target = self.err_target = "run"
         if not self.last_run_id:
             self._status("还没有 run_id（先提交一轮）", BAD)
             return
         self._spawn(
-            "取报告", lambda: [str(run_cli_json(["report", self.last_run_id]).get("report", ""))]
+            "取报告",
+            lambda: [str(run_cli_json(["report", self.last_run_id]).get("report", ""))],
         )
 
     def _fill(self, w: tk.Text, text: str) -> None:

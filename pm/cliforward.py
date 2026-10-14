@@ -41,16 +41,15 @@ class TemplateNotFound(KeyError):
     """
 
 
-def run_cli_json(args: list[str], timeout: float | None = 60.0) -> Any:
-    """subprocess 打 `run.py … --json`，返回解析后的 JSON。
+def _spawn_cli(args: list[str], timeout: float | None) -> subprocess.CompletedProcess[str]:
+    """唯一的子进程出口。加固三条，每条背后都有过一次事故：
 
-    三条不显眼的加固项，每一条背后都有过一次事故：
     - **list 参数、绝不 shell=True**：体检的提示词正文里出现 `; rm -rf /` 不该变成命令；
     - **stdin=DEVNULL**：不接的话子进程继承调用方的管道，`run.py` 的 `ensure_utf8_stdio()`
       一碰继承来的空管道就永久阻塞（实测 60s 超时，而同一命令在 shell 里 0.9s）；
     - **PYTHONIOENCODING=utf-8**：这台机器的默认码页是 cp936，不显式设就把中文输出打崩。
     """
-    proc = subprocess.run(
+    return subprocess.run(
         [sys.executable, str(RUN_PY), *args],
         capture_output=True,
         text=True,
@@ -61,6 +60,11 @@ def run_cli_json(args: list[str], timeout: float | None = 60.0) -> Any:
         stdin=subprocess.DEVNULL,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
+
+
+def run_cli_json(args: list[str], timeout: float | None = 60.0) -> Any:
+    """subprocess 打 `run.py … --json`，返回解析后的 JSON。"""
+    proc = _spawn_cli(args, timeout)
     if proc.returncode not in OK_EXIT_CODES:
         raise ForwardError(f"run.py 退出码异常 {proc.returncode}：{proc.stderr[-300:]}")
     try:
@@ -69,6 +73,15 @@ def run_cli_json(args: list[str], timeout: float | None = 60.0) -> Any:
         raise ForwardError(
             f"run.py 没有给出合法 JSON（{e}）；stderr 尾部：{(proc.stderr or '')[-300:]}"
         ) from e
+
+
+def run_cli_text(args: list[str], timeout: float | None = 120.0) -> tuple[str, int]:
+    """只打人类表格、没有 `--json` 的入口（如 `--preflight`）走这条：返回 (stdout, 退出码)。
+
+    为什么不给它编一个 JSON 形状：那等于在 UI 侧另立一套口径，而这份输出本身就是给人看的表。
+    """
+    proc = _spawn_cli(args, timeout)
+    return proc.stdout, proc.returncode
 
 
 def template_names() -> list[str]:

@@ -166,7 +166,19 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 
 ### 三之二·附三：插件面板 / 桌面窗口（人类入口，Agent 不需要它）
 
-`python run.py desktop` 是同一批能力的**原生窗口**版（Tkinter，标准库）：不开浏览器、不起 HTTP 服务、不需要 token，四张卡与下面完全同源（都打 `run.py`）。Agent 仍然只走 CLI / MCP —— 这两个人类界面不新增任何判据，只是把已有的零调用判定摆成能点开的形状。
+`python run.py desktop` 是同一批能力的**原生窗口**版（Tkinter，标准库）：不开浏览器、不起 HTTP 服务、不需要 token，五个标签与下面完全同源（都打 `run.py`）。Agent 仍然只走 CLI / MCP —— 这两个人类界面不新增任何判据，只是把已有的判定摆成能点开的形状。
+
+桌面端接的接口（一个都不新造判据）：
+
+| 标签 | 打的是 | 花钱 |
+|---|---|---|
+| ① 体检 | `run.py check --prompt` | 零调用 |
+| ② 考卷 | `run.py check --cases-file` | 零调用 |
+| ③ 差分 | `run.py diff A B`（临时文件中转） | 零调用 |
+| ④ 闭环 | `run.py --task [--prompt-file ①的正文] [--cases-file ②的模板或粘贴内容] [--assert-mode] [--samples] [--fast]`，提交前先 `--dry-run` 报价，确认后提交；`--preflight` 单独按钮 | 报价零调用，提交与预检真调用 |
+| ⑤ 账本 | `run.py history --json` / `calibrate --aggregate --json` / `library --recommend --task-text … --json` / `gate --json` | 全零调用 |
+
+⑤ 那四个读数回答的是「这套仪表现在可信吗」，不是「这次优化成功了吗」——界面上把 `estimable=False`、`papers_differ`、被排除的崩溃臂这些**否定性**标记原样显示出来，字段名对着当场 JSON 抄（第一版凭记忆写了 `r`/`decision_agree`，界面印出三个 `None`）。
 
 `python run.py panel`（缺省只绑 `127.0.0.1:8765`，自动开浏览器；`--no-browser` 只起服务）。
 
