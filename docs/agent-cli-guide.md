@@ -164,7 +164,9 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 依赖钉 `mcp==1.30.0`（**必须 <2**：mcp 2.x 会把 starlette 顶到与 fastapi 0.115 冲突的版本，
 实测装完 pm.server 直接 import 失败）。
 
-### 三之二·附三：插件面板（人类入口，Agent 不需要它）
+### 三之二·附三：插件面板 / 桌面窗口（人类入口，Agent 不需要它）
+
+`python run.py desktop` 是同一批能力的**原生窗口**版（Tkinter，标准库）：不开浏览器、不起 HTTP 服务、不需要 token，四张卡与下面完全同源（都打 `run.py`）。Agent 仍然只走 CLI / MCP —— 这两个人类界面不新增任何判据，只是把已有的零调用判定摆成能点开的形状。
 
 `python run.py panel`（缺省只绑 `127.0.0.1:8765`，自动开浏览器；`--no-browser` 只起服务）。
 

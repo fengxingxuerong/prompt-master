@@ -767,6 +767,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
     import pm.cli.history as hist
     import pm.cli.library as lib
     import pm.cli.panelcmd as pcmd
+    import pm.desktop as desk
 
     seen: list[str] = []
 
@@ -786,6 +787,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(gcmd, "gate_command", spy("gate"))
     monkeypatch.setattr(lib, "_library_command", spy("library"))
     monkeypatch.setattr(pcmd, "panel_command", spy("panel"))
+    monkeypatch.setattr(desk, "app_main", spy("desktop"))
 
     # 分发函数用的是模块级名字，替换后要重新加载才生效
     import importlib
@@ -796,7 +798,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
         assert fresh._dispatch_subcommand("status", []) == 0
         assert fresh._dispatch_subcommand("report", []) == 0
         assert fresh._dispatch_subcommand("wait", []) == 0
-        for cmd in ("history", "calibrate", "check", "diff", "gate", "library", "panel"):
+        for cmd in ("history", "calibrate", "check", "diff", "gate", "library", "panel", "desktop"):
             assert fresh._dispatch_subcommand(cmd, []) == 0
     finally:
         importlib.reload(cli_main)
@@ -805,6 +807,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
         "agent",
         "calibrate",
         "check",
+        "desktop",
         "diff",
         "gate",
         "history",

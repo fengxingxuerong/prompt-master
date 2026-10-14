@@ -25,8 +25,8 @@ import types
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from pm import cliforward as fwd
 from pm import mcp_server
 from pm import panel as panel_mod
 from pm import server as server_mod
@@ -268,7 +268,7 @@ def test_capabilities_probe_really_runs_the_cli_and_is_cached(client, monkeypatc
 
 def test_capabilities_reports_a_broken_forwarder_instead_of_hiding_it(client, monkeypatch) -> None:
     def boom(args, timeout: float = 60.0) -> dict:
-        raise RuntimeError("run.py 不在")
+        raise fwd.ForwardError("run.py 不在")
 
     monkeypatch.setattr(panel_mod, "run_cli_json", boom)
     body = client.get("/api/panel/capabilities").json()
@@ -310,7 +310,7 @@ def test_clean_prompt_still_passes_through_the_panel(client) -> None:
 
 def test_cases_check_endpoint_equals_the_cli_for_every_template(client) -> None:
     """五份自带模板逐个对：面板不许在 CLI 之上再加自己的判定。"""
-    from pm.panel import TEMPLATE_DIR
+    from pm.cliforward import TEMPLATE_DIR
 
     for p in sorted(TEMPLATE_DIR.glob("*.json")):
         via_cli = _cli(["check", "--cases-file", str(p), "--json"])
@@ -427,10 +427,11 @@ def test_bad_requests_are_rejected_before_any_subprocess(
     assert seen == [], f"坏入参还是把子进程派出去了：{seen}"
 
 
-def test_template_guard_raises_404_not_500() -> None:
-    with pytest.raises(HTTPException) as e:
-        panel_mod._template_path("../../.env")
-    assert e.value.status_code == 404
+def test_forward_layer_raises_a_neutral_error_not_an_http_one() -> None:
+    """底层不认 HTTP：桌面窗口没有"翻成 404"这一层，它要的是同一句人话直接上界面。
+    翻成 404 那一半由 test_template_names_are_whitelisted_not_guessed 打真实端点覆盖。"""
+    with pytest.raises(fwd.TemplateNotFound):
+        fwd.template_path("../../.env")
 
 
 # ---------------------------------------------------------------------------
@@ -474,9 +475,9 @@ def test_panel_and_mcp_forwarders_agree_on_hardening(monkeypatch) -> None:
         captured["kw"] = dict(kw)
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout='{"ok": 1}', stderr="")
 
-    monkeypatch.setattr(panel_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(fwd.subprocess, "run", fake_run)
 
-    assert panel_mod.run_cli_json(["check", "--prompt", "x"]) == {"ok": 1}
+    assert fwd.run_cli_json(["check", "--prompt", "x"]) == {"ok": 1}
     panel_kwargs = dict(captured["kw"])
     panel_cmd = list(captured["cmd"])
 
@@ -495,20 +496,20 @@ def test_panel_and_mcp_forwarders_agree_on_hardening(monkeypatch) -> None:
     # 退出码协议：0~3 都是"正常返回"，其余才抛
     for code in (0, 1, 2, 3):
         monkeypatch.setattr(
-            panel_mod.subprocess,
+            fwd.subprocess,
             "run",
             lambda c, _code=code, **k: subprocess.CompletedProcess(
                 args=c, returncode=_code, stdout=json.dumps({"code": _code}), stderr=""
             ),
         )
-        assert panel_mod.run_cli_json(["x"])["code"] == code
+        assert fwd.run_cli_json(["x"])["code"] == code
     monkeypatch.setattr(
         panel_mod.subprocess,
         "run",
         lambda c, **k: subprocess.CompletedProcess(args=c, returncode=99, stdout="", stderr="boom"),
     )
-    with pytest.raises(RuntimeError, match="退出码异常"):
-        panel_mod.run_cli_json(["x"])
+    with pytest.raises(fwd.ForwardError, match="退出码异常"):
+        fwd.run_cli_json(["x"])
 
 
 def test_panel_forwarder_reports_stderr_when_stdout_is_not_json(monkeypatch) -> None:
@@ -519,9 +520,9 @@ def test_panel_forwarder_reports_stderr_when_stdout_is_not_json(monkeypatch) -> 
             args=cmd, returncode=1, stdout="Traceback...", stderr="坏在这里"
         )
 
-    monkeypatch.setattr(panel_mod.subprocess, "run", fake_run)
-    with pytest.raises(RuntimeError, match="没有给出合法 JSON"):
-        panel_mod.run_cli_json(["check", "--prompt", "x"])
+    monkeypatch.setattr(fwd.subprocess, "run", fake_run)
+    with pytest.raises(fwd.ForwardError, match="没有给出合法 JSON"):
+        fwd.run_cli_json(["check", "--prompt", "x"])
 
 
 # ---------------------------------------------------------------------------
@@ -576,11 +577,11 @@ def test_panel_opens_the_browser_only_after_a_delay(monkeypatch) -> None:
 # 后端那三条"宿主在我们脚下变了"的分支
 # ---------------------------------------------------------------------------
 def test_template_that_disappeared_between_list_and_read_is_404(monkeypatch) -> None:
-    """白名单是当场列举的；列举与读取之间文件被删掉（TOCTOU）时必须 404 而不是 500。"""
-    monkeypatch.setattr(panel_mod, "_template_names", lambda: ["ghost.json"])
-    with pytest.raises(HTTPException) as e:
-        panel_mod._template_path("ghost.json")
-    assert e.value.status_code == 404 and "读不到" in str(e.value.detail)
+    """白名单是当场列举的；列举与读取之间文件被删掉（TOCTOU）时给一句人话而不是 500。"""
+    monkeypatch.setattr(fwd, "template_names", lambda: ["ghost.json"])
+    with pytest.raises(fwd.TemplateNotFound) as e:
+        fwd.template_path("ghost.json")
+    assert "读不到" in str(e.value)
 
 
 def test_panel_opens_the_browser_unless_told_not_to(monkeypatch, capsys) -> None:
@@ -610,8 +611,8 @@ def test_unusable_template_dir_yields_empty_list_not_a_crash(monkeypatch, tmp_pa
     """
     hostile = tmp_path / "not-a-dir"
     hostile.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(panel_mod, "TEMPLATE_DIR", hostile)
-    assert panel_mod._template_names() == []
+    monkeypatch.setattr(fwd, "TEMPLATE_DIR", hostile)
+    assert fwd.template_names() == []
     assert TestClient(server_mod.app).get("/api/panel/templates").json()["templates"] == []
 
 
@@ -621,6 +622,6 @@ def test_broken_template_json_is_counted_as_zero_cases(monkeypatch, tmp_path: Pa
     (tmp_path / "good.json").write_text(
         json.dumps([{"input": "a", "expected": "b"}]), encoding="utf-8"
     )
-    monkeypatch.setattr(panel_mod, "TEMPLATE_DIR", tmp_path)
+    monkeypatch.setattr(fwd, "TEMPLATE_DIR", tmp_path)
     body = TestClient(server_mod.app).get("/api/panel/templates").json()
     assert {t["name"]: t["cases"] for t in body["templates"]} == {"bad.json": 0, "good.json": 1}

@@ -66,6 +66,8 @@ _SUBCOMMAND_HELP = """
   panel       本地插件面板（浏览器小窗口）：体检 / 考卷有几票 / 两版差分三张卡零调用可用，
               ④优化闭环那张要 Key —— 没 Key 就置灰并写明原因
               —— 缺省只绑 127.0.0.1:8765（与常驻服务的 8080 分开），--no-browser 只起服务
+  desktop     原生桌面窗口（Tkinter，标准库）：同样四张卡，不开浏览器、不起服务、不要 token
+              —— 判据仍是 subprocess 打 run.py；④提交前先用 --dry-run 报调用数并要求确认
 
 本地无 Key 路径：
   {prog} --selftest                               图拓扑与控制流自检（秒级）
@@ -86,6 +88,7 @@ _SUBCOMMANDS = (
     "diff",
     "gate",
     "panel",
+    "desktop",
 )
 
 
@@ -122,6 +125,11 @@ def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
         from .panelcmd import panel_command
 
         return panel_command(argv)
+    if cmd == "desktop":
+        # 同样延迟：Tkinter 是标准库，但窗口一旦建起来就该由 mainloop 独占主线程
+        from pm.desktop import app_main
+
+        return app_main(argv)
     return _library_command(argv)
 
 
