@@ -140,14 +140,34 @@ def test_help_lists_every_subcommand():
     而 docs/agent-cli-guide.md 自称"标准学习入口就是 --help"（2026-09-25 实测计数 0）。
     """
     out = _run(["--help"]).stdout
-    for cmd in ("submit", "status", "report", "wait", "history", "calibrate", "library"):
+    for cmd in (
+        "submit",
+        "status",
+        "report",
+        "wait",
+        "history",
+        "calibrate",
+        "library",
+        "panel",
+        "desktop",
+    ):
         assert cmd in out, f"--help 漏了子命令 {cmd}"
     assert "PM_FAKE_BACKEND" in out and "--selftest" in out, "无 Key 的两条路径也要写进 --help"
 
 
 def test_each_subcommand_has_its_own_help():
     """`run.py <子命令> --help` 必须可用：--help 只给一行摘要，细节要能在原地查到。"""
-    for cmd in ("submit", "status", "report", "wait", "history", "calibrate", "library"):
+    for cmd in (
+        "submit",
+        "status",
+        "report",
+        "wait",
+        "history",
+        "calibrate",
+        "library",
+        "panel",
+        "desktop",
+    ):
         r = _run([cmd, "--help"])
         assert r.returncode == 0, f"{cmd} --help 失败：{r.stdout}{r.stderr}"
         assert f"run.py {cmd}" in r.stdout, f"{cmd} --help 的 prog 名不对"

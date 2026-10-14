@@ -16,9 +16,11 @@ Windows 上走 `vista` 原生主题。
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import queue
+import sys
 import tempfile
 import threading
 import tkinter as tk
@@ -184,6 +186,9 @@ class App:
         self._header()
         nb = ttk.Notebook(root)
         nb.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+        self.nb: Any = nb  # typeshed 里 ttk.Notebook.select 是无签名的，标成 Any 才不撞 strict
+        # 顺序即 _tab_* 的添加顺序：--tab 靠它把键翻译成标签下标
+        self.tab_keys = ("check", "cases", "diff", "run")
         self._tab_check(nb)
         self._tab_cases(nb)
         self._tab_diff(nb)
@@ -302,6 +307,10 @@ class App:
         self.led_key.pack(side="left", padx=(14, 0))
         self.status_lbl = tk.Label(bar, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9))
         self.status_lbl.pack(side="right")
+
+    def select_tab(self, key: str) -> None:
+        """按 `--tab` 停在指定标签；未知键由 argparse 的 choices 挡住，这里不再兜底。"""
+        self.nb.select(self.tab_keys.index(key))
 
     def _led(self, w: tk.Label, text: str, good: bool) -> None:
         w.configure(text=("● " if good else "× ") + text, fg=OK if good else BAD)
@@ -600,10 +609,32 @@ class App:
         w.insert("1.0", text)
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    """每个子命令都要有原地 `--help`（本仓约定，且 CI 有守卫）。
+
+    这条不是形式：第一版 `app_main` 直接忽略 argv，实测 `run.py desktop --help`
+    **开出一个窗口并卡在 mainloop**，rc=124、stdout 0 字节 —— 用户以为命令坏了。
+    """
+    prog = Path(sys.argv[0]).name
+    p = argparse.ArgumentParser(
+        prog=f"{prog} desktop",
+        description="PromptMaster 原生桌面窗口（Tkinter）：体检 / 考卷有几票 / 两版差分 / 优化闭环",
+        epilog="零调用三张卡不需要 Key；④要 Key 或 PM_FAKE_BACKEND。窗口只在本机，不开任何端口。",
+    )
+    p.add_argument(
+        "--tab",
+        choices=("check", "cases", "diff", "run"),
+        default="check",
+        help="启动后停在哪个标签（①体检 / ②考卷 / ③差分 / ④闭环）",
+    )
+    return p
+
+
 def app_main(argv: list[str] | None = None) -> int:
-    """入口：建窗口、进主循环。Tk 必须在主线程，所以这里不接 worker/并发参数。"""
-    del argv  # 目前无参数；留位是为了 `run.py desktop --help` 之后能加而不改调用形状
+    """入口：解析参数 → 建窗口 → 进主循环。Tk 必须在主线程，所以没有 --workers 这类参数。"""
+    args = _build_parser().parse_args(sys.argv[2:] if argv is None else argv)
     root = tk.Tk()
-    App(root)
+    app = App(root)
+    app.select_tab(args.tab)
     root.mainloop()
     return 0

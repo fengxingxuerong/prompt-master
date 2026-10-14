@@ -16,6 +16,7 @@ ubuntu CI 上没有 X，第二层自动跳过 —— 它不是"可选的测试"�
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -474,7 +475,58 @@ def test_app_main_builds_the_window_and_enters_the_loop(monkeypatch: pytest.Monk
         def mainloop(self) -> None:
             calls.append("mainloop")
 
+    class _FakeApp:
+        def __init__(self, root: object) -> None:
+            calls.append("app")
+
+        def select_tab(self, key: str) -> None:
+            calls.append("tab:" + key)
+
     monkeypatch.setattr(desktop.tk, "Tk", _Root)
-    monkeypatch.setattr(desktop, "App", lambda root: calls.append("app"))
-    assert desktop.app_main(["desktop"]) == 0
-    assert calls == ["app", "mainloop"]
+    monkeypatch.setattr(desktop, "App", _FakeApp)
+    assert desktop.app_main([]) == 0
+    assert calls == ["app", "tab:check", "mainloop"], calls
+
+
+def test_app_main_opens_the_requested_tab(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class _Root:
+        def mainloop(self) -> None:
+            calls.append("mainloop")
+
+    class _FakeApp:
+        def __init__(self, root: object) -> None:
+            pass
+
+        def select_tab(self, key: str) -> None:
+            calls.append("tab:" + key)
+
+    monkeypatch.setattr(desktop.tk, "Tk", _Root)
+    monkeypatch.setattr(desktop, "App", _FakeApp)
+    assert desktop.app_main(["--tab", "cases"]) == 0
+    assert calls == ["tab:cases", "mainloop"], calls
+
+
+def test_desktop_help_exits_instead_of_opening_a_window() -> None:
+    """真事故：第一版 `app_main` 忽略 argv，`run.py desktop --help` 直接开窗口卡在
+    mainloop（实测 rc=124、stdout 0 字节）—— 用户会以为命令坏了。"""
+    import subprocess
+    import sys
+    from pathlib import Path as _P
+
+    root = _P(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        [sys.executable, str(root / "run.py"), "desktop", "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=90,
+        cwd=str(root),
+        stdin=subprocess.DEVNULL,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    assert proc.returncode == 0, proc.stderr[-300:]
+    assert "run.py desktop" in proc.stdout
+    assert "--tab" in proc.stdout
