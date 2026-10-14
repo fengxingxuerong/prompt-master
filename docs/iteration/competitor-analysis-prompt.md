@@ -171,3 +171,63 @@ GEPA 的 rollout 缓存键带 **split**、train/val 命名空间隔离（`core/e
 `zou-group/awesome-textgrad`、`keirp/GPT-Optimizer`、`langchain-ai/opthax` 现在
 HTML/API/raw 三路 404——不存在或已改名；TextGrad 的 org 已从 `purir` 迁到 `zou-group`。
 竞品分析里"某项目已死"与"某项目不存在"是两种说法，本轮只写能证的那一种。
+
+## 第四轮（2026-10-15）：把对标对象换成"界面那一层"
+
+> 方法：star 当场取自 shields.io 的 `.json`（**只有 2 位有效数字**，"38k"与真值可差 ~6%），
+> 取不到的标「—」，`repo not found` 的原样写出来。
+> 采纳门槛只有一条：**零调用、确定性、不在界面侧新增任何判据**。
+
+### 1. 界面一族的地形（2026-10-15 实测）
+
+| 仓库 | 形态 | ★（shields） | 与桌面端最相关的那个机制 |
+|---|---|---|---|
+| [linshenkx/prompt-optimizer](https://github.com/linshenkx/prompt-optimizer) | TS，浏览器扩展 + 桌面端 | 38k | 收藏/历史/两版并排对比，`{{变量}}` 当一等公民 |
+| [stanfordnlp/dspy](https://github.com/stanfordnlp/dspy) | Python | 39k | （界面不是它的可抄点，抄的是"metric 必须自带理由"——已在第三轮 C 组落地） |
+| [langfuse/langfuse](https://github.com/langfuse/langfuse) | TS，Web 控制台 | 36k | 历史检索/过滤、按版本跳转、导出 |
+| [promptfoo/promptfoo](https://github.com/promptfoo/promptfoo) | TS，CLI + Web 报告 | 26k | 输出**并排**对比 + 断言表进 CI |
+| [langwatch/langwatch](https://github.com/langwatch/langwatch) | TS，Web | 4.9k | prompt 版本管理与 diff |
+| [languine-ai/languine](https://github.com/languine-ai/languine) | TS，本地优先工作台 | 2k | 本地起一个界面这件事本身 |
+| [microsoft/promptbase](https://github.com/microsoft/promptbase) | TS，实验台 | —（本轮 shields 三次空响应，不猜数） | playground 一栏一模型 |
+| kaustubhhiware/PromptEngineerNG | — | `repo not found` | 仓库不存在或已改名 ⇒ 不作为对标物（第三轮 §5 同一口径） |
+
+### 2. 本轮采纳的（7 项，全部零调用）
+
+| # | 竞品做法 | 桌面端此前缺 | 落地 |
+|---|---|---|---|
+| U1 | 并排对比（promptfoo） | ③ 只把 unified 文本打出来，人眼在两列字里跳 | `split_diff` + `ttk.Treeview` 两列逐行着色；**画 Treeview 必须回主线程**（worker 里直接 insert 实测抛 `main thread is not in main loop`） |
+| U2 | 从历史一键跳回版本（langfuse、prompt-optimizer 的收藏） | ⑤ 看到某轮想复看，得手抄 run_id | ⑤ 填 run_id → "填入"落到③的「改动前」；④ 的"取用交付提示词→①"“把它填到③的「后」” |
+| U3 | 历史检索/过滤（langfuse） | ⑤ 只能整份重跑才换视图 | 过滤框走纯文本 `filter_lines`，原文留在 `_ledger_raw` ⇒ **过滤永远是可回退的视图，不是覆盖** |
+| U4 | `{{变量}}` 一等公民（prompt-optimizer） | 带占位符的正文直接喂模型，没人提示 | ① 顶部列 `占位符（只列不判）：city→第 2 行`；**判据不在这里**（`pm/quality.py` 无变量规则，也不加） |
+| U5 | 导出/备份（几乎都有） | 读数只能截图 | 底栏"导出全部"汇一份 Markdown，空窗格写 `（空）` 不留白 |
+| U6 | 深浅色（Web 系标配） | 只有深色 | `apply_theme` 改模块级色板 + `_retheme()` 走一遍已建 widget；**不重建界面**（重建会把用户贴好的正文一起丢掉） |
+| U7 | 键盘路径 + 常驻出处 | 只有鼠标；且同一份读数在两台机器上可能来自不同代码 | Alt+1..5 / Ctrl+Enter / Ctrl+S / Ctrl+L / F1；底栏常驻 `v<版本> · <仓库路径>` |
+
+### 3. 本轮明确不采纳（附理由，防下一个人重新论证）
+
+| 竞品特性 | 不采纳理由 |
+|---|---|
+| 多模型并排跑、图像生成（prompt-optimizer 主打） | 本产品是单端点闭环 + 判据同源；多模型同屏会把"这是谁的分"搅浑，而它正是本项目唯一还站得住的诚实点 |
+| 云端同步 / 团队协作 / 账号体系（langfuse、langwatch） | 与"零出网也能用"直接冲突：形态 E 不 listen 任何端口 |
+| DSPy / TextGrad 式程序化优化 | **维持第三轮 N13**：本仓库评委在 owner 标签上 AUC 0.452~0.623、留一折净增益 +0.000，量具没判别力时优化的是它读不出的那一维 |
+| 图表化看板（柱线饼） | "增加可视化"≠加图表。图表最擅长把两个尺度画进同一列，而每个数字都必须带口径行 |
+| 浏览器扩展 / 插件市场形态 | 用户要的是桌面端原生窗口（`run.py desktop`，标准库 Tkinter，零新依赖） |
+
+### 4. 这一轮是**看界面**抓出来的四个缺陷（代码审查看不见它们）
+
+| # | 缺陷 | 为什么单测放过它 | 修法与钉法 |
+|---|---|---|---|
+| **D1** | 底栏整条被挤出可视区：两盏灯、导出全部、主题、帮助、版本号在默认 780x660 下**全看不见** | 笔记本 `expand=True` 先 pack，底栏后 pack；而窗口层用例一律**直接调方法**，从不量几何 | 底栏改 `side="bottom"` 且先于笔记本 pack；加一条 pack 顺序断言（不比像素，比的是造成缺陷的那条规则） |
+| **D2** | 并排视图把宿主临时路径画进界面（`C:\Users\…\Temp\a.md`） | `split_diff` 的 docstring 当时正写着"不会把临时路径带进界面"——**注释是错的，没人看过渲染结果** | `---`/`+++` 不进视图；加"任何单元格里不许出现 Temp/AppData"的断言 |
+| **D3** | `list_placeholders` 定义了、有 docstring、有单测，**但没有任何调用点** ⇒ 界面安静地少一栏 | 单测测的是被调函数本身，入口从未接 | 接进 `act_check`；加元用例 `test_every_desktop_helper_is_called_from_inside_the_window`（只数 `pm/desktop.py` 内的调用点，**测试引用不算接线**）。变异验证：摘掉调用点 ⇒ 该用例红 |
+| **D4** | ⑤ 过滤把 Δ 的口径说明一起筛掉 ⇒ 满屏只剩分数没有"Δ 不是更好的证据" | 过滤断言只查"命中的行在不在"，没查"不该走的行有没有走" | 固定尾巴重新贴上；断言 `"Δ 是" in kept` |
+
+另记一条测试基建账（不是产品缺陷，但坑了本轮的验证）：抓窗用 `PrintWindow`，它会把
+`WM_PRINT` **发给目标窗口**；脚本若用 `subprocess.run` 死等 PowerShell，就是自己堵住自己的
+消息循环 —— 实测卡满 4 分钟不返回。改成 `Popen` + 等待期间继续泵事件才通。
+
+### 5. 本轮的边界声明
+
+采纳的 7 项没有一项在界面侧算分：全部是"把同一份读数摆得更近、更快到达"。
+判据仍然只出自 `run.py`，出口仍然只有 `pm/cliforward.py` 一个 —— 桌面端与面板共用它，
+`tests/test_panel.py` 与 `tests/test_desktop.py` 分别钉住"界面读数 = 当场 CLI 读数"。

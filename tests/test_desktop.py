@@ -16,6 +16,7 @@ ubuntu CI 上没有 X，第二层自动跳过 —— 它不是"可选的测试"�
 
 from __future__ import annotations
 
+import ast
 import os
 import time
 from pathlib import Path
@@ -226,10 +227,18 @@ def app_and_pump(tk_root, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(desktop, "run_cli_json", stub)
     built = desktop.App(tk_root)
 
-    def pump(seconds: float = 1.5) -> None:
+    def pump(seconds: float = 1.5, until: Any = None) -> None:
+        """泵事件。给了 `until` 就**等到条件成立**为止（上限仍是 seconds）。
+
+        为什么需要这个：根窗口是 withdraw 的，`event_generate` 出来的键事件有时不
+        在当前调用里同步派发（实测同一批 48 条用例 3 次里红 1 次）。写死 `pump(1.2)`
+        的断言于是变成抖动 —— 等的东西是"事件到没到"，不是"睡够没睡够"。
+        """
         end = time.time() + seconds
         while time.time() < end:
             tk_root.update()
+            if until is not None and until():
+                break
             time.sleep(0.02)
 
     return built, pump
@@ -1033,10 +1042,10 @@ def test_keyboard_shortcuts_switch_tabs_and_fire_the_current_action(
     fake = _FakeForward(GATE_PAYLOAD)
     monkeypatch.setattr(desktop, "run_cli_json", fake)
     app.root.event_generate("<Alt-5>")
-    pump(0.3)
+    pump(2.0, lambda: int(app.nb.index("current")) == 4)
     assert int(app.nb.index("current")) == 4, "Alt+5 没切到⑤"
     app.root.event_generate("<Control-Return>")
-    pump(1.2)
+    pump(3.0, lambda: bool(fake.calls))
     # ⑤ 上没"唯一主动作"，Ctrl+Enter 约定跑第一个按钮（历史与 Δ）
     assert fake.calls and fake.calls[0][0] == "history", f"Ctrl+Enter 打错了命令：{fake.calls}"
 
@@ -1068,3 +1077,330 @@ def test_save_dialog_cancel_writes_nothing(
     app.act_save_pane()
     assert "没有可保存" not in str(app.status_lbl.cget("text"))
     assert "已保存" not in str(app.status_lbl.cget("text"))
+
+
+# ---------------------------------------------------------------------------
+# 竞品对照后补上的前端能力（全部零调用，且都不产生判定）
+# ---------------------------------------------------------------------------
+def test_split_diff_pairs_the_two_sides() -> None:
+    rows = desktop.split_diff("--- 改动前\n+++ 改动后\n@@ -1,2 +1,3 @@\n 同一行\n-旧行\n+新行")
+    kinds = [k for k, _l, _r in rows]
+    assert kinds == ["hdr", "ctx", "del", "add"]
+    assert rows[0] == ("hdr", "@@ -1,2 +1,3 @@", "")
+    assert rows[2] == ("del", "旧行", "")
+    assert rows[3] == ("add", "", "新行")
+    assert rows[1][1] == rows[1][2] == "同一行"
+    assert desktop.split_diff("") == []
+
+
+def test_split_diff_never_shows_the_host_temp_paths() -> None:
+    """`---`/`+++` 那两行带的是宿主临时目录真路径 —— 截图里露出来过一次。"""
+    rows = desktop.split_diff(DIFF_PAYLOAD["unified"])
+    flat = " ".join(f"{a}|{b}" for _k, a, b in rows)
+    assert "Temp" not in flat and "someone" not in flat, flat
+    assert "AppData" not in flat, flat
+
+
+def test_list_placeholders_lists_without_judging() -> None:
+    """只列不判：判据在 `pm/quality.py`，那里没有变量规则，这里也不加。"""
+    got = desktop.list_placeholders("第一行 {{city}} 结尾\n第二行没有\n第三行 {{date}} 与 {{city}}")
+    assert got == [(1, "city"), (3, "date"), (3, "city")]
+    assert desktop.list_placeholders("没有占位符") == []
+    assert desktop.list_placeholders("未闭合的 {{x") == []
+
+
+def test_filter_lines_is_case_insensitive_and_reversible() -> None:
+    lines = ["Δ 2.15 passed", "Δ -0.35 early", "另一行"]
+    assert desktop.filter_lines(lines, "PASSED") == ["Δ 2.15 passed"]
+    assert desktop.filter_lines(lines, "") is lines
+
+
+def test_render_export_collects_every_pane() -> None:
+    out = _text(
+        desktop.render_export(
+            {"① 提示词体检": "命中 2 条", "② 考卷有几票": ""},
+            {"版本": "2.1.0", "最近 run_id": "abc"},
+        )
+    )
+    assert "# PromptMaster 桌面端读数" in out
+    assert "版本：2.1.0" in out and "最近 run_id：abc" in out
+    assert "## ① 提示词体检" in out and "命中 2 条" in out
+    assert "（空）" in out, "空窗格也要留位置，别让人以为导出漏了"
+
+
+def test_side_by_side_view_is_painted_on_the_main_thread(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """并排视图必须真被画上，且**不能**在 worker 线程里画。
+
+    第一版直接在 `work()` 里调 `diff_view.insert()` ⇒ `RuntimeError: main thread is
+    not in main loop`（上一轮"异常必须显示出来"那条兜底把它照了出来）。
+    """
+    app, pump = app_and_pump
+    fake = _FakeForward(DIFF_PAYLOAD)
+    monkeypatch.setattr(desktop, "run_cli_json", fake)
+    app._fill(app.in_a, "改动前的正文")
+    app._fill(app.in_b, "改动后的正文")
+    app.act_diff()
+    pump(1.5)
+    assert app._pending_diff is None, "主线程没把待画的差分行取走"
+    rows = app.diff_view.get_children()
+    assert rows, "并排视图是空的"
+    kinds = {app.diff_view.item(i, "tags")[0] for i in rows}
+    assert kinds & {"add", "del", "ctx", "hdr"}, kinds
+    assert "main thread" not in str(app.panes["diff"].get("1.0", "end"))
+
+
+def test_diff_by_run_ids_uses_the_cli_run_id_support(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, pump = app_and_pump
+    fake = _FakeForward(DIFF_PAYLOAD)
+    monkeypatch.setattr(desktop, "run_cli_json", fake)
+    app._set_entry(app.diff_run_a, "b58ee488bf6c")
+    app._set_entry(app.diff_run_b, "6f07ed003fb5")
+    app.act_diff_runs()
+    pump(1.2)
+    assert fake.calls == [["diff", "b58ee488bf6c", "6f07ed003fb5", "--json"]]
+
+
+def test_run_id_fields_reject_empty_input(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, pump = app_and_pump
+    fake = _FakeForward(DIFF_PAYLOAD)
+    monkeypatch.setattr(desktop, "run_cli_json", fake)
+    app.act_diff_runs()
+    pump(0.4)
+    assert fake.calls == []
+    assert "两个 run_id" in str(app.status_lbl.cget("text"))
+
+
+def test_take_prompt_moves_the_delivered_text_between_tabs(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """跑完能把交付的提示词取回①、并填进③做下一轮差分 —— 竞品都有这步跳转。"""
+    app, pump = app_and_pump
+    payload = {"status": "passed", "run_id": "aaa111", "best_prompt": "交付的那一版提示词正文"}
+    monkeypatch.setattr(desktop, "run_cli_json_live", _live_stub(_FakeForward(payload)))
+    monkeypatch.setattr(desktop, "run_available", lambda: True)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: True)
+    app._fill(app.in_task, "让 AI 分析销售数据并给出趋势结论")
+    app.act_run()
+    pump(1.5)
+    app.act_take_prompt()
+    assert "交付的那一版" in str(app.in_check.get("1.0", "end"))
+    assert int(app.nb.index("current")) == 0
+    payload2 = dict(payload, run_id="bbb222", best_prompt="再改一版的正文")
+    monkeypatch.setattr(desktop, "run_cli_json_live", _live_stub(_FakeForward(payload2)))
+    app.act_run()
+    pump(1.5)
+    app.act_prompt_to_diff_b()
+    assert "再改一版" in str(app.in_b.get("1.0", "end"))
+    assert "交付的那一版" in str(app.in_a.get("1.0", "end"))
+    assert (app.diff_run_a.get(), app.diff_run_b.get()) == ("aaa111", "bbb222")
+
+
+def test_take_prompt_without_a_run_says_so(app_and_pump: tuple[desktop.App, Any]) -> None:
+    app, _pump = app_and_pump
+    app.act_take_prompt()
+    app.act_prompt_to_diff_b()
+    assert "还没有交付" in str(app.status_lbl.cget("text"))
+
+
+def test_ledger_filter_and_jump_to_diff(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, pump = app_and_pump
+    payload = {
+        "method": "配对",
+        "n_runs": 2,
+        "runs": [
+            {
+                "run_id": "keepme1",
+                "mtime": "10-14",
+                "task": "t",
+                "status": "passed",
+                "delta": 1.0,
+                "llm_calls": 3,
+                "demo": False,
+                "trusted": True,
+            },
+            {
+                "run_id": "dropme2",
+                "mtime": "10-13",
+                "task": "t",
+                "status": "failed",
+                "delta": None,
+                "llm_calls": 0,
+                "demo": False,
+                "trusted": True,
+            },
+        ],
+        "task_groups": [],
+    }
+    monkeypatch.setattr(desktop, "run_cli_json", _FakeForward(payload))
+    app.act_history()
+    pump(1.2)
+    full = str(app.panes["ledger"].get("1.0", "end"))
+    assert "keepme1" in full and "dropme2" in full
+    app.hist_filter.insert(0, "keepme1")
+    app.act_filter_ledger()
+    kept = str(app.panes["ledger"].get("1.0", "end"))
+    assert "keepme1" in kept and "dropme2" not in kept
+    # 分母是窗格的行数（含表头与口径说明），跟着渲染走；这里只钉"恰好命中 1 行"。
+    assert "过滤「keepme1」：1 行" in kept, kept
+    assert "Δ 是" in kept, "过滤不许把 Δ 的口径说明一起筛掉 —— 只剩分数没有口径"
+    # 过滤必须是可回退的视图，不是覆盖
+    app.hist_filter.delete(0, "end")
+    app.act_filter_ledger()
+    assert "dropme2" in str(app.panes["ledger"].get("1.0", "end"))
+    app._set_entry(app.ledger_run, "keepme1")
+    app.act_run_to_diff()
+    assert app.diff_run_a.get() == "keepme1"
+    assert int(app.nb.index("current")) == 2
+
+
+def test_theme_toggle_repaints_without_losing_the_users_text(
+    app_and_pump: tuple[desktop.App, Any],
+) -> None:
+    """换肤不许重建界面：用户贴进去的正文必须还在（重建 = 丢劳动）。"""
+    app, _pump = app_and_pump
+    app._fill(app.in_check, "用户已经贴好的正文")
+    before = str(app.panes["check"].cget("bg"))
+    app.act_theme()
+    assert str(app.panes["check"].cget("bg")) != before, "窗格底色没变"
+    assert "用户已经贴好的正文" in str(app.in_check.get("1.0", "end"))
+    assert desktop.THEME == "light"
+    app.act_theme()
+    assert desktop.THEME == "dark"
+    assert str(app.panes["check"].cget("bg")) == before
+
+
+def test_export_all_writes_one_markdown_with_every_pane(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    app, _pump = app_and_pump
+    app._show("check", ["命中 2 条"])
+    app._show("ledger", ["通过：没有新引入"])
+    target = tmp_path / "读数.md"
+    monkeypatch.setattr(desktop.filedialog, "asksaveasfilename", lambda **k: str(target))
+    app.act_export_all()
+    body = target.read_text(encoding="utf-8")
+    assert "## ① 提示词体检" in body and "## ⑤ 账本与仪表" in body
+    assert "命中 2 条" in body and "通过：没有新引入" in body
+    assert "（空）" in body
+
+
+def test_shortcuts_are_wired(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ctrl+S / Ctrl+L / F1：键盘路径不能只写在文档里。"""
+    app, pump = app_and_pump
+    seen: list[str] = []
+    monkeypatch.setattr(app, "act_save_pane", lambda: seen.append("save"))
+    monkeypatch.setattr(app, "act_help", lambda: seen.append("help"))
+    monkeypatch.setattr(app, "act_clear_pane", lambda: seen.append("clear"))
+    app.root.event_generate("<Control-s>")
+    app.root.event_generate("<F1>")
+    app.root.event_generate("<Control-l>")
+    pump(3.0, lambda: len(seen) == 3)
+    assert seen == ["save", "help", "clear"], seen
+
+
+def test_header_says_which_code_the_verdicts_come_from(
+    app_and_pump: tuple[desktop.App, Any],
+) -> None:
+    """同一份读数在两台机器上可能来自不同代码 —— 表头常驻版本与仓库路径。
+
+    它原本挂在底栏：左右两组一挤，这句第一个被裁成 `projects\\pror`（截图发现的）。
+    """
+    app, _pump = app_and_pump
+    text = str(app.env_lbl.cget("text"))
+    assert desktop.PKG_VERSION in text
+    assert Path(desktop.REPO_ROOT).name in text, "仓库目录名是「哪份代码」的最后一格信息"
+    assert len(text) <= 46, f"这句太长会被底栏裁掉尾巴（截图实测裁过）：{text!r}"
+
+
+def test_origin_label_keeps_both_ends_when_the_path_is_long(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """超长路径保两端：`E:\\…\\prompt-master`。裁掉的那半截恰恰是目录名。"""
+    monkeypatch.setattr(desktop, "REPO_ROOT", Path("E:/very/deep/nested/checkout/prompt-master"))
+    label = desktop.origin_label()
+    assert label.startswith(f"v{desktop.PKG_VERSION} · ")
+    assert "prompt-master" in label and label.startswith(f"v{desktop.PKG_VERSION} · E:")
+    assert "…" in label and len(label) < 40, label
+
+
+def test_check_pane_lists_placeholders_without_judging_them(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`list_placeholders` 必须真接在①的入口上。
+
+    教训：**定义了却没接线**的助手，单测全绿而界面一片安静。
+    """
+    app, pump = app_and_pump
+    fake = _FakeForward(CHECK_PAYLOAD)
+    monkeypatch.setattr(desktop, "run_cli_json", fake)
+    app._fill(app.in_check, "请去 {{city}} 玩\n第二行\n再来个 {{date}} 和 {{city}}")
+    app.act_check()
+    pump(1.5)
+    shown = str(app.panes["check"].get("1.0", "end"))
+    assert "占位符" in shown and "只列不判" in shown, shown
+    assert "city→第 1/3 行" in shown and "date→第 3 行" in shown, shown
+    assert "命中 2 条" in shown, "CLI 的读数一个字都不能少"
+
+
+def test_placeholder_note_stays_silent_when_there_is_nothing_to_list() -> None:
+    """干净正文不该多一行噪音 —— 有噪音就没人再看这一栏。"""
+    assert desktop.render_placeholders("你是分析师，结论标注数据来源。") == []
+    assert desktop.render_placeholders("") == []
+
+
+def test_split_diff_drops_the_blank_lines_that_split_creates() -> None:
+    """`split("\\n")` 会在尾巴上造一个空串：那不是上下文行，画出来就是一条不存在的"相同行"。"""
+    assert desktop.split_diff(" 甲行\n 乙行\n") == [
+        ("ctx", "甲行", "甲行"),
+        ("ctx", "乙行", "乙行"),
+    ]
+    assert desktop.split_diff("\n\n 只有一行\n\n") == [("ctx", "只有一行", "只有一行")]
+
+
+# 由 `run.py` 的 desktop 子命令调用，不该出现在本文件内部，所以不进这条断言。
+_ENTRYPOINTS = {"app_main"}
+
+
+def test_every_desktop_helper_is_called_from_inside_the_window() -> None:
+    """模块级助手必须在 `pm/desktop.py` **自己**里被调过。
+
+    补上一轮的坑：`list_placeholders` 写好了、单测也绿，但没接到任何按钮上 ——
+    界面就安静地少了一栏。测试引用不算接线，所以这里只数本文件里的调用点。
+    """
+    src = Path(desktop.__file__).read_text(encoding="utf-8")
+    dead = [
+        node.name
+        for node in ast.parse(src).body
+        if isinstance(node, ast.FunctionDef)
+        and node.name not in _ENTRYPOINTS
+        # `def f(` 本身占一次，所以要 ≥2 才算真有人调它
+        and src.count(f"{node.name}(") < 2
+    ]
+    assert not dead, f"定义了却没接线的助手：{dead}"
+
+
+def test_footer_is_packed_before_the_notebook(
+    app_and_pump: tuple[desktop.App, Any],
+) -> None:
+    """底栏必须**先于**笔记本 pack 且贴底 —— 这条只有量几何才会红。
+
+    实测缺陷：笔记本是 `expand=True` 且先 pack，底栏后 pack ⇒ 默认 780x660 的窗口里
+    整条底栏被挤出可视区（两盏灯、导出全部、主题、帮助、版本号全看不见）。截图发现的，
+    而此前 60 多条窗口层用例全绿 —— 它们都直接调方法，从不看像素。
+    这里不比像素（测试根窗口是 withdraw 的，比不了），比的是造成这个缺陷的那条**规则**。
+    """
+    app, _pump = app_and_pump
+    bar = app.led_cli.master
+    assert str(bar.pack_info().get("side")) == "bottom", bar.pack_info()
+    order = list(app.root.pack_slaves())
+    assert order.index(bar) < order.index(app.nb), "底栏排在笔记本后面 ⇒ expand 会把它挤出去"

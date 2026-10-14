@@ -182,6 +182,8 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 
 ⑤ 那四个读数回答的是「这套仪表现在可信吗」，不是「这次优化成功了吗」——界面上把 `estimable=False`、`papers_differ`、被排除的崩溃臂这些**否定性**标记原样显示出来，字段名对着当场 JSON 抄（第一版凭记忆写了 `r`/`decision_agree`，界面印出三个 `None`）。
 
+界面这一层（2026-10-15 按竞品补齐，全部零调用、不新增判据）：③ 的 unified 拆成**两列并排着色**（`---`/`+++` 那两行不进视图，它们带宿主临时目录真路径）；⑤ 有**过滤**（原文留在 `_ledger_raw`，所以过滤永远是可回退的视图）与 run_id **一键跳回③**；① 顶部列 `{{占位符}}` 及行号，**只列不判**（`pm/quality.py` 里没有变量规则，也不在这加）；底栏有导出全部为 Markdown、深/浅主题（换肤不重建界面）、中止；快捷键 Alt+1..5 / Ctrl+Enter / Ctrl+S / Ctrl+L / F1；表头常驻 `v<版本> · <仓库路径>`。这一轮四个缺陷全是**看渲染结果**才发现的（底栏整条被挤出可视区、临时路径进界面、助手函数定义了没接线、过滤把 Δ 的口径说明筛掉），过程与判据见 `docs/iteration/competitor-analysis-prompt.md` §第四轮。
+
 `python run.py panel`（缺省只绑 `127.0.0.1:8765`，自动开浏览器；`--no-browser` 只起服务）。
 
 它是**同一批判据的另一张脸**，不是第二套判定：面板的三个 POST 端点全部 subprocess 打

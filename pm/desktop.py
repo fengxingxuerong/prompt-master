@@ -25,12 +25,16 @@ import tempfile
 import threading
 import time
 import tkinter as tk
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
+from pm import __version__ as PKG_VERSION
 from pm.cli.support import _result_exit_code
+from pm.cliforward import (
+    ROOT as REPO_ROOT,
+)
 from pm.cliforward import (
     ForwardError,
     TemplateNotFound,
@@ -52,6 +56,43 @@ OK = "#3fb27f"
 BAD = "#e05c5c"
 ACCENT = "#5b8cff"
 MONO = ("Consolas", 10)
+
+# 换肤靠改这几个模块级名字 + `_retheme()` 走一遍已建好的 widget。
+# 为什么不做成"重建整个界面"：那会把用户已经贴进去的正文一起丢掉。
+THEME = "dark"
+
+
+def apply_theme(name: str) -> str:
+    """切色板。改的是模块级那几个颜色名 —— 已建好的 widget 由 `_retheme()` 补一遍。"""
+    global THEME
+    pal = PALETTES.get(name) or PALETTES["dark"]
+    g = globals()
+    for k, v in pal.items():
+        g[k] = v
+    THEME = name
+    return name
+
+
+PALETTES: dict[str, dict[str, str]] = {
+    "dark": {
+        "BG": "#171a21",
+        "CARD": "#1f2430",
+        "INK": "#e6e9ef",
+        "MUTED": "#8b94a7",
+        "OK": "#3fb27f",
+        "BAD": "#e05c5c",
+        "ACCENT": "#5b8cff",
+    },
+    "light": {
+        "BG": "#f5f6f8",
+        "CARD": "#ffffff",
+        "INK": "#1a1d24",
+        "MUTED": "#6b7385",
+        "OK": "#1f8a5b",
+        "BAD": "#c0392b",
+        "ACCENT": "#2f6bd6",
+    },
+}
 
 # 实测量级（来源：docs/evaluation.md §三十·二十二 与 2026-10-13 r3 的 60 分钟 / 74 次调用）
 COST_NOTE = "一轮实测约 60 分钟 / 70~80 次真实调用"
@@ -296,6 +337,112 @@ def render_preflight(stdout: str, code: int) -> list[str]:
     return [head, "", *stdout.rstrip().splitlines()[-40:]]
 
 
+# ---------------------------------------------------------------------------
+# 下面四个是 UI 侧的纯文本处理：**不做任何判定**。
+# 判定只有一处来源（`run.py` 的 check/diff/…），这里只做"拆列、过滤、汇总、列举"。
+# ---------------------------------------------------------------------------
+def split_diff(unified: str) -> list[tuple[str, str, str]]:
+    """把 unified diff 拆成 (状态, 左行, 右行)，给并排视图与逐行着色用。
+
+    状态 ∈ {"hdr", "ctx", "add", "del"}。`---`/`+++` 那两行**不进视图**：它们带的是
+    宿主临时目录的真实路径（截图里露出过 `C:\\Users\\...\\Temp\\a.md`），而"改动前/改动后"
+    两个列头已经把这件事说完了。`@@` 归 hdr —— 那是 hunk 坐标，是有用的。
+    """
+    rows: list[tuple[str, str, str]] = []
+    raw = (unified or "").split("\n")
+    # 首尾的空行是 `"".split("\n") == [""]` 造出来的，不是 diff 的内容：留着会让空输入
+    # 也画出一行"上下文"，用户看到的就是一条不存在的相同行。
+    while raw and not raw[0]:
+        raw.pop(0)
+    while raw and not raw[-1]:
+        raw.pop()
+    for line in raw:
+        if line.startswith("---") or line.startswith("+++"):
+            continue
+        if line.startswith("@@"):
+            rows.append(("hdr", line, ""))
+        elif line.startswith("+"):
+            rows.append(("add", "", line[1:]))
+        elif line.startswith("-"):
+            rows.append(("del", line[1:], ""))
+        else:
+            rows.append(
+                (
+                    "ctx",
+                    line[1:] if line.startswith(" ") else line,
+                    line[1:] if line.startswith(" ") else line,
+                )
+            )
+    return rows
+
+
+def list_placeholders(text: str) -> list[tuple[int, str]]:
+    """列举 `{{变量}}` 占位符（行号, 名字）。
+
+    ⚠️ **只列不判**：`pm/quality.py` 里没有"变量未填"这条规则，判据不在这加。
+    列出来是因为竞品（prompt-optimizer / prompt-forge）都把变量当一等公民，
+    而一份带 `{{...}}` 的提示词直接喂给模型是最常见的自伤 —— 让人自己看见。
+    """
+    out: list[tuple[int, str]] = []
+    for i, line in enumerate((text or "").splitlines(), start=1):
+        rest = line
+        while True:
+            a = rest.find("{{")
+            if a < 0:
+                break
+            b = rest.find("}}", a + 2)
+            if b < 0:
+                break
+            name = rest[a + 2 : b].strip()
+            if name:
+                out.append((i, name))
+            rest = rest[b + 2 :]
+    return out
+
+
+def render_placeholders(text: str) -> list[str]:
+    """① 窗格顶部的占位符提示。**没有占位符就一行不出**，别制造噪音。"""
+    found = list_placeholders(text)
+    if not found:
+        return []
+    by_name: dict[str, list[int]] = {}
+    for line, name in found:
+        lines = by_name.setdefault(name, [])
+        if line not in lines:
+            lines.append(line)
+    body = "  ".join(
+        f"{name}→第 {'/'.join(str(x) for x in sorted(lines))} 行" for name, lines in by_name.items()
+    )
+    return [f"占位符（只列不判，填没填由你决定）：{body}", ""]
+
+
+def filter_lines(lines: list[str], needle: str) -> list[str]:
+    """⑤ 历史过滤：大小写不敏感的子串匹配；空串原样返回（不猜用户想筛什么）。"""
+    if not needle:
+        return lines
+    low = needle.lower()
+    return [ln for ln in lines if low in ln.lower()]
+
+
+def render_export(panes: dict[str, str], meta: dict[str, str]) -> list[str]:
+    """把各窗格汇成一份 Markdown —— 竞品都有的 export，这里不新增任何判断。"""
+    lines = ["# PromptMaster 桌面端读数", ""]
+    for k, v in meta.items():
+        lines.append(f"- {k}：{v}")
+    lines.append("")
+    for title, body in panes.items():
+        lines += [f"## {title}", "", body.strip() or "（空）", ""]
+    return lines
+
+
+def origin_label() -> str:
+    """底栏那句"读数来自哪"。整条路径在 780px 宽下会被裁掉尾巴（截图实测只剩 `projects\\pror`），
+    所以过长时保两端：盘符 + 仓库目录名。版本永远在最前 —— 它才是判据的代际。"""
+    path = str(REPO_ROOT)
+    short = path if len(path) <= 26 else f"{path[:2]}{os.sep}…{os.sep}{Path(path).name}"
+    return f"v{PKG_VERSION} · {short}"
+
+
 def run_available() -> bool:
     """能不能跑闭环：有 `PM_FAKE_BACKEND` 或有 Key。晚绑定现读，别缓存（Key 可以运行时补）。"""
     if (os.getenv("PM_FAKE_BACKEND") or "").strip():
@@ -314,6 +461,12 @@ class App:
         self.q: queue.Queue[tuple[str, str, list[str], str]] = queue.Queue()
         self.panes: dict[str, tk.Text] = {}
         self.last_run_id = ""
+        self.prev_run_id = ""
+        self.last_prompt = ""
+        self.prev_prompt = ""
+        self._diff_rows: list[tuple[str, str, str]] = []
+        self._pending_diff: list[tuple[str, str, str]] | None = None
+        self._ledger_raw: list[str] = []
         self.run_proc: Any = None  # ④那一轮的真子进程；非 None = 正在烧钱
         self.inflight = 0
         self.aborted = False
@@ -326,6 +479,7 @@ class App:
             root.tk.call("tk", "scaling", float(scale))
         self._style()
         self._header()
+        self._footer()  # 底栏先占位，见 `_footer` 里那条 `side="bottom"` 的注释
         nb = ttk.Notebook(root)
         nb.pack(fill="both", expand=True, padx=12, pady=(0, 6))
         self.nb: Any = nb  # typeshed 里 ttk.Notebook.select 无签名，标 Any 才不撞 strict
@@ -339,7 +493,6 @@ class App:
         self._tab_diff(nb)
         self._tab_run(nb)
         self._tab_ledger(nb)
-        self._footer()
         self._keys()
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._probe_async()
@@ -359,10 +512,10 @@ class App:
 
         for idx, key in enumerate(self.tab_keys, start=1):
             self.root.bind(f"<Alt-{idx}>", binder(key))
-        self.root.bind(
-            "<Control-Return>",
-            lambda _e: self._run_active_action(),
-        )
+        self.root.bind("<Control-Return>", lambda _e: self._run_active_action())
+        self.root.bind("<Control-s>", lambda _e: self.act_save_pane())
+        self.root.bind("<Control-l>", lambda _e: self.act_clear_pane())
+        self.root.bind("<F1>", lambda _e: self.act_help())
 
     def _run_active_action(self) -> None:
         try:
@@ -477,10 +630,18 @@ class App:
         ttk.Label(top, text="桌面面板 · 判据同源 run.py", style="Muted.TLabel").pack(
             side="left", padx=8
         )
+        # 常驻"这份读数出自哪份代码"：版本 + 仓库路径。同一份读数在两台机器上可能来自
+        # 不同代码，这是本产品一贯要暴露的东西。放表头而不是底栏 —— 底栏左右两组挤在一起
+        # 时它第一个被裁（截图实测只剩 `projects\pror`），而表头右侧一直是空的。
+        self.env_lbl = tk.Label(top, text=origin_label(), bg=BG, fg=MUTED, font=("Segoe UI", 8))
+        self.env_lbl.pack(side="right")
 
     def _footer(self) -> None:
         bar = ttk.Frame(self.root)
-        bar.pack(fill="x", padx=14, pady=(0, 10))
+        # `side="bottom"` + **先于笔记本 pack**：底部条原本在笔记本之后 pack，
+        # 而笔记本是 `expand=True` ⇒ 窗口一矮，整条底栏被挤出可视区（截图实测：
+        # 灯、导出、主题、帮助、版本号全都不在画面里，而单测照样绿，因为它直接调方法）。
+        bar.pack(side="bottom", fill="x", padx=14, pady=(0, 10))
         self.led_cli = tk.Label(bar, text="转发检测中…", bg=BG, fg=MUTED, font=("Segoe UI", 9))
         self.led_cli.pack(side="left")
         self.led_key = tk.Label(bar, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9))
@@ -488,6 +649,11 @@ class App:
         self.status_lbl = tk.Label(bar, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9))
         self.status_lbl.pack(side="left", padx=12)
         ttk.Button(bar, text="中止", width=6, command=self.act_abort).pack(side="right")
+        ttk.Button(bar, text="导出全部", width=9, command=self.act_export_all).pack(
+            side="right", padx=6
+        )
+        ttk.Button(bar, text="主题", width=6, command=self.act_theme).pack(side="right", padx=6)
+        ttk.Button(bar, text="帮助 F1", width=8, command=self.act_help).pack(side="right", padx=6)
         ttk.Button(bar, text="另存结果…", width=10, command=self.act_save_pane).pack(
             side="right", padx=6
         )
@@ -547,6 +713,10 @@ class App:
                 else:
                     self._status(label + " 完成", OK)
                 self._show(target, lines)
+                # 并排视图的绘制留到这里：主线程
+                if self._pending_diff is not None:
+                    self._paint_diff(self._pending_diff)
+                    self._pending_diff = None
         if not drained:
             self.root.after(120, self._drain)
         else:
@@ -599,7 +769,8 @@ class App:
         )
         ttk.Label(
             row,
-            text="零调用、不联网；回答「会不会出事」，不回答「能不能完成任务」",
+            # 原本这句 27 字，窄窗口下右端被裁成"…能不能完成任务"半截 —— 裁掉的字恰好是重点
+            text="零调用、不联网；只答「会不会出事」",
             style="Muted.TLabel",
         ).pack(side="right")
         self.panes["check"] = self._text_pane(tab, 12)
@@ -611,7 +782,10 @@ class App:
             return
         self._spawn(
             "体检",
-            lambda: render_check(run_cli_json(["check", "--prompt", text, "--json"])),
+            lambda: [
+                *render_placeholders(text),
+                *render_check(run_cli_json(["check", "--prompt", text, "--json"])),
+            ],
             target="check",
         )
 
@@ -695,8 +869,32 @@ class App:
         ttk.Button(row, text="把①的正文填到「前」", command=self.act_fill_a).pack(
             side="left", padx=6
         )
-        ttk.Label(row, text="零调用 · 只拦本次新引入", style="Muted.TLabel").pack(side="right")
-        self.panes["diff"] = self._text_pane(tab, 12)
+        ttk.Button(row, text="按 run_id 差分", command=self.act_diff_runs).pack(side="left", padx=6)
+        # 贴左而不是贴右：原本挤在行尾，最后一个字被窗口右边缘切掉半截
+        ttk.Label(row, text="零调用 · 只拦新引入", style="Muted.TLabel").pack(
+            side="left", padx=(12, 0)
+        )
+        r4 = ttk.Frame(tab)
+        r4.pack(fill="x", pady=(6, 0))
+        ttk.Label(r4, text="run A").pack(side="left")
+        self.diff_run_a = ttk.Entry(r4, width=16)
+        self.diff_run_a.pack(side="left", padx=4)
+        ttk.Label(r4, text="run B", style="Muted.TLabel").pack(side="left", padx=(8, 0))
+        self.diff_run_b = ttk.Entry(r4, width=16)
+        self.diff_run_b.pack(side="left", padx=4)
+        ttk.Label(r4, text="（④跑完会自动填进来）", style="Muted.TLabel").pack(side="left")
+        # 并排视图：竞品（promptfoo 的 side-by-side、forge 的 diff）第一眼的形状。
+        # 判据仍是 CLI 的 diff --json，这里只把 unified 拆成左右两列着色。
+        # 高度是量出来的：原本 9 行 + 摘要 7 行，在默认 660px 高的窗口里把摘要挤成了
+        # 半行（截图实测），改小之后两边都完整。
+        self.diff_view: Any = ttk.Treeview(tab, columns=("l", "r"), show="headings", height=6)
+        self.diff_view.heading("l", text="改动前")
+        self.diff_view.heading("r", text="改动后")
+        self.diff_view.column("l", width=330, anchor="w")
+        self.diff_view.column("r", width=330, anchor="w")
+        self.diff_view.pack(fill="x", pady=(8, 0))
+        self._diff_tags(self.diff_view)
+        self.panes["diff"] = self._text_pane(tab, 5)
 
     def act_fill_a(self) -> None:
         self._fill(self.in_a, self.in_check.get("1.0", "end").rstrip())
@@ -713,9 +911,39 @@ class App:
                 pa, pb = Path(d) / "a.md", Path(d) / "b.md"
                 pa.write_text(a, encoding="utf-8")
                 pb.write_text(b, encoding="utf-8")
-                return render_diff(run_cli_json(["diff", str(pa), str(pb), "--json"]))
+                return self._diff_work(run_cli_json(["diff", str(pa), str(pb), "--json"]))
 
         self._spawn("差分", work, target="diff")
+
+    def act_diff_runs(self) -> None:
+        """按两个 run_id 差分：`run.py diff <A> <B>` 本来就吃 run_id，界面别只给文件。"""
+        a, b = self.diff_run_a.get().strip(), self.diff_run_b.get().strip()
+        if not a or not b:
+            self._status("两个 run_id 都要填", BAD)
+            return
+        self._spawn(
+            "差分（run 对比）",
+            lambda: self._diff_work(run_cli_json(["diff", a, b, "--json"])),
+            target="diff",
+        )
+
+    def _diff_work(self, d: dict[str, Any]) -> list[str]:
+        """worker 线程里**只算不画**：算好并排行数据，交给主线程去刷 Treeview。
+
+        这条不是洁癖 —— 第一版在这里直接调 `diff_view.insert()`，实测抛
+        `RuntimeError: main thread is not in main loop`（上一轮加的"异常必须显示出来"
+        把它照了出来，否则界面只会停在"进行中…"）。
+        """
+        self._pending_diff = split_diff(str(d.get("unified") or ""))
+        return render_diff(d)
+
+    def _paint_diff(self, rows: list[tuple[str, str, str]]) -> None:
+        view = self.diff_view
+        for iid in view.get_children():
+            view.delete(iid)
+        for kind, left, right in rows:
+            view.insert("", "end", values=(left, right), tags=(kind,))
+        self._diff_rows = rows
 
     # ---- 标签④：闭环 ----
     def _tab_run(self, nb: ttk.Notebook) -> None:
@@ -781,7 +1009,14 @@ class App:
         )
         ttk.Button(r3, text="提交任务", command=self.act_run).pack(side="left")
         ttk.Button(r3, text="取报告", command=self.act_report).pack(side="left", padx=6)
-        self.panes["run"] = self._text_pane(tab, 8)
+        r4 = ttk.Frame(tab)
+        r4.pack(fill="x", pady=(6, 0))
+        ttk.Button(r4, text="取用交付提示词 → ①", command=self.act_take_prompt).pack(side="left")
+        ttk.Button(r4, text="把它填到③的「后」", command=self.act_prompt_to_diff_b).pack(
+            side="left", padx=6
+        )
+        ttk.Label(r4, text="跑完才有内容", style="Muted.TLabel").pack(side="left")
+        self.panes["run"] = self._text_pane(tab, 7)
 
     # ---- 标签⑤：账本与仪表（四个按钮全零调用） ----
     def _tab_ledger(self, nb: ttk.Notebook) -> None:
@@ -805,17 +1040,70 @@ class App:
         self.hist_n = ttk.Spinbox(row, from_=5, to=200, width=5)
         self.hist_n.set("40")
         self.hist_n.pack(side="left")
+        row2 = ttk.Frame(tab)
+        row2.pack(fill="x", pady=(8, 0))
+        ttk.Label(row2, text="过滤").pack(side="left")
+        self.hist_filter = ttk.Entry(row2, width=26)
+        self.hist_filter.pack(side="left", padx=6)
+        ttk.Button(row2, text="应用过滤", command=self.act_filter_ledger).pack(side="left")
+        ttk.Label(row2, text="取 run_id 进③").pack(side="left", padx=(14, 2))
+        self.ledger_run = ttk.Entry(row2, width=16)
+        self.ledger_run.pack(side="left", padx=4)
+        ttk.Button(row2, text="填入", command=self.act_run_to_diff).pack(side="left")
         self.in_libq = self._input(tab, 2)
         self.in_libq.pack(fill="x", pady=(8, 0))
-        self.panes["ledger"] = self._text_pane(tab, 14)
+        self.panes["ledger"] = self._text_pane(tab, 12)
+
+    def _remember(self, key: str, lines: list[str]) -> list[str]:
+        """留一份未过滤的原文：过滤永远是可回退的视图，不是覆盖。"""
+        if key == "ledger":
+            self._ledger_raw = lines
+        return lines
+
+    def act_filter_ledger(self) -> None:
+        """过滤当前窗格已有的行（纯文本操作：不重跑 CLI、更不改判据）。"""
+        if not self._ledger_raw:
+            self._status("先点一个按钮拿读数")
+            return
+        needle = self.hist_filter.get().strip()
+        if not needle:
+            self._show("ledger", self._ledger_raw)
+            self._status("已取消过滤", OK)
+            return
+        kept = filter_lines(self._ledger_raw, needle)
+        # 末行是给 Δ 的口径说明。子串过滤会把它一起筛掉 —— 而那正是最危险的读法：
+        # 满屏只剩分数，没有"Δ 不是更好的证据"这句。固定尾巴跟着过滤后的行重新贴上。
+        note = self._ledger_raw[-1]
+        tail = [] if note in kept else ["", note]
+        head = f"过滤「{needle}」：{len(kept)} 行（原文 {len(self._ledger_raw)} 行）"
+        self._show("ledger", [head, "", *(kept or ["（没有匹配的行）"]), *tail])
+        self._status(f"过滤后 {len(kept)} 行", OK)
+
+    def act_run_to_diff(self) -> None:
+        """历史里看中的那一轮直接进③当"改动前"——竞品都有这步跳转，原来要手抄。"""
+        rid = self.ledger_run.get().strip()
+        if not rid:
+            self._status("先填一个 run_id", BAD)
+            return
+        self.nb.select(2)
+        self._set_entry(self.diff_run_a, rid)
+        self._status(f"run {rid} 已填进③的「前」", OK)
 
     def act_history(self) -> None:
         argv = ["history", "--json", "--last", self._hist_last()]
-        self._spawn("历史与 Δ", lambda: render_history(run_cli_json(argv)), target="ledger")
+        self._spawn(
+            "历史与 Δ",
+            lambda: self._remember("ledger", render_history(run_cli_json(argv))),
+            target="ledger",
+        )
 
     def act_calibrate(self) -> None:
         argv = ["calibrate", "--aggregate", "--json"]
-        self._spawn("评委仪表", lambda: render_calibrate(run_cli_json(argv)), target="ledger")
+        self._spawn(
+            "评委仪表",
+            lambda: self._remember("ledger", render_calibrate(run_cli_json(argv))),
+            target="ledger",
+        )
 
     def act_library(self) -> None:
         text = self.in_libq.get("1.0", "end").strip()
@@ -823,11 +1111,17 @@ class App:
             self._status("先在输入框写一句任务描述", BAD)
             return
         argv = ["library", "--recommend", "--task-text", text, "--json"]
-        self._spawn("资产库检索", lambda: render_library(run_cli_json(argv)), target="ledger")
+        self._spawn(
+            "资产库检索",
+            lambda: self._remember("ledger", render_library(run_cli_json(argv))),
+            target="ledger",
+        )
 
     def act_gate(self) -> None:
         self._spawn(
-            "改动门禁", lambda: render_gate(run_cli_json(["gate", "--json"])), target="ledger"
+            "改动门禁",
+            lambda: self._remember("ledger", render_gate(run_cli_json(["gate", "--json"]))),
+            target="ledger",
         )
 
     def _hist_last(self) -> str:
@@ -941,7 +1235,10 @@ class App:
                 self.run_proc = proc  # 只存句柄，不碰 widget
 
             d = run_cli_json_live(argv, register, timeout=LONG_RUN_TIMEOUT)
+            # 只存普通变量，不碰 widget（线程安全那条）
+            self.prev_run_id, self.prev_prompt = self.last_run_id, self.last_prompt
             self.last_run_id = str(d.get("run_id") or "")
+            self.last_prompt = str(d.get("best_prompt") or "")
             return render_run(d)
 
         self._spawn("优化闭环", work, target="run")
@@ -959,6 +1256,44 @@ class App:
             lambda: render_preflight(*run_cli_text(["--preflight"], timeout=PREFLIGHT_TIMEOUT)),
             target="run",
         )
+
+    @staticmethod
+    def _set_entry(w: Any, text: str) -> None:
+        w.delete(0, "end")
+        w.insert(0, text)
+
+    def _diff_tags(self, view: Any) -> None:
+        """并排视图的行色：加=绿、删=红、头=灰。只是着色，不改内容。"""
+        view.tag_configure(
+            "add", background="#123126" if THEME == "dark" else "#e6f6ee", foreground=OK
+        )
+        view.tag_configure(
+            "del", background="#3a1d1d" if THEME == "dark" else "#fdeaea", foreground=BAD
+        )
+        view.tag_configure("hdr", foreground=MUTED)
+        view.tag_configure("ctx", background=CARD, foreground=INK)
+
+    def act_take_prompt(self) -> None:
+        """把这一轮交付的提示词填回①：竞品都有"取用结果"这一步，我们原来只能手抄。"""
+        if not self.last_prompt:
+            self._status("还没有交付的提示词（先跑一轮，或从⑤取历史）", BAD)
+            return
+        self.nb.select(0)
+        self._fill(self.in_check, self.last_prompt)
+        self._status(f"已取用 {len(self.last_prompt)} 字到①", OK)
+
+    def act_prompt_to_diff_b(self) -> None:
+        if not self.last_prompt:
+            self._status("还没有交付的提示词", BAD)
+            return
+        self.nb.select(2)
+        self._fill(self.in_b, self.last_prompt)
+        if self.prev_prompt:
+            self._fill(self.in_a, self.prev_prompt)
+        if self.prev_run_id and self.last_run_id:
+            self._set_entry(self.diff_run_a, self.prev_run_id)
+            self._set_entry(self.diff_run_b, self.last_run_id)
+        self._status("已填③：点「差分」看这一改新引入了什么", OK)
 
     def act_abort(self) -> None:
         """中止④那一轮：子进程还在打真端点，每分钟都在花钱。"""
@@ -978,6 +1313,79 @@ class App:
             return self.tab_keys[int(self.nb.index("current"))]
         except (TypeError, ValueError, IndexError):
             return "check"
+
+    def act_theme(self) -> None:
+        """深/浅切换。**不重建界面** —— 重建会把用户贴进去的正文一起丢掉。"""
+        apply_theme("light" if THEME == "dark" else "dark")
+        self._retheme()
+        self._status(f"主题：{THEME}", OK)
+
+    def _retheme(self) -> None:
+        self._style()
+        for w in self._descendants(self.root):
+            try:
+                cls = w.winfo_class()
+            except Exception:  # noqa: BLE001 - 窗口正在销毁时问类名会抛
+                continue
+            if cls == "Text":
+                w.configure(bg=CARD, fg=INK, insertbackground=INK)
+            elif cls == "Label":
+                # 只换底色：前景色留给各条自己的语义（绿=可用、红=坏了），别在换肤时抹平
+                w.configure(bg=BG)
+            elif cls == "Frame":
+                w.configure(bg=BG)
+        view = getattr(self, "diff_view", None)
+        if view is not None:
+            self._diff_tags(view)
+
+    @staticmethod
+    def _descendants(w: Any) -> Iterator[Any]:
+        for c in w.winfo_children():
+            yield from App._descendants(c)
+            yield c
+
+    def act_export_all(self) -> None:
+        """把四个窗格汇成一份 Markdown 存盘（竞品都有的 export，这里不新增判断）。"""
+        panes = {
+            "① 提示词体检": str(self.panes["check"].get("1.0", "end")),
+            "② 考卷有几票": str(self.panes["cases"].get("1.0", "end")),
+            "③ 两版差分": str(self.panes["diff"].get("1.0", "end")),
+            "④ 优化闭环": str(self.panes["run"].get("1.0", "end")),
+            "⑤ 账本与仪表": str(self.panes["ledger"].get("1.0", "end")),
+        }
+        meta = {
+            "版本": PKG_VERSION,
+            "仓库": str(REPO_ROOT),
+            "最近 run_id": self.last_run_id or "（无）",
+            "导出时间": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        path = filedialog.asksaveasfilename(
+            title="导出全部读数",
+            defaultextension=".md",
+            filetypes=[("Markdown", "*.md"), ("文本", "*.txt")],
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text("\n".join(render_export(panes, meta)) + "\n", encoding="utf-8")
+        except OSError as e:
+            self._status(f"写不出去：{e}", BAD)
+            return
+        self._status(f"已导出 {path}", OK)
+
+    def act_help(self) -> None:
+        messagebox.showinfo(
+            "PromptMaster 桌面面板",
+            "Alt+1..5 切标签 · Ctrl+Enter 跑当前标签 · Ctrl+S 另存窗格 · Ctrl+L 清空窗格\n\n"
+            "①②③ 零调用不花钱；④ 要 Key，提交前会先报价。\n"
+            f"所有判据都来自同一份 CLI（{REPO_ROOT / 'run.py'}），界面不另立一套。\n\n"
+            + HONESTY_NOTE,
+        )
+
+    def act_clear_pane(self) -> None:
+        key = self._current_pane_key()
+        self._show(key, [])
+        self._status(f"已清空 {key}")
 
     def act_copy_pane(self) -> None:
         """把当前窗格的文本塞进剪贴板：结果常常要贴进别处，选中文本复制太慢。"""

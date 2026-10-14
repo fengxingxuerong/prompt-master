@@ -61,7 +61,7 @@ python run.py desktop                           # 原生桌面窗口（Tkinter �
 | 事实断言 | `--cases-file cases.json --assert-mode rule` | 你给的 `expected` 有一票否决权；`rule` 模式交评委逐条核验，`custom:<名>` 可挂你自己的断言函数 |
 | 资产与记忆 | `run.py library` / `run.py history` | 达标提示词可按任务相似度检索、导出；history 给 Δ 与显著性 |
 | 评委可信度 | `run.py calibrate [--repeat N]` | 锚点人工分 vs 评委分（MAE/偏置/排序一致性）+ 评委自我复现性极差 |
-| 插件面板 / 桌面窗口 | `run.py desktop`（Tkinter 原生窗口）或 `run.py panel`（浏览器小窗口，只绑 127.0.0.1:8765） | 把零调用能力做成能点开就用的形状，⑤ 还接上**账本与仪表**（历史 Δ / 评委聚合读数 / 资产库检索 / 改动门禁，四个按钮全零调用）。④闭环接满参数面：原稿模式、用例集（可选②的模板或粘贴内容）、断言模式、采样、快速档，**提交前先跑 `--dry-run` 把预估区间写进确认框**；判据仍由窗口 subprocess 打同一条 CLI 产生 |
+| 插件面板 / 桌面窗口 | `run.py desktop`（Tkinter 原生窗口）或 `run.py panel`（浏览器小窗口，只绑 127.0.0.1:8765） | 把零调用能力做成能点开就用的形状，⑤ 还接上**账本与仪表**（历史 Δ / 评委聚合读数 / 资产库检索 / 改动门禁，四个按钮全零调用）。④闭环接满参数面：原稿模式、用例集（可选②的模板或粘贴内容）、断言模式、采样、快速档，**提交前先跑 `--dry-run` 把预估区间写进确认框**；判据仍由窗口 subprocess 打同一条 CLI 产生。界面这一层按热门竞品补齐的是**到达速度**（全部零调用、不新增判据）：③ 两版**并排着色**、⑤ 历史**过滤** + run_id 一键跳回③、① 顶部列 `{{占位符}}`（**只列不判**）、导出全部读数为 Markdown、深/浅主题、Alt+1..5 与 Ctrl+Enter/Ctrl+S/Ctrl+L/F1，底栏常驻版本与仓库路径 |
 
 MCP 接入（13 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
 
@@ -120,7 +120,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1827 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1848 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）
