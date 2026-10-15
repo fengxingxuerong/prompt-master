@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -185,6 +186,66 @@ def test_emit_json_result_fields(capsys: pytest.CaptureFixture[str]) -> None:
     cli_support.emit_json_result({"run_id": "r10"}, Path("L"), Path("R"))
     p2 = json.loads(capsys.readouterr().out)
     assert p2["aggregate"] is None and p2["status"] is None and p2["n_versions"] == 0
+
+
+def _degraded_run_state() -> dict[str, Any]:
+    """照 2026-10-15 真端点那一轮 `5253290b3fb5` 的形状造一份状态。"""
+    return {
+        "run_id": "r-degraded",
+        "status": "early_stopped",
+        "iteration": 0,
+        "max_iterations": 2,
+        "llm_calls": 56,
+        "prompt": "交付稿",
+        "prompt_versions": [1],
+        "aggregate": {"avg_score": 7.25, "n_cases": 4},
+        "baseline_aggregate": {"avg_score": 6.51},
+        "pairwise": {"verdict": "better", "votes": {"better": 2, "worse": 1, "tie": 1}},
+        "judge_health": {
+            "panel_size": 2,
+            "models": {"evaluator": "a@0.1", "evaluator_b": "b@0.1", "arbiter": "c@0.0"},
+        },
+        "evaluations": [{"score": 7.0} for _ in range(4)],
+        "errors": [f"evaluate#{i}[evaluator_b]: 墙钟预算 600s 用尽" for i in range(4)],
+    }
+
+
+def test_json_channel_carries_every_column_the_report_shows(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """报告里能读到的结论列，`--json` 必须也带着 —— 桌面端与面板只吃这份 stdout。
+
+    实测缺陷（真端点一轮）：报告写着基线 6.51 / Δ +0.74 / 盲评 2-1-1 / 4 例评委席降级，
+    而 stdout 投影里这四个键一个都没有 ⇒ ④窗格显示"基线 — · Δ — · 盲评 —"，
+    半个评委席的读数在界面上与双评委共识长得一模一样。
+    """
+    from pm import report as pm_report
+
+    state = _degraded_run_state()
+    cli_support.emit_json_result(state, Path("L"), Path("R"))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["baseline_aggregate"]["avg_score"] == 6.51
+    assert payload["pairwise"]["verdict"] == "better"
+    # JSON 的键过一遍 stdout 会变成字符串 —— 断言按序列化后的真实形状来
+    assert sorted(payload["judge_seat_absent"]) == ["0", "1", "2", "3"]
+    assert payload["judge_seat_absent"]["0"] == ["evaluator_b"]
+
+    # 差分：同一份状态喂给报告，两边必须数出同一个降级例数（共用一份推导，不是各写一遍）
+    report = "\n".join(pm_report._judge_source_lines(state))
+    m = re.search(r"评委席降级：(\d+)/(\d+)", report)
+    assert m, report
+    assert int(m.group(1)) == len(payload["judge_seat_absent"])
+    assert int(m.group(2)) == payload["aggregate"]["n_cases"]
+
+
+def test_single_judge_config_is_not_reported_as_degradation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`PM_JUDGES=1` 是配置，不是故障：panel_size<=1 时不许报降级（也不能反过来）。"""
+    state = _degraded_run_state()
+    state["judge_health"] = {"panel_size": 1, "models": {"evaluator": "a@0.1"}}
+    cli_support.emit_json_result(state, Path("L"), Path("R"))
+    assert json.loads(capsys.readouterr().out)["judge_seat_absent"] == {}
 
 
 @pytest.mark.parametrize(

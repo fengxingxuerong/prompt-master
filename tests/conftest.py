@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os as _os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -28,6 +29,43 @@ _os.environ.pop("PM_JUDGE_JITTER", None)
 from pm import schemas as _pm_schemas
 
 _pm_schemas.JUDGE_JITTER = 0.0
+
+
+@pytest.fixture(autouse=True, scope="session")
+def seal_log_dir_for_the_whole_session(tmp_path_factory: pytest.TempPathFactory) -> Any:
+    """整个会话期间把 `PM_LOG_DIR` 钉在 tmp 下 —— 单条用例撤销 monkeypatch 之后的**兜底值**必须是 tmp。
+
+    真实污染（2026-10-15 查 `run.py history` 时撞见）：`test_task_table_is_bounded` 只等队尾
+    `run-5` 终态就返回，`run-3`/`run-4` 的工作线程还在跑；用例一结束 `seal_calibration_ledger`
+    的 monkeypatch 把 `PM_LOG_DIR` 撤成"未设"，那两个线程随后落盘就写进了**仓库 `logs/`**
+    （`run_run-4.json` mtime 01:38 正对上那趟 pre-commit 的 pytest，`task: "t"` 与 submit 参数逐字一致）。
+    后果不是多了几个脏文件，而是多了几行脏读数：`history` 会把它们当成真运行混进"最近 N 轮"
+    与 Δ 统计，而 `logs/` 在 `.gitignore` 里 ⇒ 那条 `git diff --exit-code -- releases/*/data/*` 永远看不见。
+
+    为什么不能只修那一条用例：失败形式是"某个线程活得比它的 monkeypatch 久"，
+    下一个用 worker 线程的人一样会踩。封在会话级，忘了等也只是写进 tmp。
+    """
+    session_dir = tmp_path_factory.mktemp("pm-log-seal")
+    guard = pytest.MonkeyPatch()
+    guard.setenv("PM_LOG_DIR", str(session_dir))
+    try:
+        yield
+    finally:
+        guard.undo()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def fail_if_the_suite_touched_the_operating_logs() -> Any:
+    """会话结束时验一件事：仓库 `logs/` 里没多出运行产物。上面那条密封漏了就这里红。"""
+    live = Path(__file__).resolve().parents[1] / "logs"
+    before = {p.name for p in live.glob("run_*.json")} if live.is_dir() else set()
+    yield
+    after = {p.name for p in live.glob("run_*.json")} if live.is_dir() else set()
+    leaked = sorted(after - before)
+    assert not leaked, (
+        f"测试会话往运营目录 {live} 写了 {leaked} —— 说明某条用例的写路径没被 "
+        "`PM_LOG_DIR` 管住（或被线程带出了会话密封）。这些文件会进 `run.py history` 的读数。"
+    )
 
 
 @pytest.fixture(autouse=True)

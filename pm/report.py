@@ -557,27 +557,19 @@ def _judge_source_lines(state: ReportState) -> list[str]:
     #   · 双评委但某位失败：同样落到 len==1，同样不写
     # 真实归档实测（run_13f9a99096e9 的 case#2/#3 与 run_88dcfd4d9c29 的四条）
     # 都是 `len(judge_scores)==0`。只看 judge_scores 就把配置当故障报（或反之）。
-    panel = int(jh.get("panel_size") or 0)
-    if panel > 1 and evals:
-        absent: dict[int, list[str]] = {}
-        for e in state.get("errors") or []:
-            m = _FAILED_JUDGE_RE.match(str(e))
-            if m:
-                absent.setdefault(int(m.group("idx")), []).append(m.group("seat"))
-        if absent:
-            idxs = "、".join(
-                f"case#{i}({'、'.join(sorted(set(s)))})" for i, s in sorted(absent.items())
-            )
-            seats = {r for r in (jh.get("models") or {}) if r != "arbiter"}
-            gone = sorted({r for s in absent.values() for r in s})
-            # 缺席的评委要能从配置名单里对上号；对不上（配置读失败等）就说"有评委"，
-            # 不猜是哪一位——披露文本本身不许编。
-            missing = "、".join(gone) if set(gone) <= seats else "有评委"
-            lines.append(
-                f"- ⚠️ 评委席降级：{len(absent)}/{len(evals)} 例有评委失败缺席"
-                f"（{missing}：{idxs}）——这些分数**不是**双评委共识；"
-                "两臂的评委席完整度若不同则 Δ 不可比。缺席原因见「运行期错误」。"
-            )
+    absent = judge_seat_absent(state)
+    if absent and evals:
+        idxs = "、".join(f"case#{i}({'、'.join(s)})" for i, s in sorted(absent.items()))
+        seats = {r for r in (jh.get("models") or {}) if r != "arbiter"}
+        gone = sorted({r for s in absent.values() for r in s})
+        # 缺席的评委要能从配置名单里对上号；对不上（配置读失败等）就说"有评委"，
+        # 不猜是哪一位——披露文本本身不许编。
+        missing = "、".join(gone) if set(gone) <= seats else "有评委"
+        lines.append(
+            f"- ⚠️ 评委席降级：{len(absent)}/{len(evals)} 例有评委失败缺席"
+            f"（{missing}：{idxs}）——这些分数**不是**双评委共识；"
+            "两臂的评委席完整度若不同则 Δ 不可比。缺席原因见「运行期错误」。"
+        )
     return lines
 
 
@@ -585,6 +577,25 @@ def _judge_source_lines(state: ReportState) -> list[str]:
 # （pm/nodes/judge.py 的 errors.append 格式）。这是"某位评委真的没出分"的唯一
 # 结构化痕迹——judge_scores 为空既可能是配置单评委，也可能是失败，两义。
 _FAILED_JUDGE_RE = re.compile(r"evaluate#(?P<idx>\d+)\[(?P<seat>[^\]]+)\]")
+
+
+def judge_seat_absent(state: ReportState) -> dict[int, list[str]]:
+    """哪些用例缺了哪位评委：`{用例序号: [席位…]}`，按序号升序。
+
+    报告与 `run.py --json` **共用这一份推导**（2026-10-15 实测：真端点一轮里
+    `evaluator_b` 6 次超时、4/4 例降级，报告写了这句话，而机器出口的 33 个键里
+    根本没有它 ⇒ 桌面端④把"单评委共识"当双评委共识显示）。判据仍用失败证据，
+    不用 `len(judge_scores) < panel`——理由见上面那段注释。
+    """
+    panel = int((state.get("judge_health") or {}).get("panel_size") or 0)
+    if panel <= 1:
+        return {}
+    absent: dict[int, list[str]] = {}
+    for e in state.get("errors") or []:
+        m = _FAILED_JUDGE_RE.match(str(e))
+        if m:
+            absent.setdefault(int(m.group("idx")), []).append(m.group("seat"))
+    return {i: sorted(set(seats)) for i, seats in sorted(absent.items())}
 
 
 def _revision_delta_lines(state: ReportState) -> list[str]:

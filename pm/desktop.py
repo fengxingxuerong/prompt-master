@@ -205,6 +205,18 @@ def render_run(d: dict[str, Any]) -> list[str]:
     ]
     if d.get("early_stop_reason"):
         lines.append(f"早停：{d['early_stop_reason']}")
+    # 评委席降级：这一行不许省。2026-10-15 真端点一轮里 4/4 例只剩单评委，
+    # 而④窗格当时连"基线/Δ/盲评"都是 —（`--json` 没带这几个键），于是"半个评委席
+    # 的读数"在界面上和双评委共识长得一模一样。分母取不到就不编一个分母。
+    absent = d.get("judge_seat_absent") or {}
+    if absent:
+        seats = "、".join(sorted({s for v in absent.values() for s in v}))
+        n_cases = agg.get("n_cases")
+        where = f" {len(absent)}/{n_cases} 例" if n_cases else f" {len(absent)} 例"
+        lines.append(
+            f"⚠️ 评委席降级{where}（{seats} 缺席）——这些分数不是双评委共识；"
+            "两臂完整度不同则 Δ 不可比"
+        )
     if d.get("report_path"):
         lines.append(f"交付报告：{d['report_path']}")
     lines += ["", HONESTY_NOTE]

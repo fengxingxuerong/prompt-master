@@ -1389,6 +1389,46 @@ def test_every_desktop_helper_is_called_from_inside_the_window() -> None:
     assert not dead, f"定义了却没接线的助手：{dead}"
 
 
+def test_render_run_shows_baseline_delta_and_seat_degradation() -> None:
+    """④窗格不许再把有数的列显示成"—"。
+
+    2026-10-15 真端点一轮：报告写着基线 6.51 / Δ +0.74 / 盲评 better / 4 例降级，
+    而 `--json` 投影没带这几个键 ⇒ 桌面端打的是"基线 — · Δ — · 盲评 —"。
+    修的是出口，这条钉的是界面真的把修好的键用上了（缺一环都会回到 —）。
+    """
+    payload = {
+        "run_id": "5253290b3fb5",
+        "status": "early_stopped",
+        "iterations": 0,
+        "max_iterations": 2,
+        "llm_calls": 56,
+        "aggregate": {"avg_score": 7.25, "n_cases": 4},
+        "baseline_aggregate": {"avg_score": 6.51},
+        "pairwise": {"verdict": "better", "votes": {"better": 2, "worse": 1, "tie": 1}},
+        "judge_seat_absent": {str(i): ["evaluator_b"] for i in range(4)},
+        "report_path": "logs/report_5253290b3fb5.md",
+    }
+    out = _text(desktop.render_run(payload))
+    assert "基线 6.51 → 优化后 7.25 · Δ 0.74" in out, out
+    assert "盲评 better" in out and '"better": 2' in out, out
+    assert "评委席降级 4/4 例" in out and "evaluator_b" in out, out
+    assert "不是双评委共识" in out, "降级必须带口径，不能只报一个数"
+
+
+def test_no_degradation_line_when_the_panel_is_intact() -> None:
+    """席位完整时不许冒出降级行 —— 满屏警告等于没有警告。"""
+    payload = {
+        "status": "passed",
+        "aggregate": {"avg_score": 9.0, "n_cases": 4},
+        "baseline_aggregate": {"avg_score": 8.0},
+        "pairwise": {"verdict": "better", "votes": {"better": 4}},
+        "judge_seat_absent": {},
+    }
+    out = _text(desktop.render_run(payload))
+    assert "评委席降级" not in out, out
+    assert "Δ 1.0" in out, out
+
+
 def test_footer_is_packed_before_the_notebook(
     app_and_pump: tuple[desktop.App, Any],
 ) -> None:

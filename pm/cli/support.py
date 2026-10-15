@@ -14,6 +14,7 @@ from typing import Any
 from pm.paths import (
     log_dir as log_dir,  # re-export：唯一实现在 pm/paths.py（schemas / calibration 局部导入走这里）
 )
+from pm.report import judge_seat_absent
 from pm.state import SEED_PROMPT_MAX_CHARS
 
 # 原 run.py 同款：仓库根/logs（拆包后 __file__ 深了两层，改用 parents[2] 回到仓库根）
@@ -229,6 +230,14 @@ def emit_json_result(final: dict[str, Any], log_path: Path, report_path: Path) -
         "run_id": final.get("run_id"),
         "status": final.get("status"),
         "aggregate": final.get("aggregate"),
+        # 下面四个是"结论到底站不站得住"的那几列，2026-10-15 实测它们**只在报告里、
+        # 不在机器出口里**：真端点一轮报告写着基线 6.51 / Δ +0.74 / 盲评 2-1-1 /
+        # 4 例降级，而 `--json` 的 stdout 里一个字段都没有 ⇒ 桌面端与面板只能显示"—"，
+        # 把单评委共识当双评委共识读。判据不在这产生，只是把同一份推导搬过来。
+        "baseline_aggregate": final.get("baseline_aggregate"),
+        "pairwise": final.get("pairwise"),
+        "judge_health": final.get("judge_health"),
+        "judge_seat_absent": judge_seat_absent(final),
         "iterations": final.get("iteration", 0),
         "max_iterations": final.get("max_iterations"),
         "llm_calls": final.get("llm_calls", 0),

@@ -32,7 +32,12 @@ prompt-master --json --task "..."                          # `pip install .` 之
 
 ```bash
 python run.py --task "..." --fast --json
-# stdout = 一个 JSON：run_id / status / aggregate / best_prompt / report_path / errors ...
+# stdout = 一个 JSON：run_id / status / aggregate / baseline_aggregate / pairwise /
+#            judge_health / judge_seat_absent / best_prompt / report_path / errors ...
+# ⚠️ 基线、盲评与"评委席降级"必须在机器出口里（2026-10-15 实测它们只在报告里，
+#    于是桌面端④把"半个评委席"显示成"—"，与双评委共识长得一样）：
+#    tests/test_cli_units.py::test_json_channel_carries_every_column_the_report_shows
+#    拿同一份状态对差分——报告数出几例降级，JSON 就必须带几例。
 # 日志在 stderr；退出码见上表
 ```
 
