@@ -132,12 +132,12 @@ _LOCAL_ONLY_CI_GATES = {
         "窗口层用例本来就在跑，塞进 commit 钩子只会每次提交多花几秒去问一个已知答案。",
         "side": "ci",
     },
-    "xvfb-run": {
-        "why": "它不是第二条门禁，而是**同一条 pytest 门禁在 Linux 上的运行条件**："
-        "ubuntu runner 没有 X，`tests/test_desktop.py` 的窗口层整层 `pytest.skip`，"
-        "实测把全局覆盖率从 96.99% 压到 89.66%（低于 92 地板）——红的原因是「没跑」，"
-        "不是代码坏了。"
-        "本地钩子在真有显示器的机器上执行这些用例，不需要这层包装，所以本地不跑它不算缺口。",
+    "ci_pytest": {
+        "why": "**同一条 pytest 门禁的 CI 侧包装**（xvfb 在脚本里，不在 workflow 行上）："
+        "ubuntu 没有 X，`tests/test_desktop.py` 的窗口层会整层 `pytest.skip`，实测把全局覆盖率"
+        "从 96.99% 压到 89.66%（低于 92 地板）；包装还把失败用例名发到 annotation——日志正文"
+        "要登录才读得到。本地钩子在真有显示器的机器上执行这些用例，不需要这层包装，"
+        "所以本地不跑它不算缺口。",
         "side": "ci",
     },
     "--fail-under=82": {

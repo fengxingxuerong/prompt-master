@@ -200,6 +200,13 @@ _ALLOWED_JOB_DIFFERENCES: dict[str, tuple[str, str]] = {
         "解释器有没有 tkinter、xvfb 下能不能真建窗写进 job summary 与 annotation（匿名可读）。"
         "windows 侧不需要它——那边有显示器、用例本来就真跑着。",
     ),
+    "ci_pytest": (
+        "linux",
+        "**同一条 pytest 门禁的 CI 侧包装**（xvfb 现在在脚本里，不在 workflow 行上）："
+        "跑完把失败用例名与覆盖率地板逐条发到 annotation。日志正文要登录才读得到（匿名 403），"
+        "没有这层包装，「CI 为什么红」在没有登录态的机器上只能靠猜——上一轮就是这么猜错的。"
+        "判据、用例集合、退出码都不变。",
+    ),
     "pytest tests/ -q": (
         "both",
         "**同一条门禁、不同参数**：linux 侧带 --cov=pm --cov-report=term-missing "

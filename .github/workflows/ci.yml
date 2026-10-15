@@ -60,7 +60,7 @@ jobs:
           PM_EVALUATOR_B_BASE_URL: http://127.0.0.1:9/v1
           PM_ARBITER_BASE_URL: http://127.0.0.1:9/v1
           PM_API_KEY: sk-ci-has-no-real-key
-        run: xvfb-run -a python -m pytest tests/ -q --cov=pm --cov-report=term-missing
+        run: bash scripts/ci_pytest.sh tests/ -q --cov=pm --cov-report=term-missing
       - name: 提示词改动回归门禁 —— 只拦本次「新引入」的规则失败模式
         # 为什么门禁判据是「增量」而不是「绝对」：`pm/quality.py` 的规则是给
         # 「交付给目标模型的提示词」设计的，而 `pm/prompts.py` 里 17 个节点提示词

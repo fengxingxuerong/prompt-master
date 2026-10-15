@@ -26,7 +26,7 @@
 ruff check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
 ruff format --check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
 mypy pm/ run.py run_server.py eval_prompts.py
-xvfb-run -a python -m pytest tests/ -q --cov=pm --cov-report=term-missing     # 覆盖率地板见 pyproject；Linux 侧必须带 xvfb-run，否则桌面窗口层整层 skip（实测全局 96.99%→89.66%，压穿 92 地板）。本机有显示器就不用加
+bash scripts/ci_pytest.sh tests/ -q --cov=pm --cov-report=term-missing     # 覆盖率地板见 pyproject；Linux 侧必须带 xvfb-run，否则桌面窗口层整层 skip（实测全局 96.99%→89.66%，压穿 92 地板）。本机有显示器就不用加
 # 复杂度也在这条 pytest 里：tests/test_complexity_ratchet.py 用 ruff 自己的 mccabe 计数
 # 逐函数比对台账 tests/complexity_budget.json —— 台账必须与实测**逐字相等**：
 # 新长出来的复杂函数要显式登记（并说明为什么先留着），拆小的收益必须当场回收进台账。
