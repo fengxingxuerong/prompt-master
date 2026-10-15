@@ -1034,6 +1034,23 @@ def test_a_crash_inside_the_worker_shows_up_instead_of_hanging_forever(
     assert "失败" in str(app.status_lbl.cget("text"))
 
 
+def _with_mapped_window(app: desktop.App, pump: Any, body: Any) -> None:
+    """在**映射过**的窗口上发合成键事件。
+
+    共享测试根是 `withdraw()` 的（不闪真窗口）。Windows 上 `event_generate` 照样派发到
+    root 绑定，X11 却会把发给未映射窗口的合成键事件直接丢掉 —— CI（ubuntu + xvfb）实测
+    两条键盘用例 `seen == []`、`fake.calls == []`，就是这个形状。
+    所以这里临时 deiconify、跑完再收回去；不改回"直接调函数"，那样就不再验键盘路径了。
+    """
+    app.root.deiconify()
+    pump(0.4)
+    try:
+        body()
+    finally:
+        app.root.withdraw()
+        pump(0.2)
+
+
 def test_keyboard_shortcuts_switch_tabs_and_fire_the_current_action(
     app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1041,13 +1058,17 @@ def test_keyboard_shortcuts_switch_tabs_and_fire_the_current_action(
     app, pump = app_and_pump
     fake = _FakeForward(GATE_PAYLOAD)
     monkeypatch.setattr(desktop, "run_cli_json", fake)
-    app.root.event_generate("<Alt-5>")
-    pump(2.0, lambda: int(app.nb.index("current")) == 4)
-    assert int(app.nb.index("current")) == 4, "Alt+5 没切到⑤"
-    app.root.event_generate("<Control-Return>")
-    pump(3.0, lambda: bool(fake.calls))
-    # ⑤ 上没"唯一主动作"，Ctrl+Enter 约定跑第一个按钮（历史与 Δ）
-    assert fake.calls and fake.calls[0][0] == "history", f"Ctrl+Enter 打错了命令：{fake.calls}"
+
+    def go() -> None:
+        app.root.event_generate("<Alt-5>")
+        pump(2.0, lambda: int(app.nb.index("current")) == 4)
+        assert int(app.nb.index("current")) == 4, "Alt+5 没切到⑤"
+        app.root.event_generate("<Control-Return>")
+        pump(3.0, lambda: bool(fake.calls))
+        # ⑤ 上没"唯一主动作"，Ctrl+Enter 约定跑第一个按钮（历史与 Δ）
+        assert fake.calls and fake.calls[0][0] == "history", f"Ctrl+Enter 打错了命令：{fake.calls}"
+
+    _with_mapped_window(app, pump, go)
 
 
 def test_closing_without_a_run_cleans_the_temp_dir(
@@ -1301,11 +1322,15 @@ def test_shortcuts_are_wired(
     monkeypatch.setattr(app, "act_save_pane", lambda: seen.append("save"))
     monkeypatch.setattr(app, "act_help", lambda: seen.append("help"))
     monkeypatch.setattr(app, "act_clear_pane", lambda: seen.append("clear"))
-    app.root.event_generate("<Control-s>")
-    app.root.event_generate("<F1>")
-    app.root.event_generate("<Control-l>")
-    pump(3.0, lambda: len(seen) == 3)
-    assert seen == ["save", "help", "clear"], seen
+
+    def go() -> None:
+        app.root.event_generate("<Control-s>")
+        app.root.event_generate("<F1>")
+        app.root.event_generate("<Control-l>")
+        pump(3.0, lambda: len(seen) == 3)
+        assert seen == ["save", "help", "clear"], seen
+
+    _with_mapped_window(app, pump, go)
 
 
 def test_header_says_which_code_the_verdicts_come_from(
