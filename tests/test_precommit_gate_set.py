@@ -126,6 +126,14 @@ _LOCAL_ONLY_CI_GATES = {
         "属于 CI 的兜底职责。",
         "side": "ci",
     },
+    "xvfb-run": {
+        "why": "它不是第二条门禁，而是**同一条 pytest 门禁在 Linux 上的运行条件**："
+        "ubuntu runner 没有 X，`tests/test_desktop.py` 的窗口层整层 `pytest.skip`，"
+        "实测把全局覆盖率从 96.99% 压到 89.66%（低于 92 地板）——红的原因是「没跑」，"
+        "不是代码坏了。"
+        "本地钩子在真有显示器的机器上执行这些用例，不需要这层包装，所以本地不跑它不算缺口。",
+        "side": "ci",
+    },
     "--fail-under=82": {
         "why": "modelhub 分项覆盖率线读的是**上一步 pytest 产出的 .coverage**；"
         "而本地的 pytest 钩子不带 --cov，钩子跑完没有这份文件。"

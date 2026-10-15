@@ -26,7 +26,7 @@
 ruff check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
 ruff format --check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
 mypy pm/ run.py run_server.py eval_prompts.py
-python -m pytest tests/ -q --cov=pm --cov-report=term-missing     # 覆盖率地板见 pyproject
+xvfb-run -a python -m pytest tests/ -q --cov=pm --cov-report=term-missing     # 覆盖率地板见 pyproject；Linux 侧必须带 xvfb-run，否则桌面窗口层整层 skip（实测全局 96.99%→89.66%，压穿 92 地板）。本机有显示器就不用加
 # 复杂度也在这条 pytest 里：tests/test_complexity_ratchet.py 用 ruff 自己的 mccabe 计数
 # 逐函数比对台账 tests/complexity_budget.json —— 台账必须与实测**逐字相等**：
 # 新长出来的复杂函数要显式登记（并说明为什么先留着），拆小的收益必须当场回收进台账。
@@ -54,7 +54,7 @@ python eval_prompts.py            # 节点提示词结构契约（零调用；�
 
 > ⚠️ 每一列都是**各自时点的实测**（同一条命令、独占、全量 rc=0），不是同一个数被抄来抄去。
 > 表格存在的意义就是让下一个人看见"上一轮 81%、这一轮 87.1%"是真涨了。报数前必须重测：
-> 跑法就是上面那条 `python -m pytest tests/ -q --cov=pm --cov-report=term-missing`，
+> 跑法就是上面那条 `pytest tests/ -q --cov=pm --cov-report=term-missing`（Linux/CI 侧要套 `xvfb-run -a`），
 > 且必须先看它自己打印的汇总行与退出码（本机有间歇性假红，见上面两条注意）。
 > 复测①→②：给运维路由补 21 条用例（`tests/test_modelhub_admin_routes.py`，194 条语句原本 0 覆盖）。
 > 复测②→③：给 `pool.chat()` 的**切换/瞬时重试/断路器记分/台账记账**补 11 条用例

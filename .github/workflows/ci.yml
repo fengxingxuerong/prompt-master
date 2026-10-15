@@ -43,12 +43,19 @@ jobs:
         # --cov：覆盖率地板值见 pyproject [tool.coverage.report].fail_under。
         # 注意这个数只算主进程——subprocess 打真实入口的那批用例（test_cli_guards 等）
         # 不计入分子，所以 pm/cli/main.py 的 80% 是偏保守的下界（这个数只作解释，不作判据）。
+        #
+        # ⚠️ 为什么要 `xvfb-run -a`（2026-10-15 实测）：`tests/test_desktop.py` 的窗口层用例
+        # 在没有 X 的机器上整层 `pytest.skip`，而 `pm/desktop.py` 有 892 条语句里的大部分只在
+        # 那层被覆盖 —— 本机对照跑过：带窗口层 95% / 摘掉后 **14%**，全局从 96.99% 掉到 **89.66%**，
+        # 直接压穿 92 的地板。表现就是"三个 Linux 版本全红、windows job 全绿"，
+        # 而红的原因是**没跑**，不是代码坏了 —— 静默跳过等于没这条测试。
+        # 所以 Linux 侧必须在一个虚拟显示下跑，让这 70 多条真执行。
         env:
           PM_BASE_URL: http://127.0.0.1:9/v1
           PM_EVALUATOR_B_BASE_URL: http://127.0.0.1:9/v1
           PM_ARBITER_BASE_URL: http://127.0.0.1:9/v1
           PM_API_KEY: sk-ci-has-no-real-key
-        run: python -m pytest tests/ -q --cov=pm --cov-report=term-missing
+        run: xvfb-run -a python -m pytest tests/ -q --cov=pm --cov-report=term-missing
       - name: 提示词改动回归门禁 —— 只拦本次「新引入」的规则失败模式
         # 为什么门禁判据是「增量」而不是「绝对」：`pm/quality.py` 的规则是给
         # 「交付给目标模型的提示词」设计的，而 `pm/prompts.py` 里 17 个节点提示词
