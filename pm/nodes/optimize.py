@@ -27,6 +27,28 @@ from .profiles import _model_profile
 logger = logging.getLogger("pm.nodes.optimize")
 
 
+EMPTY_UNKNOWN = "未观测到截断/额度证据，根因待查"
+
+
+def empty_output_reason(label: str, meta: dict[str, Any], calls: int) -> str:
+    """空产出的归因：**只有当场实测到"输出等于 max_tokens"才说额度**，否则照旧写未知。
+
+    §三十·十九·六 的教训是"归档里写死一个没有证据的归因，比不写更坏"（那句"思考耗尽"
+    后来被 token 分布推翻：空产出横跨 1493~16425 全分布）。所以这里不猜成因，只报数：
+    2026-10-15 真端点一轮 `5253290b3fb5` 的修订器 3 发全部 `output_tokens=24000`
+    = `PM_REVISER_MAX_TOKENS` 上限而正文为空 —— 这种就叫有证据。
+    """
+    out = int((meta or {}).get("output_tokens") or 0)
+    cap = int((meta or {}).get("max_tokens") or 0)
+    if cap <= 0 or out < cap:
+        return f"{label}返回空内容，{EMPTY_UNKNOWN}"
+    return (
+        f"{label}返回空内容，且实测输出触达上限（output_tokens={out} = max_tokens={cap}，"
+        f"本节点共 {calls} 发）⇒ 正文没有额度；要复核就把该角色"
+        f"（{(meta or {}).get('role') or label}）的 max_tokens 上限调大再跑一轮"
+    )
+
+
 def _generate_prompt_with_gate(
     role: str, system: str, user_prompt: str
 ) -> tuple[str, dict[str, Any], QualityReport, int]:
@@ -199,7 +221,7 @@ def optimize_node(state: State) -> dict[str, Any]:
             node,
             {
                 "status": "early_stopped",
-                "early_stop_reason": "优化器返回空内容，未观测到截断/额度证据，根因待查",
+                "early_stop_reason": empty_output_reason("优化器", meta, calls),
                 "errors": ["optimize: 优化器返回空提示词，无法继续优化流程"],
                 "llm_calls": state.get("llm_calls", 0) + calls,
                 "prompt_quality_issues": [{"iteration": 0, "issues": q_report.describe()}],

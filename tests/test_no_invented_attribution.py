@@ -41,20 +41,33 @@ def _reasons(mod_name: str) -> list[str]:
 
 @pytest.mark.parametrize("mod_name", ["optimize", "revise"])
 def test_empty_stop_reason_is_present_and_says_unknown(mod_name: str) -> None:
-    reasons = _reasons(mod_name)
-    assert reasons, f"{mod_name}.py 里找不到「空内容」类 early_stop_reason"
-    for r in reasons:
-        assert "未观测到" in r or "根因待查" in r, (
-            f"{mod_name}.py 的空产出早停文案没说明「原因未知」：{r!r}"
-        )
+    """两个节点都必须**走同一个归因函数**，且"没证据"那一支仍写未知。
+
+    2026-10-15 之前这里查的是节点里的字面量；字面量改成 `empty_output_reason()` 之后，
+    只查字面量就等于"文案消失了"（红），而真正该钉的是
+    ①节点确实接在这个函数上、②函数在无证据时不许编成因。两条都在这里。
+    """
+    src = (SRC / f"{mod_name}.py").read_text(encoding="utf-8")
+    assert "empty_output_reason(" in src, f"{mod_name}.py 的空产出文案没走共用归因函数"
+    assert not _reasons(mod_name), f"{mod_name}.py 里又出现了写死的空产出 early_stop_reason 字面量"
+
+    from pm.nodes.optimize import EMPTY_UNKNOWN, empty_output_reason
+
+    no_evidence = empty_output_reason("修订器", {"role": "reviser"}, 3)
+    assert no_evidence.endswith(EMPTY_UNKNOWN), no_evidence
+    assert "未观测到" in no_evidence and "根因待查" in no_evidence
 
 
 @pytest.mark.parametrize("mod_name", ["optimize", "revise"])
 def test_empty_stop_reason_asserts_no_cause(mod_name: str) -> None:
-    for r in _reasons(mod_name):
+    """无证据路径不许出现任何断言性成因词（含函数里的默认文案）。"""
+    from pm.nodes.optimize import empty_output_reason
+
+    for meta in ({}, {"output_tokens": 1500, "max_tokens": 24000}, {"max_tokens": 0}):
+        r = empty_output_reason("修订器", {**meta, "role": "reviser"}, 3)
         stripped = NEGATED.sub("", r)
         bad = [w for w in CAUSAL_WORDS if w in stripped]
-        assert not bad, f"{mod_name}.py 的空产出早停文案断言了未经观测的成因 {bad}：{r!r}"
+        assert not bad, f"够不到 max_tokens 却断言了成因 {bad}：{r!r}"
 
 
 def test_budget_exhaustion_attribution_is_left_alone() -> None:
@@ -76,3 +89,65 @@ def test_measured_diagnostics_in_llm_py_are_not_flagged() -> None:
     llm_src = (SRC.parent / "llm.py").read_text(encoding="utf-8")
     assert "reasoning_tokens" in llm_src
     assert "额度被**推理**耗尽" in llm_src, "llm.py 的实测诊断被误伤了"
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-15 追加：空产出的归因从"写死未知"升级成"有证据就说数，没证据仍说未知"。
+# 本节原意不是"永远不许归因"，而是"不许写没有证据的归因"——所以补三条：
+# 无证据路径必须仍是未知、有证据路径必须带当场实测的两个数、证据必须真能从
+# plain_call 走到文案（否则前两条只是纸面）。
+# ---------------------------------------------------------------------------
+
+
+def test_no_evidence_path_still_says_unknown() -> None:
+    from pm.nodes.optimize import empty_output_reason
+
+    reason = empty_output_reason(
+        "修订器", {"role": "reviser", "output_tokens": 1500, "max_tokens": 24000}, 3
+    )
+    assert "未观测到" in reason and "根因待查" in reason, reason
+    stripped = NEGATED.sub("", reason)
+    bad = [w for w in CAUSAL_WORDS if w in stripped]
+    assert not bad, f"够不到上限却断言了成因 {bad}：{reason!r}"
+
+
+def test_evidence_path_reports_the_measured_numbers() -> None:
+    """`5253290b3fb5` 的实况：修订器 3 发全部 output_tokens=24000=max_tokens 而正文为空。"""
+    from pm.nodes.optimize import empty_output_reason
+
+    meta = {"role": "reviser", "output_tokens": 24000, "max_tokens": 24000}
+    reason = empty_output_reason("修订器", meta, 3)
+    assert "output_tokens=24000" in reason and "max_tokens=24000" in reason, reason
+    assert "reviser" in reason, "归因要点名是哪个角色的上限"
+    assert "max_tokens" in reason
+    assert "根因待查" not in reason, "有证据时不该再写未知"
+
+
+def test_plain_call_meta_actually_carries_the_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """证据链的中间一环：`plain_call` 的 meta 必须带 max_tokens 与 output_tokens。
+
+    摘掉这两个键，上面那条"有证据"分支就永远不会触发，文案退回"根因待查"——
+    而那正是本轮真端点跑出来的处境（节点手里有数，meta 里没数）。
+    """
+    from types import SimpleNamespace
+
+    from pm import llm
+    from pm.nodes.optimize import empty_output_reason
+
+    fake_resp = SimpleNamespace(
+        content="",
+        usage_metadata={"input_tokens": 1201, "output_tokens": 24000},
+        response_metadata={},
+    )
+    fake_llm = SimpleNamespace(invoke=lambda _msgs: fake_resp)
+    monkeypatch.setattr(
+        llm,
+        "_invoke_with_rate_limit_retry",
+        lambda role, fn, overrides=None, counter=None, budget=None: fn(fake_llm),
+    )
+    _text, meta = llm.plain_call("reviser", "sys", "user")
+    assert meta.get("max_tokens"), f"meta 没带 max_tokens：{sorted(meta)}"
+    assert meta.get("output_tokens") == 24000, meta
+    assert "output_tokens=24000" in empty_output_reason("修订器", meta, 3), meta

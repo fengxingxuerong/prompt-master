@@ -14,7 +14,7 @@ from ..quality import MIN_PROMPT_LENGTH, SIZE_GROWTH_RATIO
 from ..schemas import PromptVersion
 from ..state import State
 from .common import _apply
-from .optimize import _generate_prompt_with_gate
+from .optimize import _generate_prompt_with_gate, empty_output_reason
 
 logger = logging.getLogger("pm.nodes.revise")
 
@@ -93,7 +93,7 @@ def revise_node(state: State) -> dict[str, Any]:
             node,
             {
                 "status": "early_stopped",
-                "early_stop_reason": "修订器返回空内容，未观测到截断/额度证据，根因待查",
+                "early_stop_reason": empty_output_reason("修订器", meta, calls),
                 "errors": ["revise: 修订返回空内容，已保留上一版"],
                 "should_revise": False,
                 "llm_calls": state.get("llm_calls", 0) + calls,

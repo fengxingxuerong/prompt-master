@@ -1548,6 +1548,7 @@ def plain_call(
         budget=budget,
     )
     text = resp.content if isinstance(resp.content, str) else str(resp.content)
+    in_tok, out_tok = _tokens_of(resp)
     meta = {
         "role": role,
         "model": cfg.model,
@@ -1556,5 +1557,12 @@ def plain_call(
         "requests": requests_counter[0],
         "latency_ms": int((time.time() - t0) * 1000),
         "temperature": cfg.temperature,
+        # 下面三个是"空产出到底有没有额度证据"的唯一依据。2026-10-15 真端点一轮
+        # （`5253290b3fb5`）修订器 3 次调用、每次 `output_tokens` 恰好等于
+        # `PM_REVISER_MAX_TOKENS=24000` 却返回空正文 —— 而节点只能写"未观测到截断/额度证据"，
+        # 因为 meta 里从来没带过这两个数。带上了，归因才有出处（见 §三十·十九·六）。
+        "max_tokens": cfg.max_tokens,
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
     }
     return text, meta

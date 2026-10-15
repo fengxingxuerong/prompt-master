@@ -186,6 +186,38 @@ def test_revise_empty_terminates_without_duplicate_version():
     assert "prompt_versions" not in out, "不能追加一条与上一版相同的版本"
     assert out["early_stop_reason"]
     assert any("修订返回空内容" in e for e in out["errors"])
+    # 假 plain 不带 token 证据 ⇒ 文案必须仍写"未知"，不许顺手编成因（§三十·十九·六）
+    assert "根因待查" in out["early_stop_reason"], out["early_stop_reason"]
+
+
+def test_revise_empty_with_token_cap_evidence_reports_the_numbers():
+    """同一分支，**有**当场实测时要把数报出来（2026-10-15 真端点 `5253290b3fb5`）。
+
+    那一轮修订器 3 发全部 `output_tokens=24000` = `PM_REVISER_MAX_TOKENS` 上限而正文为空，
+    节点却只能写"未观测到截断/额度证据，根因待查"——因为 `plain_call` 的 meta 当时
+    根本没带这两个数。这条钉住整条证据链：meta 带数 ⇒ 文案带数。
+    """
+
+    def plain(role, system, user, overrides=None):
+        return "", {
+            "model": "fake",
+            "channel": "plain",
+            "attempts": 1,
+            "latency_ms": 1,
+            "role": "reviser",
+            "max_tokens": 24000,
+            "output_tokens": 24000,
+        }
+
+    state = initial_state(task="t", target_model="fake", n_test_cases=2, max_iterations=2)
+    state["prompt"] = "历史最佳版本"
+    state["prompt_versions"] = [{"iteration": 0, "prompt": "历史最佳版本", "avg_score": 7.0}]
+    with testing.scope("progress", plain=plain):
+        out = revise_node(state)  # type: ignore[arg-type]
+    reason = out["early_stop_reason"]
+    assert "output_tokens=24000" in reason and "max_tokens=24000" in reason, reason
+    assert "reviser" in reason, reason
+    assert "根因待查" not in reason, "有实测证据时不该再退回未知"
 
 
 # --------------------------------------------------------------------------

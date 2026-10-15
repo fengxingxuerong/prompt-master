@@ -103,6 +103,32 @@ def test_no_panel_size_means_no_verdict() -> None:
     assert "评委席降级" not in text, f"缺分母时仍下了结论：\n{text}"
 
 
+def test_full_scores_cannot_wash_out_the_failure_evidence() -> None:
+    """终态 `judge_scores` 两位齐全，也**不许**据此判成零降级。
+
+    2026-10-15 我试过那个"改进"（把 errors 里失败过、但终态看着在场的席位减掉），
+    被 `tests/test_run_aa98d99e66b5_findings.py` 当场判红后撤回：`evaluations` 每用例
+    只归档一行，而 `PM_SAMPLES_PER_CASE=2` ⇒ 另一发的席位完整度根本不在归档里。
+    aa98d99e66b5 实况就是"4 例两位齐全 + 3 例墙钟耗尽"并存 —— 用一份取不全的证据
+    去洗白缺席，等于把本节最初的缺陷再犯一遍。这条钉子防止有人（含我自己）重踩。
+    """
+    from pm.report import judge_seat_absent
+
+    evals = [
+        {
+            "test_case_index": i,
+            "judge": "merged",
+            "judge_scores": {"evaluator": 8.0 + i * 0.1, "evaluator_b": 7.9},
+        }
+        for i in range(4)
+    ]
+    errors = [f"evaluate#{i}[evaluator_b]: 墙钟预算 600s 用尽" for i in (0, 1, 3)]
+    st = _state(evals, panel=2, errors=errors)
+    assert sorted(judge_seat_absent(st)) == [0, 1, 3], "按终态席位洗白了失败证据"
+    text = "\n".join(_judge_source_lines(st))
+    assert "评委席降级：3/4 例" in text, text
+
+
 def test_full_panel_is_not_disclosed_as_degraded() -> None:
     """评委齐全时不许报降级（否则永远在报警，读者会麻木）。"""
 

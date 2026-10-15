@@ -595,6 +595,12 @@ def judge_seat_absent(state: ReportState) -> dict[int, list[str]]:
         m = _FAILED_JUDGE_RE.match(str(e))
         if m:
             absent.setdefault(int(m.group("idx")), []).append(m.group("seat"))
+    # ⚠️ 故意**不**拿终态 `judge_scores` 去减掉"看起来还在"的席位（2026-10-15 试过，被
+    # `tests/test_run_aa98d99e66b5_findings.py` 判红后撤回）：`evaluations` 每用例只归档
+    # 一行，而 `PM_SAMPLES_PER_CASE=2` ⇒ 另一发的席位完整度**根本不在归档里**。
+    # aa98d99e66b5 就是反例：4 例的 judge_scores 两位齐全，errors 却记着 3 例墙钟耗尽
+    # ——按"减掉"的写法这轮会被判成零降级，而那正是本节要避免的"半个评委席被当共识读"。
+    # 判不了就往保守侧靠：宁可照报，也不要用一份取不全的证据去洗白。
     return {i: sorted(set(seats)) for i, seats in sorted(absent.items())}
 
 
