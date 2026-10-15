@@ -126,6 +126,12 @@ _LOCAL_ONLY_CI_GATES = {
         "属于 CI 的兜底职责。",
         "side": "ci",
     },
+    "ci_desktop_probe": {
+        "why": "它是**诊断步不是门禁**：把「xvfb 在不在 / 解释器有没有 tkinter / xvfb 下能不能建窗」"
+        "写进 job summary 与 annotation，让 CI 上那次红能被匿名读出原因。本地有显示器、"
+        "窗口层用例本来就在跑，塞进 commit 钩子只会每次提交多花几秒去问一个已知答案。",
+        "side": "ci",
+    },
     "xvfb-run": {
         "why": "它不是第二条门禁，而是**同一条 pytest 门禁在 Linux 上的运行条件**："
         "ubuntu runner 没有 X，`tests/test_desktop.py` 的窗口层整层 `pytest.skip`，"

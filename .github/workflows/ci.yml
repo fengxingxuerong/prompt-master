@@ -37,6 +37,11 @@ jobs:
       - name: Type check (mypy)
         # 与 pyproject 的 [tool.mypy] files 保持一致，别出现"本地查、CI 不查"的第三种口径
         run: mypy pm/ run.py run_server.py eval_prompts.py
+      - name: 桌面窗口层可跑性诊断（把答案送到匿名可读的位置）
+        # 连续两轮 CI 只有 pytest 那一步红，而"为什么红"匿名读不到（日志要登录）。
+        # 这一步把 xvfb / tkinter / 能否建窗三件事写进 job summary 与 annotation。
+        # 它自己不判红——真正的门禁是下一步。
+        run: bash scripts/ci_desktop_probe.sh
       - name: Tests (pytest) —— 无 Key、且禁止任何真实出网
         # 死端点 + 假 Key 是有意的：只要有一条调用漏到真端点（C5 那类缺陷），
         # 这里就会 Connection error 立刻变红，而不是在开发机上静默烧额度。

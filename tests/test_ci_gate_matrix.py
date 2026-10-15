@@ -193,6 +193,13 @@ _ALLOWED_JOB_DIFFERENCES: dict[str, tuple[str, str]] = {
         "pwsh 用 `elseif`；前者带 --json 后者不带）。判据同源，都是与基线比 "
         "pm/prompts.py，差异是 shell 语法造成的，不是覆盖面差异。",
     ),
+    "ci_desktop_probe": (
+        "linux",
+        "**不是门禁，是诊断**：`Tests (pytest)` 连续两轮只在 Linux 侧红，而日志正文要登录才读得到，"
+        "于是「红的原因是窗口层没跑」这个推断没法在远端证真/证伪。这一步把 xvfb 在不在、"
+        "解释器有没有 tkinter、xvfb 下能不能真建窗写进 job summary 与 annotation（匿名可读）。"
+        "windows 侧不需要它——那边有显示器、用例本来就真跑着。",
+    ),
     "pytest tests/ -q": (
         "both",
         "**同一条门禁、不同参数**：linux 侧带 --cov=pm --cov-report=term-missing "
