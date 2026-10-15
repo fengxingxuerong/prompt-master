@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from .filelock import _atomic_write, _process_lock
 from .pool import _project_root
 
 _LOCK = threading.Lock()
@@ -102,23 +103,6 @@ def _merge(
         ent["success"] += 1
 
 
-def _atomic_replace(tmp: Path, p: Path) -> None:
-    """os.replace 的 Windows 短锁重试。
-
-    实时杀毒/索引扫描会短暂打开刚写完的文件，replace 随即 WinError 5
-    （2026-09-29 并发记账实测偶发：8×5 笔丢 4 笔，线程栈即此行）。
-    有界重试把环境竞态兜回来；耗尽仍失败照抛——调用侧可见，不静默丢笔。
-    """
-    for attempt in range(3):
-        try:
-            os.replace(tmp, p)
-            return
-        except PermissionError:
-            if attempt == 2:
-                raise
-            time.sleep(0.02 * (attempt + 1))
-
-
 def record_call(
     *,
     model: str,
@@ -129,9 +113,18 @@ def record_call(
     failovers: int,
     content_chars: int,
 ) -> None:
-    """追加一笔调用到当日聚合（线程安全，原子写）。"""
+    """追加一笔调用到当日聚合（进程内加锁 + 跨进程锁 + 原子写）。
+
+    2026-10-15 修：原先只锁本进程（`_LOCK`）、临时文件名又是**固定的**
+    `usage_daily.json.tmp`。多进程部署下两个写者共用一个临时文件，交错写出的
+    是"两个 JSON 对象首尾相接"的半截内容，replace 之后整份日聚合当场不可解析 ——
+    实测当天 22:25~23:02 连着 5 条 `usage_store ALERT`（JSONL 事实源没丢，
+    但 `/v1/usage` 与看板读到的日聚合被整份清空重建）。
+    这与 vkeys 2026-09-25 / 10-13 那两次是同族事故，故直接共用 `filelock` 那份实现。
+    """
     day_key = time.strftime("%Y-%m-%d")
-    with _LOCK:
+    p = _path()
+    with _LOCK, _process_lock(p):
         data = _load()
         day = data.setdefault(day_key, {})
         _merge(
@@ -142,11 +135,7 @@ def record_call(
             content_chars=content_chars,
             model=model,
         )
-        p = _path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        _atomic_replace(tmp, p)
+        _atomic_write(p, data)
 
 
 def load_daily() -> dict[str, Any]:

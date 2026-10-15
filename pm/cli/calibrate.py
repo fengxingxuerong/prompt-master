@@ -574,6 +574,8 @@ def _save_entry(
     pending: list[Any],
     c: _Cohort,
 ) -> None:
+    from .. import calibration as _calib  # 局部导入：本模块顶层不碰 calibration
+
     entry: dict[str, Any] = {
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "judge": ns.judge,
@@ -607,6 +609,10 @@ def _save_entry(
         "rubric": c.rubric,
         "anchors": c.anchors,
     }
+    # 这轮有多少条锚点落在仓库自带的**示例集**上（人工分是编的）。
+    # 入账才查得回来：账本轮一旦过去只剩 id，而"那轮是不是拿示例跑的"
+    # 恰恰是后来读聚合数的人最需要知道的事（实测活账本那条 n=11 里 6 条是示例）。
+    entry["example_anchor_items"] = _calib.count_example_anchors(entry["items"])
     rep = analysis.get("repeatability") or {}
     if rep.get("n_items"):
         # 复现性也进账本：MAE/bias 只说"准不准"，极差说"这台仪表自己稳不稳"。

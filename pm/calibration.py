@@ -111,6 +111,57 @@ def render_human_source_split(pooled: dict[str, Any]) -> list[str]:
     return out
 
 
+def example_anchor_ids() -> set[str]:
+    """仓库自带**示例**锚点集的 id 集合（`samples.example.json`）。
+
+    为什么要有这个：示例锚点是给"第一次跑通流程"用的，人工分是**编的**。
+    拿它跑出来的校准会被写进活账本（`logs/judge_calibration_history.json`），
+    之后 `calibrate --aggregate` 照常把它并进合并读数 —— 实测活账本里唯一那条
+    带数字的校准行（2026-10-10，n=11）里 **6 条是示例锚点**（`demo-good`、
+    `demo-hallucinated`、`demo-vague`、`anchor-fab-trend`、`anchor-fab-attribution`、
+    `anchor-mixed`，与示例文件逐字同名），剩下 5 条才是 `real-*`。
+    而 README §三 引用的 MAE/bias 正是从这条账本重算的 ⇒ "量具准不准"这句结论
+    有一半压在编出来的锚点上，且读的人无从得知。
+    这与 `test_history_mock_filter.py` 那次是同族：mock 臂不许混进 Δ 统计，
+    示例锚点也不许**静默**混进校准聚合。
+    """
+    try:
+        data = json.loads(EXAMPLE_SAMPLES.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    rows = (
+        data
+        if isinstance(data, list)
+        else (data.get("samples") if isinstance(data, dict) else None)
+    )
+    if not isinstance(rows, list):
+        return set()
+    return {str(r["id"]) for r in rows if isinstance(r, dict) and r.get("id") is not None}
+
+
+def count_example_anchors(pairs: list[dict[str, Any]]) -> int:
+    """这批配对里有几条落在示例锚点集上（0 = 全是真锚点）。"""
+    ex = example_anchor_ids()
+    if not ex:
+        return 0
+    return sum(1 for p in pairs if str(p.get("id")) in ex)
+
+
+def render_example_anchor_disclosure(pooled: dict[str, Any]) -> list[str]:
+    """合并读数里掺了示例锚点时必须当场说清，一条都不掺就别啰嗦。"""
+    n = int(pooled.get("example_anchors") or 0)
+    if not n:
+        return []
+    tot = int(pooled.get("n_anchors") or 0)
+    return [
+        "",
+        f"- ⚠️ 合并读数里有 **{n}/{tot} 条锚点来自仓库自带的示例集**"
+        "（`judge_calibration/samples.example.json`）——那些人工分是编的，用来跑通流程，"
+        "不是所有者的判例。引用这条 MAE/bias 时必须带上这一句；想拿能站住的读数，"
+        "得先用真锚点重跑一轮 `run.py calibrate`。",
+    ]
+
+
 def load_human_sources(anchor_dir: Path | None = None) -> dict[str, str]:
     """扫锚点目录，返回 `{锚点 id: owner|ai_proxy|unknown}`。
 
@@ -1109,6 +1160,9 @@ def aggregate_history(
     pooled["owner_anchors"] = (pooled["by_human_source"].get(HUMAN_SOURCE_OWNER) or {}).get(
         "n_anchors", 0
     )
+    # 示例锚点计数（口径同 ai_proxy_anchors）：聚合刻意不按考卷过滤（§十四 先例），
+    # 那就必须在读数旁边把"这批里有几条是编的"写出来，否则"准不准"这句话没有底。
+    pooled["example_anchors"] = count_example_anchors(pairs)
 
     # 聚类自助法 CI：锚点为重抽单位（见 docstring）。锚点 <2 时重抽是常数，CI 退化为
     # 一个点——报出来就是"看起来很精确的零信息"，宁可声明跳过。
@@ -1305,6 +1359,7 @@ def render_aggregate(agg: dict[str, Any] | None) -> str:
         lines.append(f"- ⚠️ {pooled['ci_skipped']}")
     lines.extend(render_discrimination(pooled.get("discrimination") or {}))
     lines.extend(render_human_source_split(pooled))
+    lines.extend(render_example_anchor_disclosure(pooled))
     disp = agg.get("dispersion") or {}
     spans = []
     if agg.get("rounds_used", 0) >= 2:  # 单轮没有"轮间"可言，极差 0.0 是噪声不是信息

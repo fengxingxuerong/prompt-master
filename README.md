@@ -83,6 +83,12 @@ MCP 接入（13 个工具，stdio）：`python -m pm.mcp_server`。计算类工�
   ⚠️ 上面那个 4 轮聚合的输入轮已归档（出处 `docs/iteration/iteration-ledger.md`）：
   活账本经 10-10 只余 2 行（09-29 复现性行 + 10-10 换评委后单轮），
   这个聚合数**无法从活账本重算**，引用前先知道它是一次历史快照。
+  ⚠️ **活账本那条 10-10 的校准行里 6/11 条锚点是仓库自带的示例集**（2026-10-15 查实：
+  `demo-good`/`demo-hallucinated`/`demo-vague`/`anchor-fab-trend`/`anchor-fab-attribution`/
+  `anchor-mixed`，与 `judge_calibration/samples.example.json` 逐字同名，人工分是编的）。
+  所以从活账本重算的 MAE/bias **不能**当成"与人一致性"的读数——想拿能站住的数，
+  得先用真锚点重跑一轮 `run.py calibrate`。`calibrate --aggregate` 自 2026-10-15 起
+  会在合并读数旁自动印这一句（示例条数 >0 才印，全是真锚点时不啰嗦）。
 - **判定式评分协议（`PM_SCORING_MODE=checklist`）默认关闭，且已被实测否证**。它把五个整数的
   填数权从评委手里拿走一半（评委只答二值判定+证据，分数由代码算）。同一批锚点、评委预算
   抬到 24000 后重测：**17 条配对上 MAE 0.58 → 1.79、bias +1.79，且 Δ 一条负数都没有**；
@@ -120,7 +126,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1859 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1870 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）

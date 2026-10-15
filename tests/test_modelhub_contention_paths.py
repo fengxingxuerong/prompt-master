@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pm.modelhub import filelock as FL
 from pm.modelhub import vkeys as V
 from pm.modelhub.pool import ConfigError
 
@@ -220,23 +221,23 @@ class _BusyLockModule:
 
 def test_try_lock_reports_busy_as_false_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
     """被占用要返回 False 让调用方退避；抛出去会把"另一个写者正在写"变成 500。"""
-    monkeypatch.setattr(V, "_lock_impl", lambda: _BusyLockModule())
-    assert V._try_lock(3) is False
+    monkeypatch.setattr(FL, "_lock_impl", lambda: _BusyLockModule())
+    assert FL._try_lock(3) is False
 
 
 def test_unlock_failure_never_replaces_the_real_write_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """释放锁失败必须咽掉：它一旦抛出，盖掉的是真正那个写失败。"""
-    monkeypatch.setattr(V, "_lock_impl", lambda: _BusyLockModule())
-    V._unlock(3)
+    monkeypatch.setattr(FL, "_lock_impl", lambda: _BusyLockModule())
+    FL._unlock(3)
 
 
 def test_process_lock_times_out_with_an_explicit_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
 ) -> None:
     """超时报错要点名"跨进程写锁"并给出下一步，而不是无限等或静默当成没锁。"""
-    monkeypatch.setattr(V, "_try_lock", lambda fd: False)
+    monkeypatch.setattr(FL, "_try_lock", lambda fd: False)
     path = tmp_path / "vkeys.json"
 
     with pytest.raises(ConfigError, match="拿不到跨进程写锁"), V._process_lock(path, timeout=0.05):

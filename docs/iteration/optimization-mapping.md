@@ -4,12 +4,12 @@
 
 | 优化项 | 对应优点 | 优先级 | 实施方式 | 状态 |
 |---|---|---|---|---|
-| OPT-1 流式 SSE 转发 | A1 流式 | P0 | 网关 stream=true 时向上游流式转发（SSE 逐 chunk 透传，兼容 OpenAI SDK/LangChain），失败自动切换照常生效（切换前无正文输出即无感） | 待实施 |
-| OPT-2 虚拟密钥（agents 维度） | A2 虚拟密钥 | P0 | /v1/keys 签发 vk-xxx（落盘 JSON），chat 按 Authorization 归属 agent 并校验启用态；PMH_GATEWAY_TOKEN 仍为管理员口令 | 待实施 |
-| OPT-3 用量统计端点 | A3 用量归属 | P0 | /v1/usage 按 agent/model/key/day 聚合台账（calls/tokens 建议值/失败/切换次数） | 待实施 |
-| OPT-4 轻量 Web 控制台 | A4 管理后台 | P0 | /console 单页（Fathom 严谨风）：池状态、台账检索、虚拟密钥管理、对话测试窗；只读 + 密钥操作 | 待实施 |
-| OPT-5 智能体注册持久化 | A6 落库 | P0 | 注册表落盘 data/agents.json（mtime 热载），修 K-4 | 待实施 |
-| OPT-6 /v1/metrics 指标端点 | A7 指标 | P1 | JSON 指标（calls/success_rate/switches/by_model），外部探针友好 | 待实施 |
+| OPT-1 流式 SSE 转发 | A1 流式 | P0 | 网关 stream=true 时向上游流式转发（SSE 逐 chunk 透传，兼容 OpenAI SDK/LangChain），失败自动切换照常生效（切换前无正文输出即无感） | ✅ 已实施（`pm/modelhub/streaming.py`，`server.py` 的 `_stream_response`；能力性拒绝 401/404 会降级为非流式） |
+| OPT-2 虚拟密钥（agents 维度） | A2 虚拟密钥 | P0 | /v1/keys 签发 vk-xxx（落盘 JSON），chat 按 Authorization 归属 agent 并校验启用态；PMH_GATEWAY_TOKEN 仍为管理员口令 | ✅ 已实施（`pm/modelhub/vkeys.py`，路由 `server.py` 的 `/v1/keys`、`/v1/keys/{key}`） |
+| OPT-3 用量统计端点 | A3 用量归属 | P0 | /v1/usage 按 agent/model/key/day 聚合台账（calls/tokens 建议值/失败/切换次数） | ✅ 已实施（`server.py` 的 `/v1/usage`；日聚合落 `data/usage_daily.json`，2026-10-15 修掉跨进程写坏） |
+| OPT-4 轻量 Web 控制台 | A4 管理后台 | P0 | /console 单页（Fathom 严谨风）：池状态、台账检索、虚拟密钥管理、对话测试窗；只读 + 密钥操作 | ✅ 已实施（`pm/modelhub/console.py`，路由 `server.py` 的 `/console`） |
+| OPT-5 智能体注册持久化 | A6 落库 | P0 | 注册表落盘 data/agents.json（mtime 热载），修 K-4 | ✅ 已实施（`vkeys.py` 的 `_agents_path()` / `AgentRegistry`） |
+| OPT-6 /v1/metrics 指标端点 | A7 指标 | P1 | JSON 指标（calls/success_rate/switches/by_model），外部探针友好 | ✅ 已实施（`server.py` 的 `/v1/metrics`） |
 | OPT-7 健康感知加权 | A5 | P2 | 已有熔断冷却 + priority 主备链足够单机场景；加权路由收益边际小 → 记录不采纳理由（避免调度不确定性） | 不采纳 |
 | OPT-8 语义缓存 | Portkey caching | P2 | 正确性风险 → 不采纳（competitor-analysis §3） | 不采纳 |
 | OPT-9 多租户/用户体系 | One API 用户 | P2 | 单运维者场景 → 不采纳 | 不采纳 |
@@ -58,7 +58,7 @@ PB-1 与 PB-2 都**不改变评分与优化效果**，只补"可核对性"（改
 | PC-4 补采队列按人工标签格子排 | Langfuse Annotation Queue 的设计核心 | P0 | `harvest_anchors.py`：`--coverage`（只读、零写入）+ `--prefer-deficient`（最缺格 × 历史命中率排序，**只认 owner 缺口**） | ✅ 已实施 |
 | PC-5 留出集与缓存的 split 维度 | GEPA 缓存键 =(候选哈希,样例 id,**split**)，train/val 命名空间隔离 | P1 | 本产品 target/eval 缓存按内容哈希、**无 split 维**；做留出集时必须先给缓存键加 split，否则留出侧被训练侧热缓存重放 | ⏳ 未做（写死在文档，防顺手踩） |
 | PC-6 廉价优先级联（`inspect cascade()` 同形） | inspect_ai `cascade()` | ~~P1~~ **❌ 实测否决** | 判据预写后当场量：10 份真端点归档里"评委真调用落在确定性层已判死用例"占 8/40=20%，但**剔除后聚合均分只动 0.03**（4.53→4.56）⇒ 没有可修的信噪污染，只剩一两成调用节省；代价是主动按内容决定"这条不用打分"，而 `min_score`/噪声带估计依赖每条都有分（§三十·一 刚为"崩臂被好意过滤删掉"开过刀）。理由与读数见 `docs/evaluation.md` §三十一·九(1) |
-| PC-7 考卷身份做成内容哈希 | openai/evals 声明式记录 / Langfuse 数据集按时间戳定版本 | P1 | 现状用 n + 协议名推断"是不是同一张考卷"；n 相同不代表集合相同（两批各 45 条可以完全不同） | ⏳ 未做 |
+| PC-7 考卷身份做成内容哈希 | openai/evals 声明式记录 / Langfuse 数据集按时间戳定版本 | P1 | 现状用 n + 协议名推断"是不是同一张考卷"；n 相同不代表集合相同（两批各 45 条可以完全不同） | ✅ 已实施（`pm/calibration.py` 的 `_paper_identity()` 按锚点集内容哈希出指纹，`pm/cli/calibrate.py` 的 `_anchors_stamp()` 把人工分也并进指纹；⚠️ 早前标「未做」是错的——`docs/evaluation.md` 已就地更正：当时只查了 `aggregate_history` 一处就下了结论） |
 | N13 自动最优提示词搜索 / GEPA 式反思 | DSPy MIPROv2 / GEPA | 不采纳 | 理由**替换**：上一轮引的二手负结果未能复核到一手（见 §5 引用降级），本轮改用自家实测——评委在 owner 标签上 AUC 0.452（owner 子集）~0.623（全集，CI 覆盖 0.5），以这种量具为目标的搜索优化的是它没读出来的那一维 | ❌ 维持不采纳 |
 | N9 G-Eval logprob 加权 / `rubric=` 区间约束 | DeepEval | 不采纳（暂缓） | 需端点回传 logprobs，经 modelhub 网关**未验证任何上游提供**；先验端点再谈 | ❌ 待前置验证 |
 | N12 合成用例 + critic 复筛 | DeepEval synthesizer | 不采纳（暂缓） | critic 仍会是同一个评委，等于用没读出信息的量具筛题 | ❌ 阻塞在 PC-1 之后 |
