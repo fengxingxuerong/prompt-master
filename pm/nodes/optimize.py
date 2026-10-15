@@ -49,6 +49,46 @@ def empty_output_reason(label: str, meta: dict[str, Any], calls: int) -> str:
     )
 
 
+def _deliver_on_budget_exhausted(
+    state: State, node: str, exc: Exception, seed: str
+) -> dict[str, Any]:
+    """优化器墙钟预算耗尽时的收口：有可交付版本就按未达标终态交出去，一个都没有才判 failed。
+
+    分岔按数据走，不按希望走——`early_stopped` 的语义是"交付了东西但没达标"，
+    手里没货时用它就是在假交付。抽成函数而不是就地写：`optimize_node` 的复杂度
+    棘轮（CC 上限 10）不该为一条兜底分支让路。
+    """
+    fallback = str(state.get("prompt") or "").strip() or seed
+    if not fallback:
+        logger.exception("optimize 失败（且无任何可交付版本）")
+        return _apply(
+            state,
+            node,
+            {"status": "failed", "errors": [f"optimize: {exc}"]},
+            "optimize_failed",
+            error=str(exc),
+        )
+    versions = list(state.get("prompt_versions", []))
+    if not any(str(v.get("prompt") or "").strip() == fallback for v in versions):
+        versions.append(
+            PromptVersion(iteration=0, prompt=fallback, note="原稿（优化未完成）").model_dump()
+        )
+    return _apply(
+        state,
+        node,
+        {
+            "status": "early_stopped",
+            "early_stop_reason": "优化器墙钟预算耗尽（端点单发超时吃满剩余预算），交付已有版本",
+            "errors": [f"optimize: {exc}"],
+            "prompt": fallback,
+            "prompt_versions": versions,
+            "should_revise": False,
+        },
+        "optimize_budget_exhausted",
+        error=str(exc),
+    )
+
+
 def _generate_prompt_with_gate(
     role: str, system: str, user_prompt: str
 ) -> tuple[str, dict[str, Any], QualityReport, int]:
@@ -202,6 +242,13 @@ def optimize_node(state: State) -> dict[str, Any]:
 
     try:
         prompt, meta, q_report, calls = _generate_prompt_with_gate("optimizer", system, user_prompt)
+    except llm.CallBudgetExceeded as e:
+        # 真实案例 A 实测（2026-10-15，`4077d3fa3711`）：优化器一发 300s 超时后，
+        # **同一个异常在 revise 里是 early_stopped 保留历史最佳，在这里却把整轮判成 failed**
+        # ——而原稿改进模式下手里明明还有用户的原稿。1 次调用、302 秒白等，
+        # 换到的是一份连"已有版本"都没归档的失败。
+        logger.warning("优化器墙钟预算耗尽，尝试交付已有版本：%s", e)
+        return _deliver_on_budget_exhausted(state, node, e, seed)
     except Exception as e:
         logger.exception("optimize 失败")
         return _apply(

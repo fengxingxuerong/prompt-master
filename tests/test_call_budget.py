@@ -587,3 +587,21 @@ def test_transient_conn_error_with_exhausted_budget_raises_budget_error(
     info = got.value.details
     assert info["requests"] >= 1, f"预算错必须带上真实请求数：{info}"
     assert "Connection error" in info["last_error"], f"最后一次错误没带现场：{info}"
+
+
+def test_budget_message_distinguishes_spent_from_too_small_to_continue() -> None:
+    """「用尽」只在预算真花完时才说；剩余装不下一发要说清剩多少、为什么停。
+
+    现场（2026-10-15 真实案例 A，`4077d3fa3711`）：打出来的是
+    「墙钟预算 600s 用尽（实际 302s，已发 1 次真实请求）」——自相矛盾的一句话会把人
+    引去等一个不会来的结果，而真正该调的是 PM_TIMEOUT 与 PM_CALL_BUDGET 的配比。
+    """
+    spent = L.CallBudgetExceeded("optimizer", 600.0, 601.0, 2, "Request timed out.")
+    assert "用尽" in str(spent), str(spent)
+
+    early = L.CallBudgetExceeded("optimizer", 600.0, 302.0, 1, "Request timed out.")
+    msg = str(early)
+    assert "未用尽即停" in msg, f"只花了一半却不像「没花完」的说法：{msg}"
+    assert "600s 用尽" not in msg, f"预算没花完却报「用尽」：{msg}"
+    assert "剩 298s" in msg and "装不下一发完整超时" in msg, msg
+    assert early.details["wall_s"] == 302, early.details

@@ -500,3 +500,40 @@ def test_revise_node_call_budget_exceeded_degrades_to_early_stopped(
     assert "failed" not in dumped or "early_stopped" in dumped
     assert "600s 用尽" in dumped or "墙钟预算" in dumped, "预算细节要进 errors 供报告披露"
     assert "保留" in dumped
+
+
+def test_optimizer_budget_exceeded_delivers_the_seed_instead_of_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实案例 A 的形态：优化器墙钟预算耗尽时，有原稿就交付原稿，不许判 failed。
+
+    同一个异常在 `revise` 里早就走 early_stopped 保留历史最佳；`optimize` 却只有
+    `except Exception` ⇒ 整轮 failed、`prompt_versions` 空，302 秒白等。
+    这条同时钉住两个方向：有可交付版本 ⇒ early_stopped；什么都没有 ⇒ 仍然 failed。
+    """
+    from pm import llm
+    from pm.nodes.optimize import optimize_node
+
+    def boom(role, system, user_prompt):
+        raise llm.CallBudgetExceeded("optimizer", 600.0, 302.0, 1, "Request timed out.")
+
+    monkeypatch.setattr("pm.nodes.optimize._generate_prompt_with_gate", boom)
+
+    seeded = {
+        "task": "让 AI 分析销售数据",
+        "seed_prompt": "用户的原稿正文",
+        "prompt": "",
+        "prompt_versions": [],
+        "iteration": 0,
+        "llm_calls": 1,
+        "max_iterations": 2,
+    }
+    out = optimize_node(seeded)  # type: ignore[arg-type]
+    assert out["status"] == "early_stopped", out
+    assert out["prompt"] == "用户的原稿正文", out
+    assert [v["prompt"] for v in out["prompt_versions"]] == ["用户的原稿正文"], out
+    assert "预算耗尽" in out["early_stop_reason"], out
+
+    empty = {**seeded, "seed_prompt": ""}
+    out2 = optimize_node(empty)  # type: ignore[arg-type]
+    assert out2["status"] == "failed", "没有任何可交付版本时不该假装 early_stopped"

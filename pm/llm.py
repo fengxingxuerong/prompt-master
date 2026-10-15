@@ -456,10 +456,19 @@ class CallBudgetExceeded(RuntimeError):
     """
 
     def __init__(self, role: str, budget_s: float, wall_s: float, requests: int, last_err: str):
-        super().__init__(
-            f"[{role}] 墙钟预算 {budget_s:.0f}s 用尽（实际 {wall_s:.0f}s，已发 {requests} 次真实请求）。"
-            f"最后一次错误：{last_err}"
-        )
+        # 「用尽」只有在预算真的花完时才是事实。真实案例 A（2026-10-15，`4077d3fa3711`）
+        # 打的是"墙钟预算 600s 用尽（实际 302s…）"——自相矛盾：它是在**剩余 298s 装不下
+        # 一发 300s 超时**时停的，不是花完了。写成"用尽"会让人以为再等就有结果，
+        # 而真正可执行的旋钮是 PM_TIMEOUT 与 PM_CALL_BUDGET 的配比。
+        remaining = budget_s - wall_s
+        if remaining <= 1:
+            head = f"[{role}] 墙钟预算 {budget_s:.0f}s 用尽（实际 {wall_s:.0f}s，已发 {requests} 次真实请求）"
+        else:
+            head = (
+                f"[{role}] 墙钟预算未用尽即停（预算 {budget_s:.0f}s，已用 {wall_s:.0f}s，"
+                f"剩 {remaining:.0f}s 装不下一发完整超时 ⇒ 不再重试；已发 {requests} 次真实请求）"
+            )
+        super().__init__(f"{head}。最后一次错误：{last_err}")
         self.role = role
         self.details: dict[str, Any] = {
             "role": role,
