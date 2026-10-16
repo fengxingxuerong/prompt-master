@@ -27,8 +27,6 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from .pool import ConfigError
-
 __all__ = ["_atomic_write", "_lock_impl", "_process_lock", "_try_lock", "_unlock"]
 
 
@@ -88,6 +86,10 @@ def _process_lock(path: Path, *, timeout: float = 2.0) -> Iterator[None]:
     集成侧同形：两进程各发 60 把的压测 5 轮里 2 例签发者当场崩）。
     所以 open 与拿字节锁共用同一个 `timeout` 预算：总等待时间不变，超时给显式错误。
     """
+    # 局部导入：`pool` 顶层要 import `ledger`，`ledger` 又要 import 本模块 ——
+    # 顶层写 `from .pool import ConfigError` 会闭成一个环（2026-10-16 实测 ImportError）。
+    from .pool import ConfigError
+
     lock_path = path.with_name(path.name + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout

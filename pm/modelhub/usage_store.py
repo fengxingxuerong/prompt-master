@@ -3,6 +3,12 @@
 数据：data/usage_daily.json —— 结构 {"2026-09-21": {"calls": n, "success": n,
 "latency_ms_sum": n, "content_chars_sum": n, "failovers_sum": n, "by_model": {...}}}
 写入：原子写 + 文件锁，追加为增量合并（服务重启后历史保留）。
+
+**"日"是哪个日**：`record_call` 用本地日期（`time.strftime`），所以重建也必须用本地日期
+（见 `_day_key_from_ts`）——两边口径只要差一次时区换算，同一批调用就会被拆到两个键上，
+增量记账与重建结果再也加不到一起。这个口径此前是隐含的，2026-10-16 显式化。
+
+**本文件只是缓存，JSONL 台账才是事实源**：所以它坏了可以重建，见 `rebuild_from_ledger`。
 """
 
 from __future__ import annotations
@@ -11,39 +17,21 @@ import json
 import os
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
 from .filelock import _atomic_write, _process_lock
+from .notify import _notify
 from .pool import _project_root
 
 _LOCK = threading.Lock()
 
+_SOURCE = "usage_store"
 
-def _notify(msg: str) -> None:
-    """G-06 告警落盘：追加 logs/notifications.jsonl（时间戳+来源+消息）。"""
-    import json as _json
-    from pathlib import Path as _P
 
-    try:
-        nlog = _P(__file__).resolve().parents[2] / "logs" / "notifications.jsonl"
-        nlog.parent.mkdir(parents=True, exist_ok=True)
-        with open(nlog, "a", encoding="utf-8") as f:
-            import time as _t
-
-            f.write(
-                _json.dumps(
-                    {
-                        "ts": _t.strftime("%Y-%m-%dT%H:%M:%S"),
-                        "source": "usage_store",
-                        "message": msg,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:  # noqa: BLE001 - 通知失败静默
-        pass
+def _alert(msg: str) -> None:
+    _notify(msg, source=_SOURCE)
 
 
 def _path() -> Path:
@@ -52,11 +40,71 @@ def _path() -> Path:
     return root / "usage_daily.json"
 
 
-def _load() -> dict[str, Any]:
-    """加载日聚合；损坏时告警化处理：坏文件改名留存（.corrupt-<ts>），从空重建。
+def _day_key_from_ts(ts: str) -> str | None:
+    """台账事件的 UTC 时间戳 → 本地日期键，与 `record_call` 的口径**必须一致**。
 
-    不静默：损失以两个途径可见——① 改名后的 .corrupt 文件本身；② stderr ALERT 输出。
-    （JSONL 台账始终是完整事实源，本文件只是聚合缓存。）
+    台账写的是 UTC（`ledger._utcnow_iso`），日聚合记的是本地日——差这一次换算，
+    凌晨那几个小时的调用会被重建到前一天去，`/v1/usage` 就与增量记账对不上。
+    """
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt.astimezone().strftime("%Y-%m-%d")
+
+
+def rebuild_from_ledger() -> dict[str, Any]:
+    """从 JSONL 台账**整份重算**日聚合（零调用、纯读）。
+
+    为什么需要它：本文件是缓存，坏了原本只能"改名留存 + 从空重建"，也就是**当天及以前的
+    日聚合全部归零**（实测 2026-10-15 前已累计 554 次这样的损坏）。而每一笔调用在台账里都
+    有 `type=call` 的原文，重算得出来 ⇒ 损坏不该等于丢数据。
+
+    口径与增量记账严格对齐：只吃 `type == "call"`；`success/latency_ms/content_chars/
+    failovers` 逐个字段走同一个 `_merge`；坏行跳过（与 `query_ledger` 同款，不炸）。
+    台账不存在或一行都读不出来时返回 `{}`——那时确实没得重建，调用方按空处理。
+    """
+    # 局部导入：ledger 与本模块互相都不在对方的导入链上（ledger 不用 usage_store）
+    from . import ledger as LG
+
+    ledger_path = LG.ledger_path
+
+    path = ledger_path()
+    out: dict[str, Any] = {}
+    if not path.exists():
+        return out
+    try:
+        raw = LG._read_text(path)  # 与 query_ledger 同款退避：并发写时不许把瞬时占用当损坏
+    except OSError:
+        return out
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # 坏行跳过：与 query_ledger 同口径，一条坏行不该毁掉整份重建
+        if not isinstance(ev, dict) or ev.get("type") != "call":
+            continue
+        day_key = _day_key_from_ts(str(ev.get("ts") or ""))
+        if day_key is None:
+            continue
+        _merge(
+            out.setdefault(day_key, {}),
+            success=bool(ev.get("success")),
+            latency_ms=int(ev.get("latency_ms") or 0),
+            failovers=int(ev.get("failovers") or 0),
+            content_chars=int(ev.get("content_chars") or 0),
+            model=str(ev.get("model") or "?"),
+        )
+    return out
+
+
+def _load() -> dict[str, Any]:
+    """加载日聚合；损坏时告警留存，并**先从台账重建**，重建不出来才退回空。
+
+    不静默：损失/恢复都以两个途径可见——① 改名后的 .corrupt 文件本身；② stderr ALERT。
     """
     p = _path()
     if not p.exists():
@@ -69,16 +117,37 @@ def _load() -> dict[str, Any]:
             p.replace(p.with_suffix(".json.corrupt-" + ts))
         except OSError:
             pass
-        msg = (
-            "[usage_store] ALERT: usage_daily.json corrupted ("
-            + str(e)
-            + "), saved as .corrupt-"
-            + ts
-            + "; rebuilt empty; JSONL source-of-truth unaffected"
-        )
+        rebuilt = rebuild_from_ledger()
+        if rebuilt:
+            # 重建结果当场落盘：下次读就是好文件，不用每次损坏都重扫一遍台账。
+            # 这里刻意**不拿跨进程锁**——本函数已被 record_call 在临界区内调用，
+            # 再取一次同文件的字节锁会把自己锁死（Windows 上同进程另一句柄拿不到）。
+            try:
+                _atomic_write(p, rebuilt)
+            except OSError as werr:
+                print(f"[usage_store] 重建结果写盘失败：{werr}")
+            msg = (
+                "[usage_store] ALERT: usage_daily.json corrupted ("
+                + str(e)
+                + "), saved as .corrupt-"
+                + ts
+                + "; rebuilt from ledger: "
+                + str(len(rebuilt))
+                + " day(s), "
+                + str(sum(int(v.get("calls", 0)) for v in rebuilt.values()))
+                + " call(s)（JSONL 是事实源，本次无数据损失）"
+            )
+        else:
+            msg = (
+                "[usage_store] ALERT: usage_daily.json corrupted ("
+                + str(e)
+                + "), saved as .corrupt-"
+                + ts
+                + "; 台账里重建不出任何一天，退回空聚合——当天用量读数会归零"
+            )
         print(msg)
-        _notify(msg)  # G-06：告警落盘，可追溯可接通知渠道
-        return {}
+        _alert(msg)  # G-06：告警落盘，可追溯可接通知渠道
+        return rebuilt
 
 
 def _merge(
