@@ -463,7 +463,7 @@ def run_available() -> bool:
 
 
 class App:
-    """主窗口：四个标签 + 底部状态灯。耗时动作一律 worker 线程 + 队列回投。"""
+    """主窗口：五个标签 + 底部状态灯。耗时动作一律 worker 线程 + 队列回投。"""
 
     def __init__(self, root: tk.Tk, scale: float | None = None) -> None:
         self.root = root

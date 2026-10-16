@@ -218,7 +218,8 @@ node examples/browser_runtime_check.cjs http://127.0.0.1:8097/
 反而没有入口。面板不产生第二套判据：三个 POST 全部 subprocess 打同一条 `run.py`，
 由 `tests/test_panel.py` 把"面板读数 = 当场 CLI 读数"逐份模板对过。
 `frame-ancestors 'none'` 意味着它不能被 iframe 嵌进别的应用，"插件"指一条命令起一个本地窗口。
-形态 E 是同一四张卡的**原生窗口**版（Tkinter，标准库，无新依赖）：不 listen 任何端口，
+形态 E 是同一批能力的**原生窗口**版（Tkinter，标准库，无新依赖；五个标签，
+比形态 D 多一个⑤账本与仪表）：不 listen 任何端口，
 所以没有 token/CSP 那一层；判据仍来自 `run.py`（`pm/cliforward.py` 是面板与桌面共用的
 唯一转发口）。选哪个：要在别的机器/容器里远程看 → D；只要一个本机小工具 → E。
 
