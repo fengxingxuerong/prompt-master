@@ -56,15 +56,32 @@ def seal_log_dir_for_the_whole_session(tmp_path_factory: pytest.TempPathFactory)
 
 @pytest.fixture(autouse=True, scope="session")
 def fail_if_the_suite_touched_the_operating_logs() -> Any:
-    """会话结束时验一件事：仓库 `logs/` 里没多出运行产物。上面那条密封漏了就这里红。"""
+    """会话结束时验一件事：仓库 `logs/` 里没多出运行产物。上面那条密封漏了就这里红。
+
+    ⚠️ 覆盖面是**两类**文件，不是一类（2026-10-17 补第二类）：
+    - `run_*.json`：跑批产物，漏封会混进 `run.py history` 的 Δ 统计；
+    - `notifications.jsonl`：运维告警的**唯一活体凭据**（README §三 那句「损坏累计 554 条」
+      就是从它数出来的）。它此前只在 `notify` 里写死 `<repo>/logs`，于是任何触发
+      告警路径的用例都会把**假告警**灌进去——实测单跑三个 modelhub 用例就从 727 涨到 731 行。
+      只查一种文件名 = 下一个人换一种文件名就能静默写脏运营目录。
+    """
     live = Path(__file__).resolve().parents[1] / "logs"
-    before = {p.name for p in live.glob("run_*.json")} if live.is_dir() else set()
+    watch = ("run_*.json", "notifications.jsonl")
+
+    def _snapshot() -> set[str]:
+        out: set[str] = set()
+        if live.is_dir():
+            for pat in watch:
+                out |= {p.name for p in live.glob(pat)}
+        return out
+
+    before = _snapshot()
     yield
-    after = {p.name for p in live.glob("run_*.json")} if live.is_dir() else set()
-    leaked = sorted(after - before)
+    leaked = sorted(_snapshot() - before)
     assert not leaked, (
         f"测试会话往运营目录 {live} 写了 {leaked} —— 说明某条用例的写路径没被 "
-        "`PM_LOG_DIR` 管住（或被线程带出了会话密封）。这些文件会进 `run.py history` 的读数。"
+        "`PM_LOG_DIR` 管住（或被线程带出了会话密封）。`run_*.json` 会进 `run.py history` "
+        "的读数；`notifications.jsonl` 是运维告警的证据流，假告警进去就分不清真假了。"
     )
 
 
