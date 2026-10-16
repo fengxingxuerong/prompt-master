@@ -43,6 +43,21 @@ KNOWN_BAD_SEATS = {"9950147e2e40", "e76f9acfefab", "b92609933122"}
 # 取 2.5 留余量；真正的回归（某角色被系统性限速）会远超这个倍数。
 WITHIN_RUN_SPREAD_MAX = 2.5
 
+# 参与比较的输出量门槛：只看 tok/call ≥ 该轮最大值 1/3 的角色。
+#
+# ⚠️ 2026-10-17 补（真数据暴露的**判据自身缺陷**，不是端点变慢）：
+# `sec/1k tok` 是"每次调用总延迟 ÷ 这次调用产出"的比，**每次调用的固定开销
+# （首 token 预热、排队、思考段）会平摊到分母上** ⇒ 输出越少的角色读数越慢，
+# 与端点给谁限速无关。全量 101 个角色样本上 corr(log tok/call, sec/1k tok) = **-0.45**。
+# 现象：`run_732cbff15664`（外部真实案例，浏览器采集）target 只有 639 tok/call
+# 而评委 7000+，于是 target 读数 30.7 对评委 10.4 —— spread 2.95 越界，
+# 但 target 与评委的**每次调用耗时**（19.6s vs 57~75s）恰恰说明 target 更快。
+# 把输出量不同档的角色放回同一比较里，测的是"谁写得多"，不是"谁被限速"。
+# 加门槛后正常轮最大 spread 1.66（与上面那条实测一致），
+# 而**席位劣化仍被抓住**（e76f9acfefab 里 evaluator_b 301 tok/call 仍是 147.2，
+# 由 `test_second_seat_degrades` 单独覆盖）。
+MIN_TOK_PER_CALL_RATIO = 3.0
+
 # 同模型（evaluator 与 comparator 同为 deepseek-v4-flash）的速率比上限。
 # 实测 9 轮：中位 1.12，最大 1.70（那三轮 evaluator 7.5~7.8 比 comparator 12~13 快，
 # 方向还是「同档」）。取 2.0 留余量。系统性限速会是 10 倍量级。
@@ -81,6 +96,27 @@ def _rates(d: dict) -> dict[str, float]:
     return out
 
 
+def _toks_per_call(d: dict) -> dict[str, float]:
+    """各角色的每调用输出 token——固定开销平摊的分母。"""
+    out: dict[str, float] = {}
+    for role, v in (d.get("llm_usage") or {}).items():
+        c = int(v.get("calls") or 0)
+        o = int(v.get("output_tokens") or 0)
+        if c:
+            out[role] = o / c
+    return out
+
+
+def _same_size_roles(d: dict, rates: dict[str, float]) -> dict[str, float]:
+    """只留输出量与最大者同档的角色——固定开销平摊才可比（见 MIN_TOK_PER_CALL_RATIO）。"""
+    tpc = {r: t for r, t in _toks_per_call(d).items() if r in rates}
+    if not tpc:
+        return {}
+    top = max(tpc.values())
+    kept = {r: v for r, v in rates.items() if tpc.get(r, 0) >= top / MIN_TOK_PER_CALL_RATIO}
+    return kept if len(kept) >= 2 else {}
+
+
 def test_generation_rate_is_role_independent() -> None:
     """钉住核心事实：同一轮内，各角色的生成速率同档。
 
@@ -88,12 +124,14 @@ def test_generation_rate_is_role_independent() -> None:
     轮内 evaluator 会显著高于 target ⇒ 这条变红。
 
     用**轮内相对比较**而不是绝对界：速率跨时段分档，绝对界必然被真实波动打脸。
+    2026-10-17 再补一层：只比**输出量同档**的角色（见 MIN_TOK_PER_CALL_RATIO）——
+    否则测的是"谁写得多"，不是"谁被限速"。
     """
     checked = 0
     for rid, d in _runs():
         if rid in KNOWN_BAD_SEATS or _truncated(d):
             continue
-        rs = _rates(d)
+        rs = _same_size_roles(d, _rates(d))
         if len(rs) < 2:
             continue
         spread = max(rs.values()) / min(rs.values())
@@ -111,12 +149,15 @@ def test_same_model_different_role_same_rate() -> None:
     """comparator 与 evaluator 同为 deepseek-v4-flash，速率必须同档。
 
     这条否掉"端点对评委模型调度不同"那个候选（C）。
+
+    两个评委会被同档过滤挡住时（一方输出量小得多），这条退化为跳过 ——
+    宁可少测一轮，也不拿"谁写得多"当"谁被限速"。
     """
     checked = 0
     for rid, d in _runs():
         if rid in KNOWN_BAD_SEATS or _truncated(d):
             continue
-        rs = _rates(d)
+        rs = _same_size_roles(d, _rates(d))
         if "evaluator" not in rs or "comparator" not in rs:
             continue
         checked += 1
@@ -245,3 +286,80 @@ def test_evaluator_max_tokens_is_not_lowered() -> None:
         f"evaluator 入库缺省 max_tokens 现在是 {MAX_TOKENS['evaluator']}——"
         "若被调小，先确认不会重现 2026-09-14 的正文截断事故"
     )
+
+
+# ---------------------------------------------------------------------------
+# 同档过滤本身（2026-10-17）：不许把"谁写得多"当成"谁被限速"
+# ---------------------------------------------------------------------------
+
+
+def _fake_run(llm_usage: dict[str, dict[str, int]]) -> dict:
+    return {"test_runs": [{}] * 8, "llm_usage": llm_usage}
+
+
+def test_small_output_role_is_excluded_not_flagged() -> None:
+    """输出量相差一个量级的角色，不该被判成"有角色被限速"（真数据见过的形状）。
+
+    现场：`run_732cbff15664`（外部真实案例）target 639 tok/call、评委 7000+，
+    于是 target 的 `sec/1k tok` 被固定开销平摊到 30.7，对评委 10.4 ⇒ 旧判据 spread 2.95 越界。
+    实际上 target 每次调用 19.6s、评委 57~75s——**target 明明更快**。
+    """
+    d = _fake_run(
+        {
+            # 小输出 + 每次调用其实更短：旧判据会把它读成"慢"
+            "target": {"calls": 22, "output_tokens": 22 * 639, "latency_ms": 22 * 19600},
+            "evaluator": {"calls": 22, "output_tokens": 22 * 7190, "latency_ms": 22 * 74800},
+            "evaluator_b": {"calls": 22, "output_tokens": 22 * 5344, "latency_ms": 22 * 57200},
+        }
+    )
+    all_rates = _rates(d)
+    assert max(all_rates.values()) / min(all_rates.values()) > WITHIN_RUN_SPREAD_MAX, (
+        "构造没复现出旧判据的越界 —— 这个用例就白写了"
+    )
+    kept = _same_size_roles(d, all_rates)
+    assert set(kept) == {"evaluator", "evaluator_b"}, (
+        f"同档过滤没把小输出角色排掉：{kept}（target 只有 639 tok/call，"
+        "是最大者的 1/11，两个数不可比）"
+    )
+    assert max(kept.values()) / min(kept.values()) <= WITHIN_RUN_SPREAD_MAX, (
+        "排掉不可比的角色后，剩下两个同档角色不该再越界"
+    )
+
+
+def test_filter_skips_rather_than_compares_one_role() -> None:
+    """只剩一个可比较角色时必须**跳过**，而不是拿它跟不可比的对象硬比。"""
+    d = _fake_run(
+        {
+            "target": {"calls": 22, "output_tokens": 22 * 639, "latency_ms": 22 * 19600},
+            "evaluator": {"calls": 22, "output_tokens": 22 * 7190, "latency_ms": 22 * 74800},
+        }
+    )
+    assert _same_size_roles(d, _rates(d)) == {}, (
+        "只剩一个同档角色时应当返回空（调用侧据此跳过），不许退化成一个角色自己比自己"
+    )
+
+
+def test_same_size_two_roles_still_compared() -> None:
+    """同档的两个角色必须仍被比较——否则这层过滤把判据变成"什么都不查"。"""
+    d = _fake_run(
+        {
+            "evaluator": {"calls": 22, "output_tokens": 22 * 9000, "latency_ms": 22 * 90000},
+            "evaluator_b": {"calls": 22, "output_tokens": 22 * 8000, "latency_ms": 22 * 160000},
+        }
+    )
+    kept = _same_size_roles(d, _rates(d))
+    assert set(kept) == {"evaluator", "evaluator_b"}, f"同档角色被误排：{kept}"
+    assert max(kept.values()) / min(kept.values()) > 1.5, "两个同档角色的读数差该被看见"
+
+
+def test_seat_degradation_survives_the_size_filter() -> None:
+    """席位特定劣化（evaluator_b 慢 10 倍）**必须**穿过同档过滤被看见。"""
+    d = _fake_run(
+        {
+            "evaluator": {"calls": 22, "output_tokens": 22 * 9000, "latency_ms": 22 * 90000},
+            "evaluator_b": {"calls": 22, "output_tokens": 22 * 8000, "latency_ms": 22 * 900000},
+        }
+    )
+    kept = _same_size_roles(d, _rates(d))
+    assert "evaluator_b" in kept, "劣化席位被同档过滤误排——那这条守卫就成了假闸"
+    assert max(kept.values()) / min(kept.values()) >= 5.0, "10 倍劣化必须仍被判为越界"
