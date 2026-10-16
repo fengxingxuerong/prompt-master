@@ -53,8 +53,17 @@ class SlidingWindowLimiter:
                 dq.popleft()
             if len(dq) + cost > self.max_events:
                 self._denied += 1
-                retry_after = (dq[0] + self.window_seconds - now) if dq else self.window_seconds
-                return False, max(0.0, retry_after)
+                # 先算时间戳的**差**、再减窗口。写成 `dq[0] + window - now` 会把 window 加到一个
+                # 绝对时间戳上再减回去，而刚开机时 monotonic 只有几百秒 —— 实测 [200,400] 这个
+                # 量级里约 6.7% 的取值会算出"比窗口还长"的 retry_after（60.00000000000003）。
+                # CI 的 Windows runner 刚开机（monotonic≈2e2）会命中，本机开机十几小时后
+                # （≈6.8e4）永远命中不了 —— 那次「本地全绿、CI windows 独红」就是这么来的。
+                # 复现钉在 tests/test_ratelimit.py::test_limiter_basic_window（钉时钟那一段）。
+                # 上夹到 window 是滑动窗口的语义不变量：最早那条记录最多一个窗口后滑出，
+                # 绝不该让调用方等更久；下夹 0 维持原行为。
+                elapsed = now - dq[0] if dq else 0.0
+                retry_after = self.window_seconds - elapsed
+                return False, min(self.window_seconds, max(0.0, retry_after))
             dq.extend(now for _ in range(cost))
             if len(self._events) > _MAX_KEYS:
                 # 只清空桶，不动还有余留的 key：正在活跃的调用方不受影响

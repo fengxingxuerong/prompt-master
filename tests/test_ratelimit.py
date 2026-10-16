@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from pm import ratelimit as ratelimit_mod
 from pm import server as server_mod
 from pm.ratelimit import SlidingWindowLimiter, parse_rate_limit_env
 
@@ -18,7 +20,7 @@ from pm.ratelimit import SlidingWindowLimiter, parse_rate_limit_env
 # --------------------------------------------------------------------------
 # 限流器单元行为
 # --------------------------------------------------------------------------
-def test_limiter_basic_window():
+def test_limiter_basic_window(monkeypatch):
     lim = SlidingWindowLimiter(max_events=3)
     assert lim.acquire("k", 1) == (True, 0.0)
     assert lim.acquire("k", 1) == (True, 0.0)
@@ -27,6 +29,19 @@ def test_limiter_basic_window():
     assert ok is False
     assert 0 < retry_after <= 60.0
     assert lim.denied_count == 1
+
+    # 同一份窗口判定，把时钟钉在"刚开机"的量级再验一遍 —— 这里的复现是**确定性输入**，
+    # 不是赌调度时机（与 test_limiter_slides_after_window 拨时间戳同源的手法）：
+    # retry_after 由 `dq[0] + window - now` 算出，把 60 加到一个大绝对值上再减回去会丢精度。
+    # 实测 [200,400] 这个量级里约 6.7% 的取值会得到 60.00000000000003，而 200.08 就是其中一个；
+    # 本机开机十几小时（monotonic≈6.8e4）反而**永远命中不了** —— CI 的 Windows runner 刚开机
+    # （monotonic≈2e2）才会红，这就是那次"本地干净检出全绿、CI windows 独红"的来源。
+    monkeypatch.setattr(ratelimit_mod, "time", SimpleNamespace(monotonic=lambda: 200.08))
+    pinned = SlidingWindowLimiter(max_events=1)
+    assert pinned.acquire("k", 1)[0] is True
+    ok, retry_after = pinned.acquire("k", 1)
+    assert ok is False
+    assert retry_after == 60.0  # 修复前：60.00000000000003（比窗口还长，语义上是错的）
 
 
 def test_limiter_cost_accounting():
