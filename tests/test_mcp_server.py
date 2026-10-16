@@ -16,11 +16,15 @@
 
 from __future__ import annotations
 
+import ast
+import contextlib
 import io
 import json
 import subprocess
 import sys
+import time
 import urllib.error
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,6 +33,76 @@ from pm import mcp_server as M
 
 def _fake_proc(stdout: str = "{}", returncode: int = 0, stderr: str = "") -> Any:
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def _probe_stdio_server(
+    frames: list[dict[str, Any]], want_id: int, timeout: float = 120.0
+) -> tuple[dict, int]:
+    """起真子进程 `python -m pm.mcp_server`，喂若干 JSON-RPC 帧，返回 `(目标帧 result, 进程退出码)`。
+
+    ⚠️ **为什么不能写成 `subprocess.run(input=...)`**（2026-10-17 修掉的一个真 flake）：
+    那种写法会在喂完最后一帧后**立刻关闭 stdin**。而 MCP 库的 server 主循环在 stdin 读到
+    EOF 时会执行 `tg.cancel_scope.cancel()`（`mcp/server/lowlevel/server.py`，注释原文：
+    "Transport closed: cancel in-flight handlers"）—— 于是 `tools/list` 的 handler
+    还在把响应写出时就被**取消**，那帧永久丢失，而进程 rc=0、stderr 甚至已经打印了
+    "Processing request of type ListToolsRequest"。
+
+    表现：CI 上偶发（本机实测等 EOF 的写法 40 次 miss 3 次），报
+    `AssertionError: tools/list 没回帧：rc=0`。**真实 MCP 客户端不会这样用**：
+    它是长驻会话，读响应时 stdin 一直开着；所以这是**探针的缺陷，不是 MCP server 的缺陷**。
+
+    正确姿势（本机实测两种探针各 40 次、miss 0 且 rc 全 0）：
+    写完帧**保持 stdin 打开**，逐行读到目标帧；**读到之后**才关 stdin 并收进程
+    —— 那时 handler 早已完成，EOF 取消不到任何在途响应。
+    """
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pm.mcp_server"],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    result: dict = {}
+    assert proc.stdin is not None and proc.stdout is not None
+    try:
+        for frame in frames:
+            proc.stdin.write(json.dumps(frame) + "\n")
+        proc.stdin.flush()  # 写完就 flush，但**不 close** —— 见上文的取消竞态
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                got = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if got.get("id") == want_id and "result" in got:
+                result = got["result"]
+                break
+    finally:
+        # 目标帧已到手，此刻关 stdin 不会取消在途 handler
+        with contextlib.suppress(Exception):
+            proc.stdin.close()
+    try:
+        rc = proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:  # pragma: no cover - 正常路径不会走到
+        with contextlib.suppress(Exception):
+            proc.terminate()
+        try:
+            rc = proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            rc = proc.wait(timeout=15)
+    return result, rc
 
 
 # --------------------------------------------------------------------------
@@ -527,47 +601,25 @@ def test_module_entry_actually_starts_the_server():
     ⚠️ 不要在进程内 `runpy` 该模块：FastMCP 起 stdio 时会接管/关闭 stdout，
     进程内执行会把测试进程的 stdout 弄坏（实测 `ValueError: I/O operation on closed file`）。
     子进程隔离是这里唯一安全的做法。
-    """
-    from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1]
-    # 一条标准的 MCP initialize 请求（换行分隔的 JSON-RPC）
-    req = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "probe", "version": "0"},
-            },
-        }
-    )
-    proc = subprocess.run(
-        [sys.executable, "-m", "pm.mcp_server"],
-        cwd=str(root),
-        input=req + "\n",
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=120,
-    )
-    assert proc.returncode == 0, (proc.stdout[-500:], proc.stderr[-500:])
-    # 响应可能含通知行，挑出带 result 的那条
-    payloads = []
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                payloads.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    assert payloads, f"没有回出任何 JSON-RPC 帧：{proc.stdout[-300:]!r}"
-    init = next((p for p in payloads if "result" in p), None)
-    assert init, f"没有 initialize 响应：{payloads}"
-    assert init["result"]["serverInfo"]["name"], "响应里没有服务名，客户端无法确认挂载成功"
+    ⚠️ 探针必须用 `_probe_stdio_server`（读到响应再关 stdin），不要退回
+    `subprocess.run(input=...)`：喂完帧立刻 EOF 会让库在 stdin 读到结束时取消在途 handler
+    （`mcp/server/lowlevel/server.py` 的 `tg.cancel_scope.cancel()`），偶发丢帧。
+    """
+    req = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "probe", "version": "0"},
+        },
+    }
+    result, rc = _probe_stdio_server([req], want_id=1)
+    assert rc == 0, f"MCP server 子进程退出码 {rc}（正常应为 0）"
+    assert result, "没有 initialize 响应 —— 客户端无法确认挂载成功"
+    assert result["serverInfo"]["name"], "响应里没有服务名，客户端无法确认挂载成功"
 
 
 # --------------------------------------------------------------------------
@@ -634,11 +686,13 @@ def test_documented_mcp_tool_count_matches_the_live_registry() -> None:
 
     判据取**真实注册表**（起子进程发 `tools/list`），不是数源码里的装饰器：
     装饰器漏写 / 名字拼错 / FastMCP 没收下，源码计数都看不出来。
+
+    ⚠️ 2026-10-17：本用例曾在 CI 上偶发红（`tools/list 没回帧：rc=0`），
+    根因是**探针写法**而非 MCP server —— 见 `_probe_stdio_server`。现已统一走该助手。
     """
     import re
-    from pathlib import Path as _P
 
-    root = _P(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[1]
     frames = [
         {
             "jsonrpc": "2.0",
@@ -653,29 +707,9 @@ def test_documented_mcp_tool_count_matches_the_live_registry() -> None:
         {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
     ]
-    proc = subprocess.run(
-        [sys.executable, "-m", "pm.mcp_server"],
-        cwd=str(root),
-        input="\n".join(json.dumps(f) for f in frames) + "\n",
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=120,
-        check=False,
-    )
-    listed = None
-    for line in (proc.stdout or "").splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            frame = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if frame.get("id") == 2 and "result" in frame:
-            listed = frame["result"]["tools"]
-    assert listed is not None, f"tools/list 没回帧：rc={proc.returncode} {proc.stderr[-300:]}"
+    result, _rc = _probe_stdio_server(frames, want_id=2)
+    assert result, "tools/list 没回帧 —— 探针要保持 stdin 打开（见 _probe_stdio_server 的说明）"
+    listed = result["tools"]
     live = {t["name"] for t in listed}
 
     guide_text = (root / "docs" / "agent-cli-guide.md").read_text(encoding="utf-8")
@@ -694,3 +728,42 @@ def test_documented_mcp_tool_count_matches_the_live_registry() -> None:
 
     unlisted = sorted(n for n in live if f"`{n}`" not in guide_text)
     assert not unlisted, f"这些工具有注册、却没在指南的工具表里点名：{unlisted}"
+
+
+# --------------------------------------------------------------------------
+# stdio 探针的写法守卫（2026-10-17）
+# --------------------------------------------------------------------------
+def test_stdio_probes_do_not_close_stdin_before_reading() -> None:
+    """本文件里所有起 `pm.mcp_server` 子进程的探针，都不许用 `input=` 喂帧。
+
+    为什么要钉这条：`subprocess.run(input=...)` 会在喂完最后一帧后立刻关 stdin，
+    而 MCP 库在 stdin 读到 EOF 时会 `tg.cancel_scope.cancel()` 取消在途 handler
+    （`mcp/server/lowlevel/server.py`），于是响应帧偶发丢失、进程 rc=0、stderr
+    却已打印 "Processing request of type ListToolsRequest"。
+    这正是 2026-10-17 那次 CI 偶发红的形态（本机实测等 EOF 的写法 40 次 miss 3 次，
+    而保持 stdin 打开的写法 40 次 miss 0 次）。
+
+    判据取**源码文本**：这条失败的形态是"新写一个探针时顺手用了 input="，
+    单测测不出（红的是 CI 上另一次运行），所以只能钉住这个写法本身。
+    """
+    body = Path(__file__).read_text(encoding="utf-8")
+    tree = ast.parse(body)
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        # subprocess.run(...) / Popen(...) 且带 input= 关键字
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+        if name not in ("run", "Popen"):
+            continue
+        if not any(kw.arg == "input" for kw in node.keywords):
+            continue
+        # 只有真正起 mcp_server 的那些才算
+        argv_text = ast.dump(node)
+        if "mcp_server" in argv_text:
+            offenders.append(f"line {node.lineno}: {name}(...)")
+    assert not offenders, (
+        f"这些探针用 `input=` 喂帧给 mcp_server（会提前 EOF、偶发丢帧）：{offenders}；"
+        "改用 `_probe_stdio_server` —— 它读到目标帧之后才关 stdin"
+    )
