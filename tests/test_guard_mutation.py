@@ -29,6 +29,8 @@ from pathlib import Path
 
 import pytest
 
+from _mutation_lock import mutate
+
 CONFTEST = Path(__file__).resolve().parent / "conftest.py"
 META = "tests/test_env_isolation_meta.py"
 
@@ -111,22 +113,24 @@ DOC_GUARD = "tests/test_ci_gate_matrix.py"
 
 @pytest.fixture
 def _restore_docs():
-    original = OPS_DOC.read_text(encoding="utf-8")
-    try:
-        yield original
-    finally:
-        OPS_DOC.write_text(original, encoding="utf-8")
+    """只交出路径；原文由用例在**锁内**读取（见 `mutate()` 的说明）。
+
+    刻意不在这里读原文：夹具在拿锁**之前**执行，若另一个进程正持锁改着这个文件，
+    读到的就是**污染版本** ⇒ 等锁后一断言变成"锚点已变，变异测试失效"（本机实测到过）。
+    """
+    return OPS_DOC
 
 
 @pytest.mark.parametrize(
     ("label", "anchor", "replacement"), DOC_MUTATIONS, ids=[m[0] for m in DOC_MUTATIONS]
 )
 def test_docs_drifting_from_ci_makes_the_parity_guard_red(
-    label: str, anchor: str, replacement: str, _restore_docs: str
+    label: str, anchor: str, replacement: str, _restore_docs: Path
 ) -> None:
-    assert anchor in _restore_docs, f"锚点已变，变异测试失效：{anchor!r}"
-    OPS_DOC.write_text(_restore_docs.replace(anchor, replacement, 1), encoding="utf-8")
-    try:
+    with mutate(OPS_DOC) as original:  # 锁 + 按字节还原 + **锁内**读原文
+        text = original.text(OPS_DOC)
+        assert anchor in text, f"锚点已变，变异测试失效：{anchor!r}"
+        OPS_DOC.write_text(text.replace(anchor, replacement, 1), encoding="utf-8", newline="")
         proc = subprocess.run(
             [
                 sys.executable,
@@ -144,8 +148,6 @@ def test_docs_drifting_from_ci_makes_the_parity_guard_red(
             errors="replace",
             check=False,
         )
-    finally:
-        OPS_DOC.write_text(_restore_docs, encoding="utf-8")
     assert proc.returncode != 0, (
         f"「{label}」之后，文档↔CI 同步守卫仍然全绿 —— 它是个假闸。\n"
         "operations.md 里「与 ci.yml 逐条同口径」是加粗断言，"
@@ -158,11 +160,8 @@ CI_GUARD = "tests/test_ci_gate_matrix.py"
 
 @pytest.fixture
 def _restore_ci():
-    original = CI_WORKFLOW.read_text(encoding="utf-8")
-    try:
-        yield original
-    finally:
-        CI_WORKFLOW.write_text(original, encoding="utf-8")
+    """只交出路径；原文在锁内读。理由同 `_restore_docs`。"""
+    return CI_WORKFLOW
 
 
 @pytest.mark.parametrize(
@@ -171,11 +170,12 @@ def _restore_ci():
     ids=[m[0] for m in CI_MUTATIONS],
 )
 def test_breaking_the_ci_wiring_makes_the_matrix_guard_red(
-    label: str, anchor: str, replacement: str, _restore_ci: str
+    label: str, anchor: str, replacement: str, _restore_ci: Path
 ) -> None:
-    assert anchor in _restore_ci, f"锚点已变，变异测试失效：{anchor!r}"
-    CI_WORKFLOW.write_text(_restore_ci.replace(anchor, replacement, 1), encoding="utf-8")
-    try:
+    with mutate(CI_WORKFLOW) as original:  # 锁 + 按字节还原 + **锁内**读原文
+        text = original.text(CI_WORKFLOW)
+        assert anchor in text, f"锚点已变，变异测试失效：{anchor!r}"
+        CI_WORKFLOW.write_text(text.replace(anchor, replacement, 1), encoding="utf-8", newline="")
         proc = subprocess.run(
             [
                 sys.executable,
@@ -193,8 +193,6 @@ def test_breaking_the_ci_wiring_makes_the_matrix_guard_red(
             errors="replace",
             check=False,
         )
-    finally:
-        CI_WORKFLOW.write_text(_restore_ci, encoding="utf-8")
     assert proc.returncode != 0, (
         f"把「{label}」改坏后，CI 接线守卫仍然全绿 —— 它是个假闸。\n"
         "接线闸的意义恰恰在于：漏跑的那一步当时没人红过。"
@@ -203,21 +201,14 @@ def test_breaking_the_ci_wiring_makes_the_matrix_guard_red(
 
 @pytest.fixture
 def _restore_conftest():
-    """无论变异结果如何（含失败）都要把 conftest 还原 —— 否则会污染工作树。"""
-    original = CONFTEST.read_text(encoding="utf-8")
-    try:
-        yield original
-    finally:
-        CONFTEST.write_text(original, encoding="utf-8")
+    """只交出路径；原文由用例在**锁内**读取（见 `mutate()` 的说明）。"""
+    return CONFTEST
 
 
 @pytest.mark.parametrize(("label", "anchor"), MUTATIONS, ids=[m[0] for m in MUTATIONS])
 def test_removing_this_isolation_makes_the_meta_test_red(
-    label: str, anchor: str, _restore_conftest: str, tmp_path: Path
+    label: str, anchor: str, _restore_conftest: Path, tmp_path: Path
 ) -> None:
-    assert anchor in _restore_conftest, f"锚点已变，变异测试失效：{anchor!r}"
-    mutated = _restore_conftest.replace(anchor, "", 1)
-    CONFTEST.write_text(mutated, encoding="utf-8")
     # 子进程的临时根显式指到系统临时区（2026-10-12）：仓库根 conftest 默认把
     # pytest 临时根设进检出目录（那台机器 %TEMP% 有坏软链的修法），而"检出目录里
     # 临时根不可写"的机器上，子进程会死在**与隔离无关**的 PermissionError 上
@@ -227,7 +218,10 @@ def test_removing_this_isolation_makes_the_meta_test_red(
     sub_tmp.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["PYTEST_DEBUG_TEMPROOT"] = str(sub_tmp)
-    try:
+    with mutate(CONFTEST) as original:  # 锁 + 按字节还原 + **锁内**读原文
+        text = original.text(CONFTEST)
+        assert anchor in text, f"锚点已变，变异测试失效：{anchor!r}"
+        CONFTEST.write_text(text.replace(anchor, "", 1), encoding="utf-8", newline="")
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", META, "-q", "--no-header", "-p", "no:cacheprovider"],
             capture_output=True,
@@ -237,8 +231,6 @@ def test_removing_this_isolation_makes_the_meta_test_red(
             env=env,
             check=False,
         )
-    finally:
-        CONFTEST.write_text(_restore_conftest, encoding="utf-8")
     assert proc.returncode != 0, (
         f"删掉「{label}」的隔离后，元测试仍然全绿 —— 它是个假闸。\n"
         "一个不会失败的守卫比没有守卫更糟：它让人以为隔离有保护。"
@@ -302,12 +294,11 @@ PC_REGISTRY_MUTATIONS = [
 ]
 
 
-def _mutate_and_run(
-    path: Path, label: str, anchor: str, replacement: str, original: str, guard: str
-) -> None:
-    assert anchor in original, f"锚点已变，变异测试失效：{anchor!r}"
-    path.write_text(original.replace(anchor, replacement, 1), encoding="utf-8")
-    try:
+def _mutate_and_run(path: Path, label: str, anchor: str, replacement: str, guard: str) -> None:
+    with mutate(path) as original:  # 跨进程锁 + 按字节还原 + **锁内**读原文
+        text = original.text(path)
+        assert anchor in text, f"锚点已变，变异测试失效：{anchor!r}"
+        path.write_text(text.replace(anchor, replacement, 1), encoding="utf-8")
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", guard, "-q", "--no-header", "-p", "no:cacheprovider"],
             capture_output=True,
@@ -316,8 +307,6 @@ def _mutate_and_run(
             errors="replace",
             check=False,
         )
-    finally:
-        path.write_text(original, encoding="utf-8")
     assert proc.returncode != 0, (
         f"「{label}」之后，门禁集合守卫仍然全绿 —— 它是个假闸。\n"
         "pre-commit 钩子少于 CI 门禁这件事，"
@@ -327,20 +316,18 @@ def _mutate_and_run(
 
 @pytest.fixture
 def _restore_pc():
-    original = PRECOMMIT_CFG.read_text(encoding="utf-8")
-    try:
-        yield original
-    finally:
-        PRECOMMIT_CFG.write_text(original, encoding="utf-8")
+    """原文由 `_mutate_and_run` 在**锁内**读取并断言，这里不再预先读。
+
+    早先那版在夹具里读原文、再拿它去拼变异内容，于是并发时读到的可能是
+    另一个进程正在写入的**污染版本**，等锁后一断言就变成"锚点已变"（本机实测到过）。
+    """
+    return PRECOMMIT_CFG
 
 
 @pytest.fixture
 def _restore_pc_registry():
-    original = PC_GUARD_PATH.read_text(encoding="utf-8")
-    try:
-        yield original
-    finally:
-        PC_GUARD_PATH.write_text(original, encoding="utf-8")
+    """同 `_restore_pc`：只把路径交出去，原文在锁内读。"""
+    return PC_GUARD_PATH
 
 
 @pytest.mark.parametrize(
@@ -349,7 +336,7 @@ def _restore_pc_registry():
 def test_dropping_a_hook_makes_the_set_guard_red(
     label: str, anchor: str, replacement: str, _restore_pc: str
 ) -> None:
-    _mutate_and_run(PRECOMMIT_CFG, label, anchor, replacement, _restore_pc, PC_GUARD)
+    _mutate_and_run(PRECOMMIT_CFG, label, anchor, replacement, PC_GUARD)
 
 
 @pytest.mark.parametrize(
@@ -360,7 +347,7 @@ def test_dropping_a_hook_makes_the_set_guard_red(
 def test_forging_an_exception_makes_the_set_guard_red(
     label: str, anchor: str, replacement: str, _restore_pc_registry: str
 ) -> None:
-    _mutate_and_run(PC_GUARD_PATH, label, anchor, replacement, _restore_pc_registry, PC_GUARD)
+    _mutate_and_run(PC_GUARD_PATH, label, anchor, replacement, PC_GUARD)
 
 
 # ---------------------------------------------------------------------------
@@ -418,11 +405,13 @@ def _mutate_schemas(original: str, anchor: str, replacement: str) -> None:
 
 @pytest.fixture
 def _restore_schemas():
-    original = SCHEMAS.read_bytes()
-    try:
-        yield original.decode("utf-8")
-    finally:
-        SCHEMAS.write_bytes(original)  # 字节精确，见上面那段注记
+    """只提供原文；还原交给 `mutate()`（持锁 + 按**字节**还原）。
+
+    字节精确这条不能丢（见 `_mutate_schemas` 上方注记）：CRLF 检出 + `write_text`
+    会把内容写成 `\r\n`，于是 `git status` 显示 modified 而 `git diff` 是空的。
+    `mutate()` 内部就是 `read_bytes/write_bytes`，正是这里需要的。
+    """
+    return SCHEMAS.read_bytes().decode("utf-8")
 
 
 @pytest.mark.parametrize(
@@ -431,10 +420,11 @@ def _restore_schemas():
     ids=[m[0] for m in SCHEMA_MUTATIONS],
 )
 def test_breaking_the_identity_filter_makes_the_parity_guard_red(
-    label: str, anchor: str, replacement: str, _restore_schemas: str
+    label: str, anchor: str, replacement: str, _restore_schemas: Path
 ) -> None:
-    _mutate_schemas(_restore_schemas, anchor, replacement)
-    try:
+    with mutate(SCHEMAS) as original:  # 锁 + 按字节还原 + **锁内**读原文
+        text = original.text(SCHEMAS)
+        _mutate_schemas(text, anchor, replacement)
         proc = subprocess.run(
             [
                 sys.executable,
@@ -452,8 +442,6 @@ def test_breaking_the_identity_filter_makes_the_parity_guard_red(
             errors="replace",
             check=False,
         )
-    finally:
-        SCHEMAS.write_bytes(_restore_schemas.encode("utf-8"))
     assert proc.returncode != 0, (
         f"「{label}」之后，账本读者一致性守卫仍然全绿 —— 它是个假闸。\n"
         "这条守卫守的正是本轮的真实缺陷：噪声带把不属于当前仪表的实测算了进去。"

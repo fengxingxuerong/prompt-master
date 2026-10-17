@@ -50,12 +50,13 @@ releases-data-clean），当时的验证是：
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from _mutation_lock import mutate
 
 ROOT = Path(__file__).resolve().parents[1]
 PROMPTS = ROOT / "pm" / "prompts.py"
@@ -92,28 +93,12 @@ requires_hook_venv = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # 工具：安全地"弄坏 → 验 → 还原"
 # ---------------------------------------------------------------------------
-@pytest.fixture
-def restorer():
-    """登记要还原的文件；无论断言是否失败，都在退出时按字节还原。
-
-    ⚠️ 必须按**字节**还原，不能按文本：Windows 上 Python 的 `write_text`
-    默认会把 `\n` 写成 `\r\n`，于是"还原"出来的文件与 HEAD 有差异，
-    `git status` 会一直显示 modified，而 `git diff` 又看不到内容变化——
-    这是本轮实际踩到的一个坑（探针跑了三轮才发现自己污染了工作树）。
-    """
-    saved: list[Path] = []
-
-    def save(path: Path) -> None:
-        shutil.copy2(path, path.with_suffix(path.suffix + ".hooksbak"))
-        saved.append(path)
-
-    yield save
-
-    for path in saved:
-        backup = path.with_suffix(path.suffix + ".hooksbak")
-        if backup.exists():
-            shutil.copy2(backup, path)
-            backup.unlink()
+# 还原**必须按字节**（不能按文本）：Windows 上 Python 的 `write_text` 默认会把 `\n`
+# 写成 `\r\n`，于是"还原"出来的文件与 HEAD 有差异 —— `git status` 一直显示 modified，
+# 而 `git diff` 又看不到内容变化（本轮实际踩到，探针跑了三轮才发现自己污染了工作树）。
+# 这段还原 + **跨进程锁**已收进 `tests/_mutation_lock.py`：两个 pytest 并发时，
+# 固定名备份（`.hooksbak`）会互相覆盖/删除，且另一个进程会读到被污染的 `pm/prompts.py`
+# 而误报自己的回归（本机实测：两个全量套件并发 → 两边各红一片，单跑每个文件全绿）。
 
 
 def run_hook(hook_id: str) -> subprocess.CompletedProcess[str]:
@@ -165,19 +150,25 @@ def _break_prompt_rule(text: str) -> str | None:
 
 
 @requires_hook_venv
-def test_a_broken_prompt_is_actually_blocked(restorer) -> None:
+def test_a_broken_prompt_is_actually_blocked() -> None:
     """prompt-gate：引入一条命中规则 ⇒ 必须红。
 
     ⚠️ 素材必须是**规则命中**，不是文本变化。理由见模块 docstring。
     """
-    restorer(PROMPTS)
-    original = PROMPTS.read_bytes()
-    poisoned = _break_prompt_rule(original.decode("utf-8"))
+    original = PROMPTS.read_text(encoding="utf-8")
+    poisoned = _break_prompt_rule(original)
     if poisoned is None:
         pytest.skip("没找到可以污染的干净模板（模板集全变脏时属正常，跳过而非假绿）")
-    PROMPTS.write_text(poisoned, encoding="utf-8", newline="")
 
-    proc = run_hook("prompt-gate")
+    with mutate(PROMPTS) as locked:  # 锁 + 按字节还原 + **锁内**读原文
+        # 锁内重读：fixture 之外读的那份可能在另一个进程持锁期间被改成污染版本
+        text = locked.text(PROMPTS)
+        poisoned = _break_prompt_rule(text)
+        if poisoned is None:  # pragma: no cover - 同上，模板集全脏时才可能
+            pytest.skip("锁内重读后发现没有可污染的干净模板")
+        PROMPTS.write_text(poisoned, encoding="utf-8", newline="")
+        proc = run_hook("prompt-gate")
+
     assert proc.returncode != 0, (
         f"把一个干净模板污染到命中确定性规则后，prompt-gate 钩子仍然 rc=0。\n"
         f"{proc.stdout[-800:]}\n"
@@ -190,15 +181,21 @@ def test_an_untouched_repo_stays_green() -> None:
     """反向对照：不弄坏时必须是绿的。
 
     没有这条，上面那条可能是因为"钩子恒红"才通过的。
+
+    ⚠️ 本用例也要持同一把锁（2026-10-17）：它断言的是"**工作树干净时**钩子绿"，
+    而另一个 pytest 进程若正举着 `mutate()` 污染 `pm/prompts.py`，
+    这里的 `prompt-gate` 会读到污染版本而报 rc=1 —— 红的是并发，不是代码。
+    本机实测：不加锁时两个全量套件并发，这条就是唯一残留的失败。
     """
-    proc = run_hook("prompt-gate")
+    with mutate(PROMPTS):  # 只取证，不改内容；锁保证"干净"这个前提成立
+        proc = run_hook("prompt-gate")
     assert proc.returncode == 0, (
         f"工作树是干净的，prompt-gate 却 rc={proc.returncode}：\n{proc.stdout[-800:]}"
     )
 
 
 @requires_hook_venv
-def test_dirty_release_data_is_actually_blocked(restorer) -> None:
+def test_dirty_release_data_is_actually_blocked() -> None:
     """releases-data-clean：把被跟踪的数据写脏 ⇒ 必须红。
 
     这条防的是"测试写脏的运营数据被 commit 直接带走"——CI 要等 push 才发现，
@@ -226,10 +223,10 @@ def test_dirty_release_data_is_actually_blocked(restorer) -> None:
         pytest.skip("releases/*/data 下没有被 git 跟踪的文件")
     victim = tracked_paths[0]
 
-    restorer(victim)
-    victim.write_bytes(victim.read_bytes() + b"\nprobe-dirty\n")
+    with mutate(victim) as locked:  # 锁 + 按字节还原 + **锁内**读原文
+        victim.write_bytes(locked.raw(victim) + b"\nprobe-dirty\n")
+        proc = run_hook("releases-data-clean")
 
-    proc = run_hook("releases-data-clean")
     assert proc.returncode != 0, (
         f"把 {victim.name} 写脏后，releases-data-clean 仍然 rc=0。\n{proc.stdout[-500:]}"
     )
