@@ -50,7 +50,9 @@ done
 # 每个场景用独立缓存/产物目录：否则第二次跑会全部命中缓存，
 # 真实 HTTP 链路被跳过，grep 出来的证据是空的（脚本却照样 0 退出）。
 WORK_DIR="$(mktemp -d)"
-COMMON_ENV+=( PM_CACHE_DIR="$WORK_DIR" PM_LOG_DIR="$WORK_DIR" )
+# .env 里本机联调残留的 PM_FORCE_JSON_CHANNEL=1 会经 load_dotenv 注回，通道 A 全体被跳过
+# 且只留 DEBUG 日志 —— 桩 e2e 三场景全 FAIL 还找不到原因（2026-10-12 实测），与 ps1 同补
+COMMON_ENV+=( PM_FORCE_JSON_CHANNEL=0 PM_CACHE_DIR="$WORK_DIR" PM_LOG_DIR="$WORK_DIR" )
 
 # 桩评委固定给 8 分上下：把达标阈值调高，流程才会真的走到
 # revise / 早停 / 迭代上限兜底 这些分支（默认 8.0 时首轮就 passed，这些路径 0 覆盖）。

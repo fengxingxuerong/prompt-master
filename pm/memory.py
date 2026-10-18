@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .paths import log_dir as log_dir_default
+
 logger = logging.getLogger(__name__)
 
 # 注入生成链路的资产正文上限：参考块太长会挤占 Optimizer 的注意力
@@ -85,7 +87,9 @@ def find_similar_asset(
     """
     if not (task or "").strip():
         return None
-    log_dir = log_dir or (Path(__file__).resolve().parent.parent / "logs")
+    # 默认路径走 log_dir() 唯一实现：直接拿 __file__ 拼会无视 PM_LOG_DIR，
+    # e2e/多检出场景产物已隔离到别处时，这里却仍去扫仓库 logs/（2026-10-12 e2e 实测踩中）。
+    log_dir = log_dir or log_dir_default()
     if os.getenv("PM_MEMORY_HINT", "1").strip().lower() in {"0", "false", "no", "off"}:
         return None
 

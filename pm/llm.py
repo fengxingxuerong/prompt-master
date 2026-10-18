@@ -1249,7 +1249,7 @@ def _schema_hint_block(model: type[BaseModel]) -> str:
 
 
 class _ChannelASkipped(RuntimeError):
-    """主动跳过原生结构化输出通道（不是故障，不走告警日志）。"""
+    """主动跳过原生结构化输出通道（不是故障，INFO 级留痕，不走告警日志）。"""
 
 
 _UNSUPPORTED_A: set[str] = set()
@@ -1409,7 +1409,9 @@ def structured_call(
         logger.warning("[%s] %s，降级为 JSON 文本解析", role, last_err)
     except _ChannelASkipped as e:
         last_err = f"跳过原生结构化输出：{e}"
-        logger.debug("[%s] %s", role, last_err)
+        # INFO 而非 DEBUG：跳过不打 WARNING 也不打 INFO 的话，"为什么没走原生通道"
+        # 在默认日志里完全不可见 —— e2e 三场景 FAIL 时定位主要耗在这条隐形路径上（2026-10-12）
+        logger.info("[%s] %s", role, last_err)
     except CallBudgetExceeded:
         # 预算用尽不是"这个通道不支持"，不能记进能力缓存（那会让后续调用永久跳过通道 A），
         # 也不必再进通道 B——同一个预算已经见底了。直接上抛，保留现场。

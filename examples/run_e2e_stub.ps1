@@ -262,6 +262,12 @@ function Set-PmEnv {
     $env:PM_TARGET_CACHE        = '0'
     # 结构化输出方法基线：空 = 用 langchain 默认（json_schema）；场景 3 会临时覆盖
     $env:PM_STRUCT_METHOD       = ''
+    # 同理必须显式置 0：.env 里本机联调残留的 PM_FORCE_JSON_CHANNEL=1 会被 load_dotenv
+    # 注回来，通道 A 全体被跳过且只留 DEBUG 日志 —— 三场景全 FAIL 还找不到原因（2026-10-12 实测）
+    $env:PM_FORCE_JSON_CHANNEL  = '0'
+    # 与 .sh 的 COMMON_ENV 对齐：产物目录一并隔离，否则记忆检索会扫到主检出的 logs/
+    # （实测扫到 1472 条本地历史，86% 未参与检索的告警即来源于此）
+    $env:PM_LOG_DIR             = $WorkDir
     # 与 .sh 对齐（A11）：桩评委固定给 8 分上下，阈值不调高则首轮就 passed，
     # revise / 早停 / 迭代上限分支在桩 e2e 里 0 覆盖
     $env:PM_PASS_THRESHOLD      = '9.5'
