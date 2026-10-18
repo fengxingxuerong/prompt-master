@@ -117,6 +117,11 @@ MCP 接入（13 个工具，stdio）：`python -m pm.mcp_server`。计算类工�
   其余要靠新一轮真端点批次（§十七实测：一轮 4 用例双采样 ≈80~100 次调用、3~5 小时）：
   `python harvest_anchors.py --coverage` 看差哪几格，`--prefer-deficient --total N` 按缺口排采集顺序（没给 `--total` 时它只排序不取舍，那条 CLI 会当场这么说）。
   零算力那批不用采集：`python scripts/build_owner_rejudge_queue.py` 生成一张表，把 25 条"AI 代判当成人工锚点"的条目请所有者改判——表里 `human_score` 一律留空，回填只写他填过的行并把那些行记成 `human_score_source=owner`，有非法行则整次作废、一字节不动。
+  ⚠️ **别直接拿那张 CSV 打分**：它的「输出摘要」被 `_make_score_form` 截到 **160 字符**，
+  而这次要判的正是只有看全文才判得出来的两类东西（编造的关键事实 / 核心交付物缺位）——
+  凭摘要打出来的分是「编的分」，与本仓 10-15 查实过的"活账本 6/11 条锚点人工分是编的"同类。
+  判分请用 `python scripts/build_rejudge_form.py`：把 25 条的**完整**输出摊成
+  `judge_calibration/rejudge_form.html`（评委分默认隐藏防锚定、进度存本地、导出即回填 CSV）。
 
 ## 四、仓库地图
 
@@ -126,7 +131,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1897 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1909 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）

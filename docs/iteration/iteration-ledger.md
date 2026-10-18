@@ -1653,3 +1653,45 @@ run `54b28925695a`，35 调用，`early_stopped`（修订器空内容 → 保留
 
 验收：四条接线测试先红后绿；全量 1308 串行绿（+4）；ruff/format/mypy 干净；用例数三处同改
 1304→1308（README / operations / pre-commit 注释，`test_test_count_copies_match_the_live_collection` 钉）。
+
+## Round 33（2026-10-18，PromptMaster 本产品）—— R4 取证：把中断那一轮的读数捞回来，并修掉"中断 = 零落盘"
+
+**① R4 不是"什么都没跑出来"，是"没人去看 err"**
+
+`logs/live_run_support_triage_20261014_r4.json` 是 0 字节，此前据此记为"R4 未跑完、归因未裁定"。
+本轮按 `live_run_support_triage_20261014_r4.err`（46KB，322 行）逐行取证，读数其实在：
+
+| 轮 | 基线 avg/min | 优化臂 avg/min | Δ(pointwise) | 成对盲评 |
+|---|---|---|---|---|
+| R3（命题：单类别刚性约束） | 7.35 / 5.12 | 9.50 / 9.30 | **+2.15** | 优化版 1 : 基线 3 → **worse** |
+| R4（只改命题：所有根因类别逐一列出） | 8.77 / 8.60 | 9.36 / 9.12 | **+0.59** | **没跑到**（流程止于 reviser 429 退避） |
+
+出处：R3 `live_run_support_triage_20261013_r3.err:134 / :242 / :263`；
+R4 `live_run_support_triage_20261014_r4.err:111`，聚合行在 02:24:33（`avg=9.36 min=9.12 下界=8.76`，
+该行 `passed=True` 随后被注入门禁压成 False：1/1 条注入用例被劫持）。
+
+读得出来的方向：**只改任务命题，基线就被抬高 1.42 分（7.35→8.77），而优化臂几乎不动（9.50→9.36），
+Δ 从 +2.15 缩到 +0.59** ⇒ R3 那个"大 Δ"里有相当一部分是任务命题把基线压下去造成的假象，
+与"冲突是任务命题产物而非提示词骨架缺陷"的假说同向。
+
+**但裁定仍然不成立**：R4 设计的判据是成对盲评（R3 的冲突正是盲评给的），而盲评在流程更后面，
+那一轮在 02:25:13（`[reviser] 轮换到 Key 池第 0 个 Key 重试`）之后进程消失，盲评一行都没有。
+Δ 缩窄是 pointwise 侧的旁证，不是判据本身。**要裁定必须重跑 R4**（真端点一次约 80~100 次调用 / 3~5 小时），
+属 owner 的成本决策，不在工程侧替他决定。
+
+**② 同轮修掉"中断即零落盘"（R4 证据全丢的直接原因）**
+
+- 根因：`run_pipeline` 只在正常返回时把 state 交回 `pm/cli/main.py:245` 的 `save_artifacts`；
+  Ctrl+C / 关闭终端抛的是 `KeyboardInterrupt`（`BaseException`），既不抓也不落盘。
+  而 langgraph 默认带 MemorySaver，**每个节点之后的状态本来就在内存里**，只是没人去取。
+- 对照证据：同日 20:20 / 21:08 / 23:16 / 23:17 四轮（完成或早停）都有 `run_*.json`，
+  只有 00:09 起、02:25 中断的 R4 没有 ⇒ 不是"从来不落盘"，是"只有跑完才落盘"。
+- 修法：`pm/cli/pipeline.py` 加 `except BaseException` 抢救分支 —— 取 `app.get_state(config).values`，
+  用 `_atomic_write`（`pm/modelhub/filelock.py`，同族实现不抄第二遍）写到 `pm.paths.log_dir()`，
+  **明写 `artifact_interrupted=true` + `interrupted_at`**，并向 stderr 报出落点。
+- 三条刻意的边界：正常路径一个字节都不多写（落盘时机变了会污染 `--json` 契约与运营目录闸）；
+  **空状态不落盘**（"文件在、信息不在"正是 `live_run_*.json` 0 字节那个坏形状）；
+  抢救失败不许吞掉原始异常（把 `KeyboardInterrupt` 变成 `OSError` 会让调用方以为任务本身坏了）。
+- 守卫 6 条（`tests/test_pipeline_interrupt_safety.py`），先红后绿。
+  变异验牙：`except BaseException` → `except Exception` ⇒ 2 条当场红，还原即绿。
+- ruff / format / mypy --strict 干净；`tests/` 子集 253 条（cli/pipeline/graph/e2e/artifact/interrupt）全绿。
