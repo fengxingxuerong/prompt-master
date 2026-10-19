@@ -85,10 +85,12 @@ def test_budget_exhaustion_attribution_is_left_alone() -> None:
 
 
 def test_measured_diagnostics_in_llm_py_are_not_flagged() -> None:
-    """`pm/llm.py` 的额度诊断是**有实测数据**的，不在本节范围。"""
-    llm_src = (SRC.parent / "llm.py").read_text(encoding="utf-8")
+    """`pm/llm/` 的额度诊断是**有实测数据**的，不在本节范围。"""
+    llm_src = "\n".join(
+        p.read_text(encoding="utf-8") for p in sorted((SRC.parent / "llm").glob("*.py"))
+    )
     assert "reasoning_tokens" in llm_src
-    assert "额度被**推理**耗尽" in llm_src, "llm.py 的实测诊断被误伤了"
+    assert "额度被**推理**耗尽" in llm_src, "pm/llm 的实测诊断被误伤了"
 
 
 # ---------------------------------------------------------------------------

@@ -273,7 +273,7 @@ python run.py calibrate       # ④ 评委可信度校准 + 漂移对比
 | Variable | `PM_MODEL` | 必填，如 `your-model-name` |
 | Secret/Variable | `PM_EVALUATOR_B_*` / `PM_ARBITER_*` / `PM_COMPARATOR_*` | 可选；未配则回退全局三件套 |
 
-⚠️ **角色级覆盖是"静默生效"的**：`pm/llm.py` 读的是 `PM_<ROLE>_BASE_URL` 这类键名，
+⚠️ **角色级覆盖是"静默生效"的**：`pm/llm/config.py` 读的是 `PM_<ROLE>_BASE_URL` 这类键名，
 写错了（比如多一个 `_B`）不会报错 —— 它会回退到全局模型，于是"冒烟过了、评测也过了"，
 但用的根本不是你以为的那个模型。`tests/test_prompt_eval.py` 里有两条护栏钉这件事
 （三处 env 必须逐字一致 + 角色名必须是 `pm.llm` 真的认识的那些）。

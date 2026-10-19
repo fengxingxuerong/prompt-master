@@ -185,7 +185,7 @@ def test_dynamic_pm_keys_are_known() -> None:
     found = {
         _rel(p) for p in PM_ROOT.rglob("*.py") if _DYNAMIC.search(p.read_text(encoding="utf-8"))
     }
-    assert found == {"pm/schemas.py", "pm/cache.py", "pm/llm.py"}, (
+    assert found == {"pm/schemas.py", "pm/cache.py", "pm/llm/config.py"}, (
         f"出现了新的动态 PM_ 键构造：{sorted(found)}\n"
         "请确认它是否需要隔离——动态键没法被 test_every_literal_pm_key 扫到。"
     )

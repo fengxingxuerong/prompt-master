@@ -85,7 +85,7 @@ curl http://127.0.0.1:8687/api/health
 
 ## 7. 与 PromptMaster 原有流程的关系
 
-- 原有优化闭环（`run.py` / `run_server.py` / MCP）**完全不受影响**：仍然走 `pm/llm.py`
+- 原有优化闭环（`run.py` / `run_server.py` / MCP）**完全不受影响**：仍然走 `pm/llm/`
   的角色配置（PM_* 变量），本次未改动其任何一行逻辑；
 - ModelHub 是**新增的统一接入层**：新智能体一律接 8687 网关；PromptMaster 内部
   流程后续如需接入模型池，把 `PM_BASE_URL=http://127.0.0.1:8687/v1` 即可切换（可选，

@@ -58,7 +58,7 @@ dev = [
 [tool.setuptools]
 # 平铺布局下 setuptools 自动发现会把 run.py / run_server.py 当成顶层模块，
 # 这里只安装 pm 包（含 pm.nodes / pm.cli / pm.web 子包）；两个入口脚本依旧用 `python run.py ...` 从仓根跑。
-packages = ["pm", "pm.nodes", "pm.cli", "pm.web", "pm.modelhub", "pm.calibration"]
+packages = ["pm", "pm.nodes", "pm.cli", "pm.web", "pm.modelhub", "pm.calibration", "pm.llm"]
 
 [tool.setuptools.dynamic]
 # 见 [project] 的 dynamic：版本号取自 pm/__init__.py:__version__（setuptools 按 AST 静态读，不 import）
@@ -151,7 +151,15 @@ strict = true
 [[tool.mypy.overrides]]
 # pydantic BaseModel 因 follow_imports=skip 被判 Any，继承它的模型类只能豁免
 # disallow_subclassing_any；模型字段本身均已完整标注
-module = ["pm.schemas", "pm.llm", "pm.assertions", "pm.server", "pm.modelhub.server", "pm.panel"]
+module = [
+    "pm.schemas",
+    "pm.llm",
+    "pm.llm.config",
+    "pm.assertions",
+    "pm.server",
+    "pm.modelhub.server",
+    "pm.panel",
+]
 disallow_subclassing_any = false
 
 [[tool.mypy.overrides]]
