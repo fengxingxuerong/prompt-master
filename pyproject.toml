@@ -10,21 +10,25 @@ name = "prompt-master"
 dynamic = ["version"]
 description = "提示词自动生成 / 测试 / 评估 / 迭代优化闭环（LangGraph）"
 requires-python = ">=3.11"
-# 与 requirements.txt 保持同一组实测通过的版本号（tests/test_packaging.py 会比对两边，防漂移）。
-# 以前这里是空的、依赖全在 requirements.txt，导致 `pip install .` 装出来是个跑不起来的空壳。
+# 这里写的是**兼容范围**（库用户 `pip install prompt-master` 时允许装的版本），
+# requirements.txt 才是 CI/生产的**精确锁**（`==`，可复现）。两层职责不同：
+#   范围 `~=1.2.11` = >=1.2.11,<1.3 —— 只放开补丁位，不放开小版本；
+#   `mcp>=1.30,<2` 是硬上限：mcp 2.x 会把 starlette 顶到与 fastapi 0.115 冲突的版本
+#   （实测 2.2.0 装完 pm.server 直接 import 失败），所以不能写成 `~=`。
+# 两边的包含关系由 tests/test_packaging.py::test_pyproject_dependencies_match_requirements 钉住
+# （锁里的精确版必须落在范围里）。
 dependencies = [
-    "langgraph==1.2.11",
-    "langgraph-checkpoint==4.2.0",
-    "langgraph-checkpoint-sqlite==3.1.1",
-    "langchain-core==1.6.2",
-    "langchain-openai==1.6.0",
-    "pydantic==2.13.5",
-    "python-dotenv==1.2.3",
-    "fastapi==0.115.12",
-    "uvicorn[standard]==0.34.2",
-    # pm/mcp_server.py（智能体标准协议接入）。必须 <2：mcp 2.x 会把 starlette 顶到
-    # 与 fastapi 0.115 冲突的版本（实测 2.2.0 装完 pm.server 直接 import 失败）
-    "mcp==1.30.0",
+    "langgraph~=1.2.11",
+    "langgraph-checkpoint~=4.2.0",
+    "langgraph-checkpoint-sqlite~=3.1.1",
+    "langchain-core~=1.6.2",
+    "langchain-openai~=1.6.0",
+    "pydantic~=2.13.5",
+    "python-dotenv~=1.2.3",
+    "fastapi~=0.115.12",
+    "uvicorn[standard]~=0.34.2",
+    # pm/mcp_server.py（智能体标准协议接入）。必须 <2，理由见上方注释。
+    "mcp>=1.30,<2",
 ]
 
 [project.scripts]

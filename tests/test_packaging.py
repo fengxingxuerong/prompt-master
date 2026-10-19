@@ -16,19 +16,70 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+_SPEC_RE = re.compile(r"^([A-Za-z0-9_.\-]+)(?:\[([^\]]+)\])?\s*((?:==|~=|>=|<=|>|<).*)$")
+
+
 def _split(spec: str) -> tuple[str, str, str]:
-    """`uvicorn[standard]==0.34.2` → ("uvicorn", "standard", "0.34.2")。"""
-    name, _, ver = spec.partition("==")
-    name = name.strip()
-    extras = ""
-    m = re.match(r"^([A-Za-z0-9_.\-]+)\[([^\]]+)\]$", name)
-    if m:
-        name, extras = m.group(1), m.group(2)
+    """`uvicorn[standard]~=0.34.2` → ("uvicorn", "standard", "~=0.34.2")。
+
+    第三段返回的是**约束串**而不是裸版本号：2026-10-19 起两份清单职责不同 ——
+    pyproject 写兼容范围（`~=` / `>=,<`），requirements.txt 写精确锁（`==`）。
+    两者的包含关系由 `_spec_allows` 判，不再要求字符串相同。
+    """
+    m = _SPEC_RE.match(spec.strip())
+    if not m:
+        raise ValueError(f"无法解析依赖声明：{spec!r}")
+    name, extras, constraint = m.group(1), m.group(2) or "", m.group(3).strip()
     return (
         name.lower(),
         ",".join(sorted(e.strip() for e in extras.split(",") if e.strip())),
-        ver.strip(),
+        constraint,
     )
+
+
+def _vtuple(ver: str) -> tuple[int, int, int]:
+    parts = [int(p) for p in re.findall(r"\d+", ver)]
+    while len(parts) < 3:
+        parts.append(0)
+    return (parts[0], parts[1], parts[2])
+
+
+def _clause_ok(lv: tuple[int, int, int], op: str, dv: tuple[int, int, int]) -> bool:
+    """单个版本子句是否成立（`~=` 展开成 `>=x,<下一小版本`）。"""
+    if op == "==":
+        return lv == dv
+    if op == ">=":
+        return lv >= dv
+    if op == "<=":
+        return lv <= dv
+    if op == ">":
+        return lv > dv
+    if op == "<":
+        return lv < dv
+    if op == "~=":
+        return lv >= dv and lv < (dv[0], dv[1] + 1, 0)
+    raise ValueError(f"不支持的版本约束符：{op!r}")
+
+
+def _spec_allows(locked: str, declared: str) -> bool:
+    """精确锁 `==1.2.11` 是否落在 pyproject 的约束 `~=1.2.11` / `>=1.30,<2` 里。
+
+    锁写成范围（不带 `==`）直接判 False：那等于没有锁，CI 每次装到的版本都不同。
+    """
+    m = re.match(r"^==\s*([0-9][^\s]*)$", locked.strip())
+    if not m:
+        return False
+    lv = _vtuple(m.group(1))
+    for clause in declared.split(","):
+        clause = clause.strip()
+        if not clause:
+            continue
+        cm = re.match(r"^(~=|>=|<=|==|>|<)\s*([0-9][^\s]*)$", clause)
+        if not cm:
+            raise ValueError(f"不支持的版本约束：{clause!r}（只接受 ~= >= <= == > <）")
+        if not _clause_ok(lv, cm.group(1), _vtuple(cm.group(2))):
+            return False
+    return True
 
 
 def _requirements() -> dict[str, tuple[str, str]]:
@@ -48,11 +99,19 @@ def _pyproject() -> dict:
 
 
 def test_pyproject_dependencies_match_requirements():
+    """两份清单的**包含关系**，不是字符串相等。
+
+    pyproject = 兼容范围（库用户装到的可以是补丁位上的任何版本）；
+    requirements.txt = 精确锁（CI / 生产复现）。判据三条：
+    ① 运行时依赖的名称集合两边相等（多一个 = 装上未测的东西，少一个 = 装不起来）；
+    ② extras 相同；
+    ③ 锁里的精确版必须落在 pyproject 的范围内。
+    """
     proj = _pyproject()["project"]
     declared = {}
     for spec in proj["dependencies"]:
-        name, extras, ver = _split(spec)
-        declared[name] = (extras, ver)
+        name, extras, constraint = _split(spec)
+        declared[name] = (extras, constraint)
 
     reqs = _requirements()
     # 排除"开发/门禁工具"：口径是 dev extras 里列了什么，而不是另抄一份名单。
@@ -64,8 +123,23 @@ def test_pyproject_dependencies_match_requirements():
 
     missing = sorted(set(runtime) - set(declared))
     assert not missing, f"requirements.txt 里有、pyproject 里没声明：{missing}"
-    drift = {k: (runtime[k], declared[k]) for k in runtime if runtime[k] != declared[k]}
-    assert not drift, f"两份清单版本/extra 不一致：{drift}"
+    extra = sorted(set(declared) - set(runtime))
+    assert not extra, f"pyproject 声明了但 requirements.txt 没锁：{extra}（会装上未测版本）"
+
+    bad_extras = {
+        k: (runtime[k][0], declared[k][0]) for k in runtime if runtime[k][0] != declared[k][0]
+    }
+    assert not bad_extras, f"两份清单的 extras 不一致：{bad_extras}"
+
+    out_of_range = {
+        k: (runtime[k][1], declared[k][1])
+        for k in runtime
+        if not _spec_allows(runtime[k][1], declared[k][1])
+    }
+    assert not out_of_range, (
+        f"锁的精确版不在 pyproject 的兼容范围内：{out_of_range}"
+        "（升依赖的顺序：先改 requirements 的 ==，跑全量套件，再抬 pyproject 的下限）"
+    )
 
 
 def test_dev_extras_cover_ci_tools():
