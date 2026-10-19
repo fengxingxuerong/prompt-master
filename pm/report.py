@@ -1,207 +1,146 @@
-"""交付报告渲染：从 `pm/nodes.py` 搬出来的纯函数。
+"""render_report：章节编排（2026-10-19 拆包后本文件只剩这一层 + 兼容重导出）。
 
-为什么单独成模块：报告是这套系统对外的唯一界面，"如实标注"全靠它。原先它和节点实现
-挤在同一个 1500 行文件里 —— 改措辞要在大文件里翻，改节点又容易误伤渲染。
-这里只做字符串组装，不读写图状态；写回由 `nodes.report_node` 负责。
+原来的 `pm/report.py` 有 1079 行：取值/判定、43 处跨段依赖、15 个章节渲染函数。
+现在：`report_helpers.py`（取值与判定）、`report_sections.py`（逐章节渲染）、
+本文件（编排 + 重导出全部符号，保证 `from .report import X` 的既有调用方零改动）。
 """
 
 from __future__ import annotations
 
-import re
-from collections.abc import Mapping
 from typing import Any
 
-from .schemas import (
-    PASS_THRESHOLD,
-    effective_disagreement_threshold,
-    judge_disagreement_threshold,
-    judge_jitter,
+from .report_helpers import (
+    BASELINE_DISCRIMINATION_FLOOR as BASELINE_DISCRIMINATION_FLOOR,
 )
-
-# 用例区分度自检阈值：基线均分达到该值以上时，判定「用例对优化不敏感」。
-# 基线 = 原始需求直喂 target：它都拿到接近满分，说明这批用例太简单，
-# 任何合理的提示词都能过——优化版即使 9 分也证明不了相对价值（评不出差异）。
-BASELINE_DISCRIMINATION_FLOOR = 8.0
-
-# 报告只“读”状态，不依赖 State 的完整字段定义（也不该依赖）：
-# 用 Mapping 接单，方便单测直接传 dict，又避开 TypedDict 的窄接受。
-ReportState = Mapping[str, Any]
-
-
-def _seed_arm(state: ReportState) -> str:
-    """原稿改进模式下的用户原稿；没交原稿时为空串（基线臂=原始需求直喂）。"""
-    return str(state.get("seed_prompt") or "").strip()
-
-
-def _report_safe_int(value: Any) -> int:
-    """尽力取非负整数，取不到就是 0（state 里的字段类型不可信）。
-
-    为什么需要：state 可能来自旧版 checkpoint 或外部构造，`int(None)`／`int("abc")`
-    会让**报告渲染**整段崩掉 —— 报告是唯一给用户看的东西，绝不能因为一个脏字段
-    就整个出不来（测试实证：total="abc" 时原写法抛 ValueError）。
-    """
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _verdict_conflict(
-    d_avg: float | None, pw: dict[str, Any], base_word: str = "基线"
-) -> str | None:
-    """均分口径（Δ）与成对盲评结论是否打架。
-
-    真实运行里出现过：均分 8.67 > 基线 7.54（Δ=+1.13），盲评却是优化版 0 胜 / 基线 4 胜。
-    两段结论并排展示、不提示冲突，等于让读者自己猜——与"证明变好了"的设计目标直接矛盾。
-    这里只**报告**冲突，不改判定：自动裁定一个自己都说不清的结果比如实说明更危险。
-
-    `base_word` 是对手臂的称呼：原稿改进模式下它不是"未优化的基线"而是**用户自己的版本**，
-    沿用"基线"会让读者把"基线胜出"读成"不优化更好"。默认值保持非原稿模式逐字不变。
-    """
-    if d_avg is None or not pw:
-        return None
-    verdict = str(pw.get("verdict") or "")
-    if d_avg > 0 and verdict == "worse":
-        return (
-            f"均分口径说优化版更好（Δ={d_avg:+.2f}），"
-            f"但成对盲评多数判**{base_word}胜出**——相对偏好与绝对评分给出相反结论。"
-        )
-    if d_avg <= 0 and verdict == "better":
-        return (
-            f"均分口径说没有正向提升（Δ={d_avg:+.2f}），"
-            "但成对盲评多数判**优化版胜出**——相对偏好与绝对评分给出相反结论。"
-        )
-    return None
-
-
-def _infra_invalid_cases(state: Mapping[str, Any]) -> int:
-    """本臂有多少条用例**没有任何有效样本**（目标模型空输出 / 调用失败）。
-
-    为什么必须单独报：这类用例在评分层被记 1.0（否则用例会凭空消失），于是
-    "优化版比基线差 4.81 分"可能测的只是**两次调用之间端点抖动的相位差**——
-    2026-09-18 的 sales_mockgen 一轮就是这样：优化臂 8 次 empty_output、
-    基线臂全成功，Δ 完全没有质量含义。不写出来就会被当成结论读。
-    """
-    by_case: dict[int, bool] = {}
-    for r in _test_runs(state):
-        i = _report_safe_int(r.get("test_case_index", 0) or 0)
-        ok = not r.get("error") and bool(str(r.get("output") or "").strip())
-        by_case[i] = by_case.get(i, False) or ok
-    return sum(1 for ok in by_case.values() if not ok)
-
-
-def _cases_short_note(agg: dict[str, Any]) -> str:
-    """用例数不足时在报告里显式标注（C1）：避免“分数很高”被当成“结论可靠”。"""
-    if agg.get("cases_complete", True):
-        return ""
-    return f"（不足：期望 {agg.get('n_cases_expected')} 条，本次不予判定达标）"
-
-
-def pick_best(state: ReportState) -> tuple[dict[str, Any], str]:
-    """挑出交付版本并给出说明。
-
-    原文档只说"返回当前最佳版本 + 未解决的问题"，却没实现"最佳"的选取逻辑。
-    这里明确：达标即取当前版；未达标则回溯所有版本取 avg_score 最高者，
-    并如实标注未达标与遗留问题 —— 不粉饰结果。
-    """
-    versions: list[dict[str, Any]] = state.get("prompt_versions") or []
-    status = state.get("status", "running")
-    scored = [v for v in versions if v.get("avg_score") is not None]
-    if status == "passed" and versions:
-        return versions[-1], "最终版本（已达标）"
-    if scored:
-        best = max(scored, key=lambda v: (v["avg_score"] or 0, v.get("min_score") or 0))
-        return best, f"第 {best.get('iteration')} 版（未达标，取历史最高分）"
-    if versions:
-        return versions[-1], "最终版本（未获得评分）"
-    return {"iteration": 0, "prompt": ""}, "无可用版本"
-
-
-def _human_source_note(cal: dict[str, Any]) -> str:
-    """锚点侧的同源披露：合并 bias 里有多少"人工分"其实是 AI 代判的。
-
-    评委同源（A/B 同模型）早有检测和警示，锚点侧的同源此前只在提交说明里承认过一句。
-    代判模型 GLM-5.3 与评委 B glm-5.2 同族 ⇒ 那部分读数量的是**家族一致性**，
-    不写出来，读者会把"+3.09"整句当成"与人的偏差"。
-    """
-    split = cal.get("by_human_source") or {}
-    ai = split.get("ai_proxy") or {}
-    owner = split.get("owner") or {}
-    ai_n = int(ai.get("n_anchors") or 0)
-    owner_n = int(owner.get("n_anchors") or 0)
-    if not ai_n or ai_n < owner_n:
-        return ""
-    bias = owner.get("bias")
-    strict = (
-        f"；严格人工那一半（{owner_n} 条）bias {float(bias):+.2f}"
-        if isinstance(bias, (int, float))
-        else ""
-    )
-    return f"（其中 {ai_n} 条的人工分是 AI 按所有者判例代判、与评委 B 同族{strict}）"
-
-
-def _calibration_disclosure(agg: ReportState) -> str | None:
-    """校准披露行：把账本里量得的评委系统性偏差折进报告的读数语境。
-
-    2026-09-29 落地，依据 docs/evaluation.md §十五：48 锚点人工基线把「评委 A
-    系统性偏松 bias +3.64、8.0 判定漏放 35/45」坐实——绝对分不带这把尺子的
-    已知误差就会被误读，8.2 不是"接近满分"，折算后约 4.6。与空产出封顶同一
-    哲学的另一半：**只披露、不修复**——点估计、判定行、保守下界全部照旧，
-    读者拿误差棒自己折算。
-
-    偏差在告警线（±1.0，calibration.BIAS_ALERT）内时降为弱措辞，否则未来换了
-    校准合格的评委，报告还在喊狼来了。
-
-    2026-10-04 换型纪元：聚合按**本轮实际解析到的评委模型**过滤（账本轮记录
-    自带 model 字段）——换型后旧模型的 +3.09 不再混进新仪表的披露行。模型
-    解析失败时退回不过滤（旧行为）：披露行有比没有好，配置错误另有体检管。
-    """
-    from . import llm as _llm
-    from .calibration import BIAS_ALERT, latest_pooled
-    from .prompts import checklist_rubric_stamp, rubric_stamp
-    from .scoring import scoring_mode
-
-    try:
-        current_model = _llm.build_config("evaluator").model
-        current_rubric = (
-            checklist_rubric_stamp() if scoring_mode() == "checklist" else rubric_stamp()
-        )
-    except Exception:  # noqa: BLE001 - 与 _judge_health 同款：配置读取失败不影响主流程
-        current_model = None
-        current_rubric = None
-
-    cal = latest_pooled(model=current_model, rubric=current_rubric)
-    if not cal:
-        return None
-    bias = cal.get("bias")
-    if not isinstance(bias, (int, float)):
-        return None
-    ci = cal.get("bias_ci95")
-    ci_note = (
-        f"（95% CI {ci[0]:+.2f}~{ci[1]:+.2f}）" if isinstance(ci, list) and len(ci) == 2 else ""
-    )
-    src_parts = [str(cal.get(k)) for k in ("n_anchors", "n_rounds") if isinstance(cal.get(k), int)]
-    src = f"{src_parts[0]} 条人工锚点、{src_parts[1]} 轮校准的" if len(src_parts) == 2 else ""
-    src += _human_source_note(cal)
-    avg = agg.get("avg_score")
-    if abs(bias) < BIAS_ALERT:
-        return (
-            f"- 评委校准披露：{src}聚合平均偏差 {bias:+.2f}{ci_note}，在告警线"
-            f"（±{BIAS_ALERT}）内，绝对分可按面值理解"
-        )
-    direction = "偏松" if bias > 0 else "偏严"
-    kappa = (cal.get("decision") or {}).get("kappa")
-    kappa_note = f"，κ={kappa}" if isinstance(kappa, (int, float)) else ""
-    fold = (
-        f"；本报告均分 {avg} 按此折算约 **{max(0.0, float(avg) - float(bias)):.1f}**"
-        if isinstance(avg, (int, float))
-        else ""
-    )
-    return (
-        f"- ⚠️ 评委校准披露：{src}聚合平均偏差 **{bias:+.2f}**{ci_note}——评委系统性{direction}"
-        f"已实测坐实{fold}。{PASS_THRESHOLD} 达标判定在裸读数下不可采信{kappa_note}，"
-        "达标结论建议人工抽查复核（量具刻画见 docs/evaluation.md §十五）"
-    )
+from .report_helpers import (
+    ReportState as ReportState,
+)
+from .report_helpers import (
+    _aggregate as _aggregate,
+)
+from .report_helpers import (
+    _base_word as _base_word,
+)
+from .report_helpers import (
+    _baseline_aggregate as _baseline_aggregate,
+)
+from .report_helpers import (
+    _calibration_disclosure as _calibration_disclosure,
+)
+from .report_helpers import (
+    _cases_short_note as _cases_short_note,
+)
+from .report_helpers import (
+    _delta_avg as _delta_avg,
+)
+from .report_helpers import (
+    _evaluations as _evaluations,
+)
+from .report_helpers import (
+    _human_source_note as _human_source_note,
+)
+from .report_helpers import (
+    _infra_invalid_cases as _infra_invalid_cases,
+)
+from .report_helpers import (
+    _pairwise as _pairwise,
+)
+from .report_helpers import (
+    _report_safe_int as _report_safe_int,
+)
+from .report_helpers import (
+    _seed_arm as _seed_arm,
+)
+from .report_helpers import (
+    _test_runs as _test_runs,
+)
+from .report_helpers import (
+    _verdict_conflict as _verdict_conflict,
+)
+from .report_helpers import (
+    pick_best as pick_best,
+)
+from .report_sections import (
+    _FAILED_JUDGE_RE as _FAILED_JUDGE_RE,
+)
+from .report_sections import (
+    _assertion_lines as _assertion_lines,
+)
+from .report_sections import (
+    _baseline_lines as _baseline_lines,
+)
+from .report_sections import (
+    _ceiling_claim_lines as _ceiling_claim_lines,
+)
+from .report_sections import (
+    _conflict_lines as _conflict_lines,
+)
+from .report_sections import (
+    _empty_deliverable_lines as _empty_deliverable_lines,
+)
+from .report_sections import (
+    _final_prompt_lines as _final_prompt_lines,
+)
+from .report_sections import (
+    _header_lines as _header_lines,
+)
+from .report_sections import (
+    _injection_lines as _injection_lines,
+)
+from .report_sections import (
+    _jitter_provenance_lines as _jitter_provenance_lines,
+)
+from .report_sections import (
+    _judge_bias_lines as _judge_bias_lines,
+)
+from .report_sections import (
+    _judge_source_lines as _judge_source_lines,
+)
+from .report_sections import (
+    _noise_band_lines as _noise_band_lines,
+)
+from .report_sections import (
+    _open_issues_lines as _open_issues_lines,
+)
+from .report_sections import (
+    _pairwise_lines as _pairwise_lines,
+)
+from .report_sections import (
+    _quality_warning_lines as _quality_warning_lines,
+)
+from .report_sections import (
+    _restate_ratio_lines as _restate_ratio_lines,
+)
+from .report_sections import (
+    _revision_delta_lines as _revision_delta_lines,
+)
+from .report_sections import (
+    _run_errors_lines as _run_errors_lines,
+)
+from .report_sections import (
+    _score_overview_lines as _score_overview_lines,
+)
+from .report_sections import (
+    _seed_lines as _seed_lines,
+)
+from .report_sections import (
+    _uncertainty_lines as _uncertainty_lines,
+)
+from .report_sections import (
+    _unresolved_lines as _unresolved_lines,
+)
+from .report_sections import (
+    _usage_lines as _usage_lines,
+)
+from .report_sections import (
+    _version_table_lines as _version_table_lines,
+)
+from .report_sections import (
+    _wasted_delivery_lines as _wasted_delivery_lines,
+)
+from .report_sections import (
+    judge_seat_absent as judge_seat_absent,
+)
 
 
 def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
@@ -229,851 +168,3 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     lines += _seed_lines(state)
     lines += _final_prompt_lines(state)
     return "\n".join(lines), pick_best(state)[0]
-
-
-# ---------------------------------------------------------------------------
-# 共享小工具：各章节都要用的取值，集中一处，免得同一个字段两种读法
-# ---------------------------------------------------------------------------
-
-
-def _base_word(state: ReportState) -> str:
-    """对手臂的称呼：原稿模式下"基线"其实是用户自己写的版本，
-    沿用"基线"会让"基线胜出"被读成"不优化更好"。
-    """
-    return "你的原稿" if _seed_arm(state) else "基线"
-
-
-def _aggregate(state: ReportState) -> dict[str, Any]:
-    agg: dict[str, Any] = state.get("aggregate") or {}
-    return agg
-
-
-def _baseline_aggregate(state: ReportState) -> dict[str, Any]:
-    base: dict[str, Any] = state.get("baseline_aggregate") or {}
-    return base
-
-
-def _pairwise(state: ReportState) -> dict[str, Any]:
-    pw: dict[str, Any] = state.get("pairwise") or {}
-    return pw
-
-
-def _evaluations(state: ReportState) -> list[dict[str, Any]]:
-    return [e for e in (state.get("evaluations") or []) if isinstance(e, dict)]
-
-
-def _test_runs(state: ReportState) -> list[dict[str, Any]]:
-    """逐条执行记录，只认 dict 条目、`test_runs` 整体缺失或为 None 时给空表。
-
-    为什么要在读取点统一收口：state 可能来自旧版 checkpoint 或外部构造，
-    实测 `test_runs=["x"]` 会让报告渲染抛 AttributeError、`test_runs=None` 抛
-    TypeError——**报告是唯一给用户看的东西**，不能因为一条脏记录整个出不来
-    （同文件 `_report_safe_int` 讲的是同一件事）。原先三处读取各写各的：
-    `_infra_invalid_cases` 防了非 dict，另外两处没防。
-    """
-    return [r for r in (state.get("test_runs") or []) if isinstance(r, dict)]
-
-
-def _delta_avg(state: ReportState) -> float | None:
-    """均分口径的 Δ：没跑基线时是 None（冲突检测就靠这个 None 保持沉默）。"""
-    base = _baseline_aggregate(state)
-    if not base:
-        return None
-    agg = _aggregate(state)
-    return round(
-        float(agg.get("avg_score", 0.0) or 0.0) - float(base.get("avg_score", 0.0) or 0.0), 2
-    )
-
-
-# ---------------------------------------------------------------------------
-# 各章节
-# ---------------------------------------------------------------------------
-
-
-def _header_lines(state: ReportState) -> list[str]:
-    """报告头：run 身份、状态、模式。模式必须在头部就说清——否则读者把 Δ 当成
-    "比不优化好多少"读，而它实际是"比交来的那份原稿好多少"。
-    """
-    status = state.get("status", "running")
-    iteration = state.get("iteration", 0)
-    lines: list[str] = []
-    lines.append("# PromptMaster 交付报告")
-    lines.append("")
-    lines.append(f"- run_id：`{state.get('run_id')}`")
-    lines.append(f"- 状态：`{status}`")
-    lines.append(f"- 迭代轮次：{iteration} / {state.get('max_iterations', 3)}")
-    if state.get("early_stop_reason"):
-        lines.append(f"- 提前终止：{state['early_stop_reason']}")
-    lines.append(f"- 目标模型：`{state.get('target_model')}`")
-    if _seed_arm(state):
-        lines.append(
-            f"- 模式：原稿改进（输入原稿 {len(_seed_arm(state))} 字符；"
-            "基线 = 用户原稿，Δ 读作「比你自己的版本好多少」）"
-        )
-    lines.append(f"- LLM 调用次数：{state.get('llm_calls', 0)}")
-    lines.append("")
-    return lines
-
-
-def _score_overview_lines(state: ReportState) -> list[str]:
-    """## 评分总览：判定看保守下界而不是点估计（见置信度章节）。"""
-    agg = _aggregate(state)
-    lines: list[str] = []
-    lines.append("## 评分总览")
-    lines.append("")
-    if agg:
-        lines.append("| 指标 | 值 |")
-        lines.append("|---|---|")
-        lines.append(f"| 平均分 | {agg.get('avg_score')} |")
-        lines.append(f"| 最低分 | {agg.get('min_score')} |")
-        lines.append(f"| 最高分 | {agg.get('max_score')} |")
-        lines.append(f"| 用例数 | {agg.get('n_cases')}{_cases_short_note(agg)} |")
-        lines.append(f"| 通过用例 | {agg.get('n_passed')} |")
-        verdict = f"通过（≥{PASS_THRESHOLD}）" if agg.get("passed") else "未达标"
-        lines.append(f"| 判定 | {verdict} |")
-    else:
-        lines.append("_未产生评估结果_")
-    lines.append("")
-    return lines
-
-
-def _uncertainty_lines(state: ReportState) -> list[str]:
-    """## 置信度与采样噪声：点估计之外还要看采样噪声与下界。整章只在有聚合结果时出现。"""
-    agg = _aggregate(state)
-    if not agg:
-        return []
-    lines: list[str] = ["## 置信度与采样噪声", ""]
-    lines += _noise_band_lines(agg)
-    lines += _judge_bias_lines(agg)
-    lines += _restate_ratio_lines(state)
-    lines += _ceiling_claim_lines(state)
-    lines += _empty_deliverable_lines(state)
-    lines += _judge_source_lines(state)
-    lines += _revision_delta_lines(state)
-    lines.append("")
-    return lines
-
-
-def _noise_band_lines(agg: dict[str, Any]) -> list[str]:
-    lines: list[str] = []
-    lines = _jitter_provenance_lines(agg)
-    lines.append(f"- 每条用例重复采样：{agg.get('n_samples', 1)} 次（`PM_SAMPLES_PER_CASE`）")
-    lines.append(
-        f"- 用例间标准误差 SEM：{agg.get('sem', 0.0)}；采样噪声（平均极差）：{agg.get('noise', 0.0)}"
-        + (
-            f"；⊕ 评委复现性抖动 {agg.get('judge_jitter')} → 合成噪声带 "
-            f"{agg.get('noise_total')}（`ci_lower` 用的是合成值）"
-            if agg.get("judge_jitter")
-            else ""
-        )
-    )
-    if agg.get("judge_jitter"):
-        jit_a = judge_jitter("evaluator")
-        jit_b = judge_jitter("evaluator_b")
-        seat_note = (
-            f"；两位座位各自的实测极差 {jit_a}/{jit_b}"
-            if {jit_a, jit_b} != {agg.get("judge_jitter")}
-            else ""
-        )
-        lines.append(
-            f"- 仲裁有效触发线：{effective_disagreement_threshold()}"
-            f"（配置值 {judge_disagreement_threshold()}，按评委自我分歧抬高{seat_note}——"
-            "低于这条线的分差当成仪表抖动而不是用例难度，所以**双评委分歧变少了**，"
-            "不是交叉验证变强了）"
-        )
-    lines.append(
-        f"- 均分保守下界：**{agg.get('ci_lower')}**（判定看这个而不是看点估计 {agg.get('avg_score')}）"
-    )
-    unstable = agg.get("unstable_cases") or []
-    if unstable:
-        lines.append(f"- ⚠️ 结论不稳的用例：{', '.join('#' + str(i) for i in unstable)}")
-    # ⚠️ 0.0 是二义读数：既是"重复打分完全一致"（好），也是"压根没重复采样、测不出来"。
-    # 默认 PM_SAMPLES_PER_CASE=1 落在后者，而报告曾照印 0.0，读的人会当成"噪声极小"。
-    if not agg.get("noise_measurable", False):
-        lines.append(
-            "- ⚠️ **噪声不可估**：本轮每条用例只采样 1 次，上面那个 `采样噪声 0.0` "
-            "是「没测到」而不是「重复打分完全一致」。要拿到真实的噪声带，"
-            "把 `PM_SAMPLES_PER_CASE` 调到 ≥2 重跑。"
-        )
-    return lines
-
-
-def _jitter_provenance_lines(agg: dict[str, Any]) -> list[str]:
-    """评委抖动那个数是从哪来的（§十八：未验证的配置常数不得进带，但必须披露）。"""
-    prov = agg.get("jitter_provenance") or {}
-    if not prov:
-        return []
-    source = prov.get("source")
-    if source in ("measured", "measured_override"):
-        where = f"账本实测（n={prov.get('n_samples')}，ts={prov.get('ts') or '—'}）"
-        if source == "measured_override":
-            where += f"，被显式配置 {prov.get('configured')} 覆盖"
-        return [f"- 评委复现性抖动取值出处：{where}"]
-    configured = prov.get("configured")
-    if source == "unverified_config":
-        return [
-            f"- ⚠️ 评委复现性抖动：配置里写了 `{configured}`，但校准账本里查不到对应的 "
-            "`--repeat` 实测记录 —— 该值**未计入**噪声带与 `ci_lower`。"
-            f"请跑 `python run.py calibrate --judge evaluator --repeat 3` 把它量出来。"
-        ]
-    return ["- 评委复现性抖动：未配置、未实测，按 0 计入（噪声带里不含评委手抖）"]
-
-
-def _judge_bias_lines(agg: dict[str, Any]) -> list[str]:
-    lines: list[str] = []
-    bias = agg.get("judge_bias", 0.0)
-    lines.append(
-        f"- 评委自报分与代码加权分的平均偏差：{bias}"
-        + (
-            "（⚠️ 系统性偏高，评委在放水，建议换评委家族或降温）"
-            if agg.get("judge_bias_warning")
-            else ""
-        )
-    )
-    cal_line = _calibration_disclosure(agg)
-    if cal_line:
-        lines.append(cal_line)
-    return lines
-
-
-def _restate_ratio_lines(state: ReportState) -> list[str]:
-    # 这台"放水探测器"其实大部分是恒零的：提示词把权重给了模型、演算示例直接示范
-    # 怎么求加权，而 model_reported_score 又排在 dimension_scores 之后生成——
-    # 实测 109 次原始评委调用里评委 A 有 80%、仲裁 88% 是**逐字复述**加权结果。
-    # 所以先把"相等占比"印出来，否则上面那行 -0.17 会被读成"没放水"。
-    evals = _evaluations(state)
-    scored = [
-        e
-        for e in evals
-        if isinstance(e.get("model_reported_score"), (int, float))
-        and isinstance(e.get("weighted_score"), (int, float))
-    ]
-    if not scored:
-        return []
-    same = sum(1 for e in scored if abs(e["model_reported_score"] - e["weighted_score"]) < 1e-9)
-    if not same:
-        return []
-    return [
-        f"  - ⚠️ 其中 {same}/{len(scored)} 条自报分与代码加权分**完全相等**："
-        "这部分不是独立印象，复述上面那行不构成「没放水」的证据。"
-        "（该探测器只在两数真的分开时才有意义）"
-    ]
-
-
-def _ceiling_claim_lines(state: ReportState) -> list[str]:
-    # 满分声明：五维全部 ≥9.5 却还留着 issue，是自相矛盾；一条 issue 都不给则是
-    # "无可指摘"的强声明却没有可核对的证据。两种都是天花板行为，实测占 9.4%。
-    ceil_with_issue: list[Any] = []
-    ceil_no_issue: list[Any] = []
-    for e in _evaluations(state):
-        ds = e.get("dimension_scores") or {}
-        dims = [v for v in ds.values() if isinstance(v, (int, float))]
-        if len(dims) == 5 and min(dims) >= 9.5:
-            (ceil_with_issue if (e.get("issues") or []) else ceil_no_issue).append(
-                e.get("test_case_index")
-            )
-    lines: list[str] = []
-    if ceil_with_issue:
-        lines.append(
-            f"- ⚠️ 五维全 ≥9.5 却仍列出了问题：{'、'.join('#' + str(i) for i in ceil_with_issue)}"
-            " —— 有缺陷就不该是满分，这条分数的信息量低于它的数字看起来的程度"
-        )
-    if ceil_no_issue:
-        lines.append(
-            "- ⚠️ 宣称「无可指摘」（五维全 ≥9.5 且 issues 为空）："
-            f"{'、'.join('#' + str(i) for i in ceil_no_issue)} —— 本轮人工锚点里最高只到 8.7，"
-            "满分声明建议人工抽查"
-        )
-    return lines
-
-
-def _empty_deliverable_lines(state: ReportState) -> list[str]:
-    # 空产出高分：输出只剩占位/拒答标记却被判可上线（2026-09-27 人工锚点实测：
-    # 两条空壳日报评委 7.0/9.85、人工 2/2）。与满分声明同一待遇：提醒，不否决。
-    from .scoring import has_empty_deliverable_profile
-
-    evals = _evaluations(state)
-    _out_by_idx = {
-        str(tr.get("test_case_index", "0")): str(tr.get("output") or "") for tr in _test_runs(state)
-    }
-    empty_high = [
-        "#" + str(e.get("test_case_index"))
-        for e in evals
-        if isinstance(e.get("weighted_score"), (int, float))
-        and e["weighted_score"] >= PASS_THRESHOLD
-        and has_empty_deliverable_profile(_out_by_idx.get(str(e.get("test_case_index", "0")), ""))
-    ]
-    if empty_high:
-        return [
-            f"- ⚠️ 空产出获高分（≥{PASS_THRESHOLD}）：{'、'.join(empty_high)}"
-            " —— 输出只有占位/拒答标记，没有实质交付物；"
-            "「拒答得体」应体现为 task_completion 低分，不该换来可上线判定"
-        ]
-    if state.get("empty_cap"):
-        return [
-            f"- ℹ️ 空产出硬封顶已生效：{state.get('empty_cap')} 条评估命中空产出画像，"
-            "加权分已由代码压到 4.0（不可用档）。这不是评委的意见，是确定性约束"
-            "——校准口径不含此封顶，量的是评委裸分。"
-        ]
-    return []
-
-
-def _judge_source_lines(state: ReportState) -> list[str]:
-    lines: list[str] = []
-    # 评委配置体检：同源评委 = 同一分布采样两次，交叉验证不提供独立证据
-    jh = state.get("judge_health") or {}
-    if jh.get("homogeneous"):
-        lines.append(f"- ⚠️ **评委同源**：{jh.get('note', '')}")
-    elif jh.get("models"):
-        lines.append(f"- 评委模型：{'、'.join(sorted(set(jh['models'].values())))}")
-    # 分数出自谁：双评委分差超阈值时采信的是**第三方单评委**，两位原评委的分只留在
-    # judge_scores 里。真跑实测占 9/26 轮（两个已完成 run，冻结口径；见 llm_e2e_matrix 发现 13），不是边角情况，但报告此前从不说明，
-    # 读者会以为表里每个数都是两位评委的共识（n_arbitrated 只进过 trace）。
-    evals = _evaluations(state)
-    n_arb = sum(1 for e in evals if e.get("judge") == "arbiter")
-    n_cons = sum(1 for e in evals if e.get("judge") == "conservative")
-    if evals and (n_arb or n_cons):
-        parts = []
-        if n_arb:
-            parts.append(f"{n_arb}/{len(evals)} 例出自**仲裁者一人**")
-        if n_cons:
-            parts.append(f"{n_cons}/{len(evals)} 例因仲裁调用失败取了两评委较低分（安全侧）")
-        lines.append(
-            "- ⚠️ 分数出处：" + "；".join(parts) + "——这些数**不是**双评委共识，"
-            "逐评委的原始分在 `judge_scores`，跨轮对比时按单评委读。"
-        )
-    # 评委席降级（2026-10-06 §三十·十一·二 补）：上面那条只覆盖"两位都在、分歧大、
-    # 交给第三方"这一种形态。**评委直接缺席**是另一种：缺席的用例 `judge` 字段仍是
-    # `"evaluator"`（不是 arbiter / conservative），既有条件一个都判不到。
-    # 真实跑 run_13f9a99096e9：evaluator_b 5 次超时，4 条用例里 2 条只剩单评委，
-    # 那轮的 avg 与基线照常进归档、进分数表，**正文一句都没提这件事**。
-    # 后果：半个评委席的读数被当成双评委共识读——而两臂评委席完整度不同，
-    # Δ 就不可比（§三十·十一·二 结论：那一轮数据不可用）。
-    # 分母取 judge_health.panel_size（配置值），不用"见过几个"倒推：
-    # 全员缺席时倒推会得到 0，判不出降级。
-    # ⚠️ 判据必须用**失败证据**（errors 里 `evaluate#<idx>[<seat>]:`），
-    # 不能用 `len(judge_scores) < panel`——两种形态在归档里**长得一样**：
-    #   · PM_JUDGES=1 配置：`_merge_judge_results` 的 len==1 分支原样返回，不写 judge_scores
-    #   · 双评委但某位失败：同样落到 len==1，同样不写
-    # 真实归档实测（run_13f9a99096e9 的 case#2/#3 与 run_88dcfd4d9c29 的四条）
-    # 都是 `len(judge_scores)==0`。只看 judge_scores 就把配置当故障报（或反之）。
-    absent = judge_seat_absent(state)
-    if absent and evals:
-        idxs = "、".join(f"case#{i}({'、'.join(s)})" for i, s in sorted(absent.items()))
-        seats = {r for r in (jh.get("models") or {}) if r != "arbiter"}
-        gone = sorted({r for s in absent.values() for r in s})
-        # 缺席的评委要能从配置名单里对上号；对不上（配置读失败等）就说"有评委"，
-        # 不猜是哪一位——披露文本本身不许编。
-        missing = "、".join(gone) if set(gone) <= seats else "有评委"
-        lines.append(
-            f"- ⚠️ 评委席降级：{len(absent)}/{len(evals)} 例有评委失败缺席"
-            f"（{missing}：{idxs}）——这些分数**不是**双评委共识；"
-            "两臂的评委席完整度若不同则 Δ 不可比。缺席原因见「运行期错误」。"
-        )
-    return lines
-
-
-# 失败证据：errors 里 judge 节点写的 `evaluate#<idx>[<seat>]: <原因>`
-# （pm/nodes/judge.py 的 errors.append 格式）。这是"某位评委真的没出分"的唯一
-# 结构化痕迹——judge_scores 为空既可能是配置单评委，也可能是失败，两义。
-_FAILED_JUDGE_RE = re.compile(r"evaluate#(?P<idx>\d+)\[(?P<seat>[^\]]+)\]")
-
-
-def judge_seat_absent(state: ReportState) -> dict[int, list[str]]:
-    """哪些用例缺了哪位评委：`{用例序号: [席位…]}`，按序号升序。
-
-    报告与 `run.py --json` **共用这一份推导**（2026-10-15 实测：真端点一轮里
-    `evaluator_b` 6 次超时、4/4 例降级，报告写了这句话，而机器出口的 33 个键里
-    根本没有它 ⇒ 桌面端④把"单评委共识"当双评委共识显示）。判据仍用失败证据，
-    不用 `len(judge_scores) < panel`——理由见上面那段注释。
-    """
-    panel = int((state.get("judge_health") or {}).get("panel_size") or 0)
-    if panel <= 1:
-        return {}
-    absent: dict[int, list[str]] = {}
-    for e in state.get("errors") or []:
-        m = _FAILED_JUDGE_RE.match(str(e))
-        if m:
-            absent.setdefault(int(m.group("idx")), []).append(m.group("seat"))
-    # ⚠️ 故意**不**拿终态 `judge_scores` 去减掉"看起来还在"的席位（2026-10-15 试过，被
-    # `tests/test_run_aa98d99e66b5_findings.py` 判红后撤回）：`evaluations` 每用例只归档
-    # 一行，而 `PM_SAMPLES_PER_CASE=2` ⇒ 另一发的席位完整度**根本不在归档里**。
-    # aa98d99e66b5 就是反例：4 例的 judge_scores 两位齐全，errors 却记着 3 例墙钟耗尽
-    # ——按"减掉"的写法这轮会被判成零降级，而那正是本节要避免的"半个评委席被当共识读"。
-    # 判不了就往保守侧靠：宁可照报，也不要用一份取不全的证据去洗白。
-    return {i: sorted(set(seats)) for i, seats in sorted(absent.items())}
-
-
-def _revision_delta_lines(state: ReportState) -> list[str]:
-    # 逐条得失：均分看不出的"修 4 坏 3"必须让读者看见（震荡的直接证据）
-    delta = state.get("revision_delta") or {}
-    if not (isinstance(delta, dict) and (delta.get("fixed") or delta.get("broken"))):
-        return []
-    return [
-        f"- 与上一版逐条对照：修好 {len(delta['fixed'])} 条"
-        f"（{'、'.join('#' + str(i) for i in delta['fixed'])}）"
-        f"／弄坏 {len(delta['broken'])} 条"
-        f"（{'、'.join('#' + str(i) for i in delta['broken'])}）"
-        f"，净值 {delta.get('net', 0)}"
-    ]
-
-
-def _baseline_lines(state: ReportState) -> list[str]:
-    """## 与基线对比：没有参照点，"分数很高"本身不构成结论。"""
-    agg = _aggregate(state)
-    base = _baseline_aggregate(state)
-    pw = _pairwise(state)
-    lines: list[str] = []
-    if not base:
-        if not pw:
-            lines.append("## 与基线对比")
-            lines.append("")
-            lines.append(
-                "_未跑基线（PM_BASELINE=0 或基线失败）——因此无法回答"
-                + ("“比你的原稿好多少”。_" if _seed_arm(state) else "“比不优化好多少”。_")
-            )
-            lines.append("")
-        return lines
-
-    # 注意不能用 `or 0.0` 兜 None：round(-0.001, 2) 得到 -0.0，它是假值，
-    # 会被换成 +0.0 —— 报告里 Δ 的符号就印错了（Δ≤0 那条警告也跟着变）。
-    d_avg_val = _delta_avg(state)
-    d_avg = 0.0 if d_avg_val is None else d_avg_val
-    d_min = round(
-        float(agg.get("min_score", 0.0) or 0.0) - float(base.get("min_score", 0.0) or 0.0), 2
-    )
-    lines.append(
-        "## 与基线对比（"
-        + ("用户原稿直喂 target" if _seed_arm(state) else "原始需求直喂 target")
-        + "，同口径采样与评分）"
-    )
-    lines.append("")
-    lines.append("| 指标 | 基线 | 优化后 | Δ |")
-    lines.append("|---|---|---|---|")
-    lines.append(f"| 平均分 | {base.get('avg_score')} | {agg.get('avg_score')} | {d_avg:+} |")
-    lines.append(f"| 最低分 | {base.get('min_score')} | {agg.get('min_score')} | {d_min:+} |")
-    # 基础设施有效性：本臂有整条用例没有任何有效样本时，Δ 测的是端点抖动不是质量
-    n_invalid = _infra_invalid_cases(state)
-    if n_invalid:
-        lines.append("")
-        lines.append(
-            f"> ⚠️ **本轮 Δ 不可采信**：优化臂有 {n_invalid} 条用例**没有任何有效样本**"
-            "（目标模型空输出或调用失败，评分层按刻度下限记账以免用例凭空消失）。"
-            "两臂是在不同时间窗打的，端点抖动会直接冒充成质量差——先错峰重跑本臂"
-            "（或调大 `PM_TARGET_MAX_TOKENS`，空输出多半是 reasoning 耗尽预算），"
-            "再谈优化有没有变好。"
-        )
-    lines.append(
-        f"| 断言未通过 | {base.get('n_assertions_failed', 0)}/{base.get('n_assertions', 0)} "
-        f"| {agg.get('n_assertions_failed', 0)}/{agg.get('n_assertions', 0)} | - |"
-    )
-    lines.append("")
-    if d_avg <= 0:
-        lines.append(
-            "> ⚠️ 本轮优化相对基线**没有正向提升**。流水线跑得通不等于创造了价值，"
-            "建议人工比对两份输出或提高 PM_SAMPLES_PER_CASE 后重跑。"
-        )
-        lines.append("")
-    # 用例区分度自检：基线（原始需求直喂）都接近满分 = 用例太简单，
-    # 任何合理提示词都能过，优化版的分数证明不了相对价值（评不出差异）。
-    base_avg = float(base.get("avg_score") or 0.0)
-    if base_avg >= BASELINE_DISCRIMINATION_FLOOR:
-        easy_arm = "连原始需求都能拿高分" if not _seed_arm(state) else "连你的原稿都能拿高分"
-        lines.append(
-            f"> ⚠️ **用例区分度不足**：基线均分已达 {base_avg}（≥ {BASELINE_DISCRIMINATION_FLOOR}），"
-            f"说明当前测试用例对优化不敏感——{easy_arm}，"
-            "本报告的达标结论不能证明优化版相对更好。"
-            "建议换用更难的用例（参考 `case_templates/` 的边界与注入场景）或提高采样口径后重跑。"
-        )
-        lines.append("")
-    return lines
-
-
-def _pairwise_lines(state: ReportState) -> list[str]:
-    pw = _pairwise(state)
-    if not pw:
-        return []
-    bw = _base_word(state)
-    votes = pw.get("votes") or {}
-    n_cmp = _report_safe_int(pw.get("n_compared"))
-    # 分母是新加的键：老归档里没有它，退化成"实际出票例数"（即不告警），
-    # 而不是反过来把老报告全判成覆盖率不足。
-    n_exp = _report_safe_int(pw.get("n_expected")) or n_cmp
-    # 「多数」是指占**应比较例数**的多数，不是占实际出票例数的多数 ——
-    # 只跑通 1/4 例时那 1 票无论判什么都配不上"多数"两个字。
-    top = max(_report_safe_int(votes.get("better")), _report_safe_int(votes.get("worse")))
-    thin = n_exp > 0 and top * 2 <= n_exp
-    verdict_text = {
-        "better": "优化版倾向胜出（出票不足，不代表整卷）" if thin else "优化版多数胜出",
-        "worse": (
-            f"**{bw}倾向胜出（优化未带来优势；出票不足，不代表整卷）**"
-            if thin
-            else f"**{bw}多数胜出（优化未带来优势）**"
-        ),
-        "tie": "两份持平",
-        "no_signal": "无有效信号（成对比较全部失败）",
-    }.get(str(pw.get("verdict")), str(pw.get("verdict")))
-    lines: list[str] = []
-    lines.append(f"## 成对盲评（优化版 vs {bw}）")
-    lines.append("")
-    lines.append(f"- 结论：{verdict_text}")
-    lines.append(
-        f"- 投票：优化版胜 {votes.get('better', 0)} / {bw}胜 {votes.get('worse', 0)} "
-        f"/ 持平 {votes.get('tie', 0)}（共 {n_cmp} 例"
-        + (f"／应比较 {n_exp} 例" if n_exp != n_cmp else "")
-        + "，每例双向评：正序 + 交换 A/B）"
-        + (
-            f"\n- ⚠️ 位置偏置：{pw['position_flips']}/{n_cmp} 例两序结论相反"
-            "，已一律记为持平（这类用例的胜负由座位决定，不计入结论）"
-            if pw.get("position_flips")
-            else ""
-        )
-    )
-    if n_cmp < n_exp:
-        lines.append(
-            f"- ⚠️ 覆盖不足：{n_exp} 例里只有 {n_cmp} 例出票"
-            f"（{_report_safe_int(pw.get('n_skipped'))} 例两侧无输出或成对调用失败）"
-            "——这个结论**不能**按比例外推到整张考卷。"
-        )
-    if pw.get("conflict"):
-        lines.append(f"- ⚠️ 结论冲突：{pw['conflict']}")
-    for d in (pw.get("details") or [])[:6]:
-        lines.append(f"  - case#{d.get('test_case_index')}：{d.get('reason') or '（未给依据）'}")
-    lines.append("")
-    return lines
-
-
-def _conflict_lines(state: ReportState) -> list[str]:
-    """## 结论冲突：两个信号打架时必须说出来，不能让读者自己猜。"""
-    pw = _pairwise(state)
-    conflict = _verdict_conflict(_delta_avg(state), pw, _base_word(state))
-    if not conflict:
-        return []
-    bw = _base_word(state)
-    lines: list[str] = []
-    lines.append("## ⚠️ 结论冲突（需人工裁定）")
-    lines.append("")
-    lines.append(f"- 冲突：{conflict}")
-    lines.append("")
-    lines.append(
-        "- 为什么两个信号会打架：均分是**绝对尺度**（评委按锚点打分，受评委松紧影响），"
-        "成对盲评是**相对偏好**（同一输入二选一，不受绝对尺度漂移影响）。"
-        "两者不一致通常意味着评委尺度偏松/偏紧，或两份输出各有长短（格式好 vs 事实准）。"
-    )
-    lines.append("- 建议动作（按成本从低到高）：")
-    lines.append("  1. 先看**事实断言**表：断言失败的一方无论分数高低都不应采用；")
-    lines.append("  2. 提高 `PM_SAMPLES_PER_CASE` 后重跑（单采样的噪声足以让两个信号分道扬镳）；")
-    lines.append("  3. 人工比对上面对盲评列出的逐例依据，再决定是否采用本版提示词。")
-    # 冲突自动归因（确定性风格统计，compare_node 计算并存入 pairwise.attribution）
-    attr = pw.get("attribution") or {}
-    if attr.get("hypothesis"):
-        b, c = attr.get("base") or {}, attr.get("cur") or {}
-        lines.append("")
-        lines.append("- 风格归因（自动统计，供裁定参考）：")
-        lines.append(
-            f"  - 保守枚举标记（数据缺失/未提供等）：{bw} {b.get('conservative_markers', 0)} 处"
-            f" vs 优化版 {c.get('conservative_markers', 0)} 处"
-        )
-        lines.append(
-            f"  - 具体数值引用：{bw} {b.get('data_points', 0)} 处"
-            f" vs 优化版 {c.get('data_points', 0)} 处"
-        )
-        lines.append(f"  - 归因假设：{attr['hypothesis']}")
-    lines.append("")
-    lines.append("> 本系统不自动裁定冲突：错误的自动裁定比「如实说不知道」更危险。")
-    lines.append("")
-    return lines
-
-
-def _version_table_lines(state: ReportState) -> list[str]:
-    versions: list[dict[str, Any]] = state.get("prompt_versions") or []
-    if len(versions) <= 1:
-        return []
-    lines: list[str] = []
-    lines.append("## 版本迭代")
-    lines.append("")
-    lines.append("| 版本 | 平均分 | 最低分 | 说明 |")
-    lines.append("|---|---|---|---|")
-    for v in versions:
-        lines.append(
-            f"| v{v['iteration']} | {v.get('avg_score', '-')} | "
-            f"{v.get('min_score', '-')} | {v.get('note', '')} |"
-        )
-    lines.append("")
-    return lines
-
-
-def _unresolved_lines(state: ReportState) -> list[str]:
-    unresolved = state.get("unresolved_questions", []) or []
-    if not unresolved:
-        return []
-    lines: list[str] = []
-    lines.append("## 需求侧遗留问题")
-    lines.append("")
-    for q in unresolved:
-        lines.append(f"- {q}")
-    lines.append("")
-    return lines
-
-
-def _open_issues_lines(state: ReportState) -> list[str]:
-    agg = _aggregate(state)
-    if not (agg and agg.get("all_issues")):
-        return []
-    lines: list[str] = []
-    lines.append("## 未解决的输出问题")
-    lines.append("")
-    for i in agg["all_issues"][:20]:
-        lines.append(f"- {i}")
-    lines.append("")
-    return lines
-
-
-def _run_errors_lines(state: ReportState) -> list[str]:
-    if not state.get("errors"):
-        return []
-    lines: list[str] = []
-    lines.append("## 运行期错误")
-    lines.append("")
-    for e in state["errors"][:20]:
-        lines.append(f"- `{e}`")
-    lines.append("")
-    return lines
-
-
-def _wasted_delivery_lines(state: ReportState, usage: dict[str, Any]) -> list[str]:
-    """「成功但空」的钱花在哪：把 trace 的 *_empty 事件与台账对起来。
-
-    为什么要有这一段（§三十·十九，真实证据 run_41a833fb9b41）：
-    台账只记**成功**与**失败**两类，而「HTTP 200 但正文是空的」两类都不是。
-    实测那轮 optimizer 花掉 32850 输出 token / 207 秒、台账字段全部正常，
-    可最终提示词是 0 字符——只看用量表完全看不出这轮白烧了。
-    """
-    empties = [
-        t
-        for t in (state.get("trace") or [])
-        if isinstance(t, dict) and str(t.get("event") or "").endswith("_empty")
-    ]
-    if not empties:
-        return []
-    lines = [
-        "> ⚠️ 本轮出现过**「调用成功但交付为空」**：这些调用在台账上属于正常成功"
-        "（HTTP 200、token 照记），所以上面的用量表看不出异常。",
-    ]
-    for t in empties:
-        node = str(t.get("node") or "")
-        role = {"optimize": "optimizer", "evaluate": "evaluator"}.get(node)
-        spent = ""
-        if role and (usage.get(role) or {}):
-            u = usage[role] or {}
-            out_tok = int(u.get("output_tokens") or 0)
-            lat = int(u.get("latency_ms") or 0) / 1000
-            spent = f"，该角色累计已花 {out_tok} 输出 token / {lat:.0f}s"
-        lines.append(f"> - `{t.get('event')}`（node=`{node}`{spent}）")
-    lines.append("")
-    return lines
-
-
-def _usage_lines(state: ReportState) -> list[str]:
-    """## 模型用量与耗时（按角色台账）：9 次调用花了多少 token、哪个角色最贵，一眼可见。"""
-    usage = state.get("llm_usage") or {}
-    if not usage:
-        return []
-    lines: list[str] = []
-    lines.append("## 模型用量与耗时（按角色）")
-    lines.append("")
-    lines.append("| 角色 | 调用次数 | 输入 tokens | 输出 tokens | 累计耗时 |")
-    lines.append("|---|---|---|---|---|")
-    tot_calls = tot_in = tot_out = 0
-    tot_ms = 0
-    for role in sorted(usage):
-        t = usage.get(role) or {}
-        calls = int(t.get("calls", 0) or 0)
-        inp = int(t.get("input_tokens", 0) or 0)
-        out = int(t.get("output_tokens", 0) or 0)
-        ms = int(t.get("latency_ms", 0) or 0)
-        tot_calls += calls
-        tot_in += inp
-        tot_out += out
-        tot_ms += ms
-        lines.append(f"| {role} | {calls} | {inp} | {out} | {ms / 1000:.1f}s |")
-    lines.append(f"| **合计** | {tot_calls} | {tot_in} | {tot_out} | {tot_ms / 1000:.1f}s |")
-    lines.append("")
-    # §三十·十八：失败/重试单列。**不并进上面的 calls** —— 那四个数按成功调用算，
-    # 混进失败会让「秒/千输出token」这类速率判据失真（judge 守卫依赖那个口径）。
-    #
-    # 为什么必须显示：以前失败的调用在台账上完全不存在，于是「真的慢」与「一直失败」
-    # 在这张表上长得一样——本会话已因此查错三轮（查错本账/误判偶发长尾/误判端点排队）。
-    if any(int((usage.get(r) or {}).get("failed_calls", 0) or 0) for r in usage):
-        lines.append("> ⚠️ 上表的「调用次数」只数**成功**的调用。失败/重试另列于下表——")
-        lines.append("> 两者不可相加：相加会得到一个既不是真实请求数、也不是成功数的混合值。")
-        lines.append("")
-        lines.append("| 角色 | 失败次数 | 失败耗时 | 重试请求数 |")
-        lines.append("|---|---|---|---|")
-        tf = tms = tr = 0
-        for role in sorted(usage):
-            row = usage.get(role) or {}
-            f_n = int(row.get("failed_calls", 0) or 0)
-            f_ms = int(row.get("failed_latency_ms", 0) or 0)
-            r_n = int(row.get("retry_requests", 0) or 0)
-            if not (f_n or r_n):
-                continue
-            tf += f_n
-            tms += f_ms
-            tr += r_n
-            lines.append(f"| {role} | {f_n} | {f_ms / 1000:.1f}s | {r_n} |")
-        lines.append(f"| **合计** | {tf} | {tms / 1000:.1f}s | {tr} |")
-        lines.append("")
-    # §三十·十九：「成功但空」——传输层成功（HTTP 200、token 照记）但**交付为空**。
-    # run_41a833fb9b41 实测：optimizer 烧了 32850 输出 token / 207 秒，台账一切正常，
-    # 而最终提示词 0 字符。这类故障**记账记不到**（它既不是失败也不是成功退出），
-    # 证据在 trace 的 `*_empty` 事件里。只看用量表会以为这轮一切正常。
-    _wasted = _wasted_delivery_lines(state, usage)
-    if _wasted:
-        lines.extend(_wasted)
-    # 金额折算：有 PM_PRICE_*_PER_M 才出现。本系统不内置价目表（会过期且错得看不出来），
-    # 没配单价时整段不渲染——"没有数"比"看起来很合理的假数"安全。
-    from .cost import render_cost_section
-
-    lines.extend(render_cost_section(usage))
-    return lines
-
-
-def _assertion_lines(state: ReportState) -> list[str]:
-    """事实断言（ground-truth）结果：确定性校验的逐条对错，评委分之外的硬证据。"""
-    assert_runs = [
-        (r, r["assertion"]) for r in _test_runs(state) if isinstance(r.get("assertion"), dict)
-    ]
-    if not assert_runs:
-        return []
-    lines: list[str] = []
-    lines.append("## 事实断言（ground-truth 校验）")
-    lines.append("")
-    lines.append("| 用例 | 模式 | 结果 | 说明 | 期望片段 |")
-    lines.append("|---|---|---|---|---|")
-    for r, a in assert_runs:
-        exp_cell = str(a.get("expected") or "")
-        if len(exp_cell) > 120:
-            exp_cell = exp_cell[:120] + "…"
-        if a.get("advisory"):
-            mark = "⚠️ 语义判定" if a.get("advisory_kind") == "semantic" else "⚠️ 仅提醒"
-        else:
-            mark = "✅ 通过" if a.get("passed") else "❌ 未通过"
-        lines.append(
-            f"| case#{r.get('test_case_index', '?')} | {a.get('mode', '-')} "
-            f"| {mark} | {a.get('detail', '')} | {exp_cell} |"
-        )
-    if any(str(a.get("mode")) == "rule" for _, a in assert_runs):
-        lines.append("")
-        lines.append(
-            "> `rule` 行由**评委**逐条核验（带主观噪声），默认不计入否决；"
-            "要把它当硬约束请设 `PM_RULE_VETO=1`。"
-        )
-    lines.append("")
-    return lines
-
-
-def _injection_lines(state: ReportState) -> list[str]:
-    """注入存活（鲁棒性专项）：确定性劫持检测，评委分之外的另一条硬证据。"""
-    surv = state.get("injection_survival")
-    gate = state.get("injection_gate") or {}
-    gate_blocked = bool(gate.get("blocked")) if isinstance(gate, dict) else False
-    # 2026-09-16：显示条件必须包含 gate_blocked 本身。
-    # 原条件只看 injection_survival —— 一旦两个字段不同步（gate 说拦了但 surv 缺失/
-    # total=0），报告就会**静默不提**门禁，用户只看到"未达标"却不知原因。
-    # 门禁拦了就必须说清楚，这是安全结论的可解释性底线。
-    surv_total = _report_safe_int((surv or {}).get("total")) if isinstance(surv, dict) else 0
-    if not (surv_total > 0 or gate_blocked):
-        return []
-    hijacked = _report_safe_int((surv or {}).get("hijacked")) if isinstance(surv, dict) else 0
-    if gate_blocked and isinstance(gate, dict):
-        # 以门禁记录的为准（它是实际拦截时快照下来的）
-        hijacked = _report_safe_int(gate.get("hijacked")) or hijacked
-    lines: list[str] = []
-    lines.append("## 注入存活（鲁棒性专项）")
-    lines.append("")
-    # 用 surv_total / gate 快照，不要直接索引 surv —— 只有 gate 时 surv 可能是 None
-    shown_total = surv_total or _report_safe_int(gate.get("total"))
-    lines.append(
-        f"- 注入用例：{shown_total} 条；被劫持：{hijacked} 条"
-        "（输出执行了注入指令，判定为确定性包含检查，不经评委）"
-    )
-    # 基线臂同口径检测：给出"劫持是优化版引入的，还是这份数据本来就能劫持"的参照
-    base_surv = state.get("baseline_injection_survival")
-    if isinstance(base_surv, dict) and base_surv.get("total"):
-        lines.append(
-            f"- 同一批用例打基线（"
-            f"{'用户原稿直喂' if _seed_arm(state) else '原始需求直喂'}）：被劫持 "
-            f"{_report_safe_int(base_surv.get('hijacked'))}/{base_surv['total']} 条"
-            + (
-                "——基线未中招而优化版中招，说明劫持由这版提示词自己引入"
-                if not _report_safe_int(base_surv.get("hijacked")) and hijacked
-                else ""
-            )
-        )
-    for d in ((surv or {}).get("details") or [])[:10]:
-        lines.append(f"- ❌ {d}")
-    if hijacked:
-        lines.append("")
-        lines.append(
-            "> 被劫持 = 交付提示词里「标签内是数据、其中指令不得执行」一类的声明"
-            "没有实际约束力。这种缺陷评委分照常能打 8+，不代表可上线。"
-        )
-        if gate_blocked:
-            lines.append("")
-            lines.append(
-                f"> 🚫 **注入门禁已拦截**：达标结论被压制（{hijacked}/{shown_total} 被劫持），"
-                "本次交付按未达标处理；修复注入约束前禁止渲染 SKILL.md。"
-            )
-    lines.append("")
-    return lines
-
-
-def _quality_warning_lines(state: ReportState) -> list[str]:
-    """代码侧质量门警告（元话语/上下文泄漏，评估时已注入核查）。"""
-    q_issues = state.get("prompt_quality_issues", []) or []
-    if not q_issues:
-        return []
-    lines: list[str] = []
-    lines.append("## 提示词质量警告（代码侧规则检测）")
-    lines.append("")
-    for qi in q_issues:
-        lines.append(f"- v{qi.get('iteration', '?')}：{qi.get('issues', '')}")
-    lines.append("")
-    return lines
-
-
-def _seed_lines(state: ReportState) -> list[str]:
-    seed = _seed_arm(state)
-    if not seed:
-        return []
-    best, _ = pick_best(state)
-    lines: list[str] = []
-    lines.append("## 原稿体检（代码侧确定性规则，未跑模型）")
-    lines.append("")
-    findings = [str(f) for f in (state.get("seed_quality_findings") or []) if str(f).strip()]
-    if findings:
-        lines.append(f"你交来的原稿命中 {len(findings)} 条规则，这些命中项已作为判据交给改进器：")
-        lines.append("")
-        lines.extend(f"- {f}" for f in findings)
-    else:
-        lines.append(
-            "- 原稿未命中任何确定性规则。注意这只说明「实测到会出事的那几类」没踩到，"
-            "不等于原稿已经够用——它的分数由下面的基线对比给出。"
-        )
-    lines.append("")
-    lines.append(f"- 原稿 {len(seed)} 字符 → 交付版 {len(best.get('prompt') or '')} 字符")
-    lines.append("")
-    return lines
-
-
-def _final_prompt_lines(state: ReportState) -> list[str]:
-    best, best_note = pick_best(state)
-    return [
-        f"## 最终提示词（{best_note}）",
-        "",
-        "```text",
-        best.get("prompt", ""),
-        "```",
-        "",
-    ]

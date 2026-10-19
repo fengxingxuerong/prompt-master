@@ -313,7 +313,7 @@ def test_provenance_literals_stay_consistent_across_judge_and_report():
     import inspect
     import re
 
-    from pm import report
+    from pm import report, report_helpers, report_sections
     from pm.nodes import judge as judge_mod
     from pm.schemas import EvaluationResult
 
@@ -321,7 +321,10 @@ def test_provenance_literals_stay_consistent_across_judge_and_report():
     written |= set(re.findall(r'judge="([a-z_]+)"', inspect.getsource(judge_mod)))
     assert {"merged", "arbiter", "conservative"} <= written
 
-    counted = set(re.findall(r'e\.get\("judge"\) == "([a-z_]+)"', inspect.getsource(report)))
+    # 2026-10-19 拆包：出处计数在 report_sections，编排在 report，取值在 report_helpers。
+    # 元测试必须扫**全部三个模块**：只扫编排层会得到空集合，而那不是"没了"，是"搬走了"。
+    report_src = "".join(inspect.getsource(m) for m in (report, report_sections, report_helpers))
+    counted = set(re.findall(r'e\.get\("judge"\) == "([a-z_]+)"', report_src))
     assert counted, "报告里数出处的那段没了就该改这条测试，而不是留着当摆设"
     assert counted <= written, f"报告在数评委侧不会写的值：{counted - written}"
 
