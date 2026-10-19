@@ -127,17 +127,16 @@ _LOCAL_ONLY_CI_GATES = {
         "side": "ci",
     },
     "ci_desktop_probe": {
-        "why": "它是**诊断步不是门禁**：把「xvfb 在不在 / 解释器有没有 tkinter / xvfb 下能不能建窗」"
-        "写进 job summary 与 annotation，让 CI 上那次红能被匿名读出原因。本地有显示器、"
-        "窗口层用例本来就在跑，塞进 commit 钩子只会每次提交多花几秒去问一个已知答案。",
+        "why": "它是**附件的诊断步不是门禁**：桌面窗口 2026-10-19 已移出主包（extras/），"
+        "这一步只回答「xvfb 在不在 / 解释器有没有 tkinter / xvfb 下能不能建窗」，"
+        "写进 job summary 与 annotation 供匿名读取。附件本身不在门禁里，"
+        "塞进 commit 钩子只会每次提交多花几秒去问一个与主产品无关的答案。",
         "side": "ci",
     },
     "ci_pytest": {
-        "why": "**同一条 pytest 门禁的 CI 侧包装**（xvfb 在脚本里，不在 workflow 行上）："
-        "ubuntu 没有 X，`tests/test_desktop.py` 的窗口层会整层 `pytest.skip`，实测把全局覆盖率"
-        "从 96.99% 压到 89.66%（低于 92 地板）；包装还把失败用例名发到 annotation——日志正文"
-        "要登录才读得到。本地钩子在真有显示器的机器上执行这些用例，不需要这层包装，"
-        "所以本地不跑它不算缺口。",
+        "why": "**同一条 pytest 门禁的 CI 侧包装**：把失败用例名发到 annotation——日志正文"
+        "要登录才读得到。xvfb 自 2026-10-19 起只是兜底（窗口层已移出主套件，覆盖率分母"
+        "不再含 desktop.py）；本地钩子跑同一套 tests/，不需要这层包装。",
         "side": "ci",
     },
     "--fail-under=82": {

@@ -173,6 +173,8 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 
 `python run.py desktop` 是同一批能力的**原生窗口**版（Tkinter，标准库）：不开浏览器、不起 HTTP 服务、不需要 token，五个标签与下面完全同源（都打 `run.py`）。Agent 仍然只走 CLI / MCP —— 这两个人类界面不新增任何判据，只是把已有的判定摆成能点开的形状。
 
+⚠️ **它是可选附件**（2026-10-19 从主包移出）：实现在仓库根的 `extras/desktop.py`，不随 `pip install .` 安装，回归在 `tests_extras/`（不在 CI 主套件，手动跑）。装包态调用会提示并返回 2。
+
 桌面端接的接口（一个都不新造判据）：
 
 | 标签 | 打的是 | 花钱 |

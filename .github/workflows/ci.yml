@@ -31,16 +31,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Lint (ruff check)
-        run: ruff check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
+        run: ruff check pm/ tests/ extras/ tests_extras/ run.py run_server.py examples/ eval_prompts.py
       - name: Format check (ruff format)
-        run: ruff format --check pm/ tests/ run.py run_server.py examples/ eval_prompts.py
+        run: ruff format --check pm/ tests/ extras/ tests_extras/ run.py run_server.py examples/ eval_prompts.py
       - name: Type check (mypy)
         # 与 pyproject 的 [tool.mypy] files 保持一致，别出现"本地查、CI 不查"的第三种口径
-        run: mypy pm/ run.py run_server.py eval_prompts.py
-      - name: 桌面窗口层可跑性诊断（把答案送到匿名可读的位置）
-        # 连续两轮 CI 只有 pytest 那一步红，而"为什么红"匿名读不到（日志要登录）。
-        # 这一步把 xvfb / tkinter / 能否建窗三件事写进 job summary 与 annotation。
-        # 它自己不判红——真正的门禁是下一步。
+        run: mypy pm/ extras/ run.py run_server.py eval_prompts.py
+      - name: 附件 extras 可跑性诊断（把答案送到匿名可读的位置）
+        # 2026-10-19 起桌面窗口已移出主包（实现 extras/desktop.py、测试 tests_extras/），
+        # 主套件不再含窗口层。这一步保留为**附件**的体检：xvfb / tkinter / 能否建窗
+        # 写进 job summary 与 annotation。它自己不判红——附件不在门禁内。
         run: bash scripts/ci_desktop_probe.sh
       - name: Tests (pytest) —— 无 Key、且禁止任何真实出网
         # 死端点 + 假 Key 是有意的：只要有一条调用漏到真端点（C5 那类缺陷），
@@ -49,12 +49,10 @@ jobs:
         # 注意这个数只算主进程——subprocess 打真实入口的那批用例（test_cli_guards 等）
         # 不计入分子，所以 pm/cli/main.py 的 80% 是偏保守的下界（这个数只作解释，不作判据）。
         #
-        # ⚠️ 为什么要 `xvfb-run -a`（2026-10-15 实测）：`tests/test_desktop.py` 的窗口层用例
-        # 在没有 X 的机器上整层 `pytest.skip`，而 `pm/desktop.py` 有 892 条语句里的大部分只在
-        # 那层被覆盖 —— 本机对照跑过：带窗口层 95% / 摘掉后 **14%**，全局从 96.99% 掉到 **89.66%**，
-        # 直接压穿 92 的地板。表现就是"三个 Linux 版本全红、windows job 全绿"，
-        # 而红的原因是**没跑**，不是代码坏了 —— 静默跳过等于没这条测试。
-        # 所以 Linux 侧必须在一个虚拟显示下跑，让这 70 多条真执行。
+        # ⚠️ `xvfb-run -a` 自 2026-10-19 起**不再是必需的**：窗口层已移出主套件
+        # （tests_extras/），覆盖率分母里也不再有那 2087 行。保留它只是兜底 ——
+        # 将来若有人把窗口用例放回 tests/，没有 X 时那一层会整层 skip 而不报错，
+        # 静默跳过等于没这条测试（10-15 实测：摘掉窗口层全局覆盖率 96.99% → 89.66%）。
         env:
           PM_BASE_URL: http://127.0.0.1:9/v1
           PM_EVALUATOR_B_BASE_URL: http://127.0.0.1:9/v1

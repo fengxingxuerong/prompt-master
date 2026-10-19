@@ -1,4 +1,4 @@
-"""桌面端（`pm/desktop.py`）的回归。
+"""桌面端（`extras/desktop.py`，可选附件）的回归。
 
 分两层，因为这两层能证明的事完全不同：
 
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pm import desktop
+from extras import desktop
 from pm.cliforward import ForwardError
 
 CHECK_PAYLOAD = {
@@ -1397,7 +1397,7 @@ _ENTRYPOINTS = {"app_main"}
 
 
 def test_every_desktop_helper_is_called_from_inside_the_window() -> None:
-    """模块级助手必须在 `pm/desktop.py` **自己**里被调过。
+    """模块级助手必须在 `extras/desktop.py` **自己**里被调过。
 
     补上一轮的坑：`list_placeholders` 写好了、单测也绿，但没接到任何按钮上 ——
     界面就安静地少了一栏。测试引用不算接线，所以这里只数本文件里的调用点。

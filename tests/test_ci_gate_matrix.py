@@ -195,10 +195,10 @@ _ALLOWED_JOB_DIFFERENCES: dict[str, tuple[str, str]] = {
     ),
     "ci_desktop_probe": (
         "linux",
-        "**不是门禁，是诊断**：`Tests (pytest)` 连续两轮只在 Linux 侧红，而日志正文要登录才读得到，"
-        "于是「红的原因是窗口层没跑」这个推断没法在远端证真/证伪。这一步把 xvfb 在不在、"
-        "解释器有没有 tkinter、xvfb 下能不能真建窗写进 job summary 与 annotation（匿名可读）。"
-        "windows 侧不需要它——那边有显示器、用例本来就真跑着。",
+        "**不是门禁，是附件诊断**：桌面窗口已于 2026-10-19 移出主包（extras/ + tests_extras/），"
+        "主套件不再含窗口层。这一步把 xvfb 在不在、解释器有没有 tkinter、xvfb 下能不能真建窗"
+        "写进 job summary 与 annotation（匿名可读），用于回答「附件在这台机器上能不能跑」。"
+        "windows 侧不需要它——那边有显示器、手动跑 tests_extras 即可。",
     ),
     "ci_pytest": (
         "linux",
