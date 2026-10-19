@@ -216,6 +216,7 @@ def compare_node(state: State) -> dict[str, Any]:
     details: list[dict[str, Any]] = []
     n_calls = 0
     n_position_flips = 0
+    n_skipped = 0
 
     def _judge_pair(a_out: str, a_label: str, b_out: str, idx: int) -> dict[str, Any]:
         """一次成对判定，返回 {verdict, reason}；调用失败时 verdict=None（不计票）。"""
@@ -248,6 +249,7 @@ def compare_node(state: State) -> dict[str, Any]:
         c_out = str(cur[idx].get("output", ""))
         b_out = str(base[idx].get("output", ""))
         if not c_out.strip() and not b_out.strip():
+            n_skipped += 1
             continue
         # **双向评**：正序（优化版在 A）与反序（基线在 A）各判一次。
         # 旧做法是"随机决定谁放 A"——它能平均掉位置偏好，却看不见位置偏好：
@@ -256,6 +258,7 @@ def compare_node(state: State) -> dict[str, Any]:
         fwd = _judge_pair(c_out, "cur", b_out, idx)
         rev = _judge_pair(b_out, "base", c_out, idx)
         if fwd["verdict"] is None and rev["verdict"] is None:
+            n_skipped += 1
             continue
         agree = fwd["verdict"] is not None and fwd["verdict"] == rev["verdict"]
         if not agree:
@@ -316,6 +319,8 @@ def compare_node(state: State) -> dict[str, Any]:
         "verdict": verdict,
         "votes": votes,
         "n_compared": len(details),
+        "n_expected": len(common),
+        "n_skipped": n_skipped,
         "position_flips": n_position_flips,
         "conflict": conflict,
         "details": details,

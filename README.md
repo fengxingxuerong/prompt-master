@@ -1,53 +1,70 @@
-# PromptMaster · 给 Agent 用的提示词质检与优化闭环
+# PromptMaster
 
-> 一句话：把一句需求变成**被测过、被评过、被证伪过一轮**的提示词，并如实说清哪里还不行。
-> 产出是「最终提示词 + 交付报告 + 可选 SKILL.md + 机器可读 JSON」，不是"看起来更好"的一段话。
+**中文** · [English](README.en.md)
 
-本仓库有两块东西，别走错门：
+> 把「让 AI 分析销售数据」这种一句话需求，变成**被测过、被评过、被证伪过一轮**的提示词，
+> 并如实说清哪里还不行。产出四件：最终提示词 / 交付报告 / 可选 SKILL.md / 机器可读 JSON。
 
-| 是什么 | 在哪 | 入口文档 |
+**它不是提示词润色器。** 按花不花钱排，它只做三件事：
+
+| 你想干的事 | 命令 | 成本 |
 |---|---|---|
-| **PromptMaster 本产品**（提示词优化/评测/校准） | `pm/`、`run.py`、`run_server.py` | 本文 ↓ 与 `docs/agent-cli-guide.md` |
-| **套件三服务**（ModelHub 网关 / 龙虾站 / 任务台账，随仓发布） | `releases/`、`config/` | `docs/suite/README.md` |
+| 体检一版已有提示词 | `run.py check --prompt-file x.md` | 零调用、零出网，命中规则退出码 1 |
+| CI 里只拦本次新引入的坑 | `run.py gate` | 零调用，判增量不判绝对值 |
+| 跑完整闭环：生成 → 用例 → 评估 → 修订 | `run.py --task "…"` | 会花钱，先 `--preflight` |
 
-## 一、一分钟跑通
+## 30 秒跑通
 
 ```bash
-# 0) 装依赖（Python ≥3.11）
-pip install -r requirements.txt
+pip install -r requirements.txt          # Python ≥3.11
+python run.py --selftest                 # 不配 Key：验代码能不能跑，不验效果
+python run.py check --prompt-file 我的提示词.md   # 零调用，先免费体检再决定要不要花钱
+```
 
-# 0b) 可选：装成命令（Agent 配置里就不用写 `python /绝对路径/run.py`，也不会换机器就断）
+真实运行（先 `cp .env.example .env` 填 `PM_API_KEY`，或 export 同名变量）：
+
+```bash
+python run.py --preflight                # 逐角色冒烟，花大钱之前必做
+python run.py --task "让 AI 分析销售数据" --target-model deepseek-v3
+python run.py --task "…" --prompt-file 我的提示词.md   # 改已有那版，Δ = 比你自己好多少
+```
+
+退出码是给 Agent 做分支的协议：`0` 达标 / `1` 未达标但已交付 / `2` 参数或配置错 / `3` 运行失败。
+加 `--json` 时 stdout 恰好一个 JSON 对象，进度全走 stderr。
+
+## 什么时候别用它
+
+1. **只想把一句话写漂亮** → 用 [prompt-optimizer](https://github.com/linshenkx/prompt-optimizer)，更轻、开箱即用。
+2. **要 100+ 家模型厂商或红队扫描** → 用 [promptfoo](https://github.com/promptfoo/promptfoo)。
+3. **需要统计学意义上的「确实变好了」** → 现在给不了：评委判别力尚无统计证据（[§三](#三先读这一节再用它给的分数)）。
+4. **要 LangChain / LlamaIndex 生态集成** → 它只接 `openai` / `anthropic` 兼容端点。
+
+## 一、更多入口
+
+```bash
+# 装成命令：Agent 配置里不用写 `python /绝对路径/run.py`，换机器也不会断
 pip install . && prompt-master --help
 #   ⚠️ 装包态下 `.env` 是按**当前工作目录**向上找的；在别的目录跑请直接用环境变量传 PM_API_KEY
 
-# 1) 无 Key，先看代码能不能跑（不证明效果）
-python run.py --selftest
-PM_FAKE_BACKEND=progress python run.py --task "让 AI 分析销售数据" --fast   # 假后端跑完整流程
+# 不花钱，先用假后端把整条流水线跑一遍
+PM_FAKE_BACKEND=progress python run.py --task "让 AI 分析销售数据" --fast
 
-# 2) 真实运行：配 Key（cp .env.example .env 后填 PM_API_KEY，或 export）
-python run.py --preflight                       # 花大钱之前先逐角色冒烟，必做
-python run.py --task "让 AI 分析销售数据" --target-model deepseek-v3
+# 长任务别占终端：常驻服务（REST + Web 控制台 + MCP 同源，:8080）
+python run_server.py &
+python run.py submit --task "……"     # 秒回 run_id
+python run.py wait <run_id>          # 轮询到终态，输出结果 JSON
 
-# 2b) 已经有一版提示词了：先免费体检，再决定要不要花钱改
-python run.py check --prompt-file 我的提示词.md          # 零调用，命中规则就退出码 1
-python run.py --task "让 AI 分析销售数据" --prompt-file 我的提示词.md
-#     ↑ 带 --prompt-file 时基线臂自动换成你的原稿，报告里的 Δ 即「比你自己的版本好多少」
-
-# 3) 长任务别占终端：起常驻服务，用子命令
-python run_server.py &                          # REST + Web 控制台 + MCP 同源，:8080
-python run.py submit --task "……"                # 秒回 run_id
-python run.py wait <run_id>                     # 轮询到终态，输出结果 JSON
-
-# 3b) 想要一个能点的小窗口（插件形态，零调用三张卡不需要 Key）
-python run.py panel                             # 只绑 127.0.0.1:8765，自动开浏览器
-python run.py desktop                           # 原生桌面窗口（Tkinter 标准库）：不开浏览器、不起服务
-#   Alt+1..5 切标签、Ctrl+Enter 跑当前标签；底部有 复制结果 / 另存结果… / 中止（④在跑时可掐真子进程）
-#   体检 / 考卷有几票 / 两版差分 = 当场出判定；④优化闭环没 Key 会置灰并写明原因
+# 能点的小窗口（零调用的三张卡不需要 Key）
+python run.py panel                  # 浏览器小窗，只绑 127.0.0.1:8765
+python run.py desktop                # 原生 Tkinter 窗口：不开浏览器、不起服务
+#   左侧导航切五张卡（Alt+1..5 同效）、Ctrl+Enter 跑当前卡；底栏 复制 / 另存 / 中止（④在跑时可掐真子进程）
+#   体检 / 考卷有几票 / 两版差分 = 当场出判定；④没 Key 时两个花钱按钮置灰，卡里写明为什么灰
 ```
 
 `python run.py --help` 会列出全部参数与**子命令**（`submit/status/report/wait/history/calibrate/library/check/diff/gate/panel/desktop`）。
-退出码是给 Agent 做分支的协议：`0` 达标交付 / `1` 未达标但已交付 / `2` 参数或配置错误 / `3` 运行失败。
-加 `--json` 时 stdout 恰好一个 JSON 对象，进度全部走 stderr。
+
+> 本仓还有第二块东西：`releases/` 里的套件三服务（ModelHub 网关 / 龙虾站 / 任务台账），
+> 与本产品无关，入口见 `docs/suite/README.md`。
 
 ## 二、能力线
 
@@ -65,63 +82,33 @@ python run.py desktop                           # 原生桌面窗口（Tkinter �
 
 MCP 接入（13 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
 
-## 三、这个产品对自己的结论有多硬（先读这节再用它给的分数）
+## 三、先读这一节，再用它给的分数
 
-- **评委这把尺子没有对准所有者的标准**（2026-09-27，23 条人工锚点全量校准，零失败）：
-  与人工分 MAE 3.73、bias +3.73（系统性放水）；过线判定一致率 26.1%（κ=-0.089）——
-  人工判不可用的输出评委全数放行。三家厂商对照（sensenova/glm-5.2/deepseek-v4-flash）
-  等幅失守（4.1~4.4）⇒ 是评分协议缺了所有者的标准，不是某个模型的锅。
-  已落地：空产出与安全可见性两类盲区有了提示词条款 + 代码硬封顶（校准口径不含封顶，
-  量的是评委裸分）；完整实验链见 `docs/evaluation.md` §十四/§十五。
-  ⚠️ 考卷已换过三张（9-27 首批 23 条 → candidates 48 条全确认 → 9-29 叠加 19 条
-  A/B 考卷，聚合覆盖 64 条）：最近 4 轮 impression 聚合（2026-09-30 零调用重算）
-  MAE 3.13［95% CI 2.42~3.86，宽 1.44］、bias +3.09、一致率 0.368、κ 0.074——
-  放水方向未变；CI 宽 1.44 且轮间考卷不同，「评委变好/变坏」的精细比较与
-  逐轮趋势对比均不成立，单轮读数仍是 ±极差量级的方向参考。
-  量化工具：`run.py calibrate --aggregate`（零调用，口径见 §十四）。
-  口径与逐轮记录见 `docs/evaluation.md`，账本在 `logs/judge_calibration_history.json`。
-  ⚠️ 上面那个 4 轮聚合的输入轮已归档（出处 `docs/iteration/iteration-ledger.md`）：
-  活账本经 10-10 只余 2 行（09-29 复现性行 + 10-10 换评委后单轮），
-  这个聚合数**无法从活账本重算**，引用前先知道它是一次历史快照。
-  ⚠️ **活账本那条 10-10 的校准行里 6/11 条锚点是仓库自带的示例集**（2026-10-15 查实：
-  `demo-good`/`demo-hallucinated`/`demo-vague`/`anchor-fab-trend`/`anchor-fab-attribution`/
-  `anchor-mixed`，与 `judge_calibration/samples.example.json` 逐字同名，人工分是编的）。
-  所以从活账本重算的 MAE/bias **不能**当成"与人一致性"的读数——想拿能站住的数，
-  得先用真锚点重跑一轮 `run.py calibrate`。`calibrate --aggregate` 自 2026-10-15 起
-  会在合并读数旁自动印这一句（示例条数 >0 才印，全是真锚点时不啰嗦）。
-- **判定式评分协议（`PM_SCORING_MODE=checklist`）默认关闭，且已被实测否证**。它把五个整数的
-  填数权从评委手里拿走一半（评委只答二值判定+证据，分数由代码算）。同一批锚点、评委预算
-  抬到 24000 后重测：**17 条配对上 MAE 0.58 → 1.79、bias +1.79，且 Δ 一条负数都没有**；
-  它的"极差小"也不是量具变好——17 条只落在 6 个分值上、**10 条同为 9.35**（不违规就没有
-  下压项，评委选顶档则总分为常数）。09-29 按旧条件（先加举证门槛）重开复测后**结论仍是不换**，
-  且否证理由已换过一轮（§十三）：稳定性判据字面通过（降幅 0.414 > 噪声地板 0.25），
-  但实测证明该判据可被塌缩分布平凡满足——现行理由是**塌缩未治好**（17 条仍 5 个分值、
-  10 条挤 9.35）与**偏松一分没动**（bias +1.85、Δ 全正），本段早先写的
-  「降幅 0.225 未达成」是已被超越的旧理由。
-  重开前置条件也已随之更新：要改成「分布在 N 条锚点上至少 M 个不同分值」这类
-  **分辨力**指标，而不是只压极差。
-- **达标 ≠ 有效果**：报告里的 Δ 只在基线有效时才有意义（零有效样本会报"不可采信"）。
-- **注入防御是模型相关的**：同一提示词在 A 端点免疫、在 B 端点可能被一句话劫持；
-  注入门禁会在 `hijacked>0` 时拒发 SKILL.md，这是兜底不是保险。
-- **评委分关于"所有者说达标"到底有多少信息，2026-10-06 起有直接读数**（`docs/evaluation.md` §三十一）：
-  45 条那轮 AUC **0.623**［95% CI 0.341~0.841，**覆盖 0.5**］（仅所有者亲判的子集 **0.452**、
-  rho −0.227），且**留一折重定阈值与"一律判不达标"完全同分（净增益 +0.000）**
-  ⇒ 换阈值/平移/缩放这类事后处理**买不到一个样本的正确率**，而不是"还没调好"。
-  换评委后的 10 条 AUC 0.958、κ=0.80，但 κ 的 95% CI 半宽 0.345（>0.3）——
-  与"瞎猜"不可区分，因此**既不能读成"评委变准了"，也不能读成反证**（两轮考卷不同，按 §十三 本来就不许比）。
-  已落地：`calibrate` 单轮报告与 `--aggregate` **两处**都先报判别力与可估性；
-  2×2 任一格子 <10 条时不再印 κ 点值，改印「这张考卷答不了达标一致性」（门槛由 κ 标准误反解 + 蒙特卡洛核对）。
-  现在真正缺的是 **所有者亲判的"达标"样本**（门槛是每格 10 条，owner 现在只有 10 条且 ≥9 只 1 条）。
-  **补料清单当场核过（不是"归档还有很多"）**：按输出内容去重后，评委 ≥8 的素材 52 条里 50 条已在锚点集，
-  **真能新判的只有 2 条**；另有 3 条落在评委 8.0-8.9 段的 AI 代判可请所有者**改判**（同一动作顺手补上"bias 拆不出严格人工那一半"那个老洞）。
-  其余要靠新一轮真端点批次（§十七实测：一轮 4 用例双采样 ≈80~100 次调用、3~5 小时）：
-  `python harvest_anchors.py --coverage` 看差哪几格，`--prefer-deficient --total N` 按缺口排采集顺序（没给 `--total` 时它只排序不取舍，那条 CLI 会当场这么说）。
-  零算力那批不用采集：`python scripts/build_owner_rejudge_queue.py` 生成一张表，把 25 条"AI 代判当成人工锚点"的条目请所有者改判——表里 `human_score` 一律留空，回填只写他填过的行并把那些行记成 `human_score_source=owner`，有非法行则整次作废、一字节不动。
-  ⚠️ **别直接拿那张 CSV 打分**：它的「输出摘要」被 `_make_score_form` 截到 **160 字符**，
-  而这次要判的正是只有看全文才判得出来的两类东西（编造的关键事实 / 核心交付物缺位）——
-  凭摘要打出来的分是「编的分」，与本仓 10-15 查实过的"活账本 6/11 条锚点人工分是编的"同类。
-  判分请用 `python scripts/build_rejudge_form.py`：把 25 条的**完整**输出摊成
-  `judge_calibration/rejudge_form.html`（评委分默认隐藏防锚定、进度存本地、导出即回填 CSV）。
+**这把尺子还没对准 —— 而且当前没有能站住的一致性读数。** 跑一次就能看到现状：
+
+```bash
+python run.py calibrate --aggregate     # 零调用，纯账本重算
+```
+
+活账本现在只有 **1 轮 / 11 条**：MAE 0.882、bias +0.291、κ 0.814、AUC 0.875（95% CI 0.6~1.0）。
+数字看着不错，但 **6/11 条锚点来自仓库自带示例集，人工分是编的**；且判定 2×2 里最薄一格只有
+4 条（<10）⇒ **这张考卷答不了「达标一致性」**。2026-10-19 起出处按桶拆开（所有者亲判 5 条 /
+仓库示例 6 条），示例不再冒充 owner —— 严格人工那一半只有 5 条，n=5 的读数只能当方向。
+
+历史 4 轮快照（MAE 3.13、bias +3.09、κ 0.074、AUC 0.623，CI 覆盖 0.5）只能当方向参考，
+且**无法从活账本重算**（输入轮已归档）。两组数都不构成「评委可信」的证据 ——
+真结论只有一句：**缺所有者亲判的真锚点。**
+
+由此推出的三条使用边界：
+
+1. **Δ 只在基线有效时才有意义**（零有效样本会报「不可采信」）。
+2. **达标 ≠ 有效果**：分数是方向参考，不是验收依据。
+3. **注入防御是模型相关的**：同一提示词在 A 端点免疫、B 端点可能被一句话劫持。
+
+判定式评分协议（`PM_SCORING_MODE=checklist`）已实测否证并默认关闭 —— 它稳定了分布，
+但把 17 条里的 10 条挤到同一个 9.35 上，且偏松一分没动。
+**完整实验链、否证理由、锚点造假自查全部在
+[`docs/evaluation.md`](docs/evaluation.md) §三十四**（原 README 本节原文，2026-10-19 迁入）。
 
 ## 四、仓库地图
 
@@ -131,7 +118,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1909 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1923 条，无 Key、禁止真实出网）
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）

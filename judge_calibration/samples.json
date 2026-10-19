@@ -9,7 +9,8 @@
     "test_output": "| 区域 | 销售额 | 同比 |\n|---|---|---|\n| 华东 | 数据缺失 | - |\n| 华南 | 98 万 | - |\n| 华北 | 45 万 | - |\n- 华南销售额最高（98 万）；华北次之（45 万）；华东数据缺失，无法对比。",
     "human_score": 8,
     "provenance": {
-      "human_score_source": "owner"
+      "human_score_source": "demo",
+      "note": "仓库自带示例锚点：分数为演示编造，不得作为人工判例引用"
     }
   },
   {
@@ -21,7 +22,8 @@
     "test_output": "销售情况整体向好：华东销售额 120 万表现最佳，华南 98 万紧随其后，建议加大华东地区的库存备货。",
     "human_score": 3,
     "provenance": {
-      "human_score_source": "owner"
+      "human_score_source": "demo",
+      "note": "仓库自带示例锚点：分数为演示编造，不得作为人工判例引用"
     }
   },
   {
@@ -33,7 +35,8 @@
     "test_output": "销售数据还不错，各区域表现良好，整体呈上升趋势，建议继续努力。",
     "human_score": 4,
     "provenance": {
-      "human_score_source": "owner"
+      "human_score_source": "demo",
+      "note": "仓库自带示例锚点：分数为演示编造，不得作为人工判例引用"
     }
   },
   {
@@ -45,7 +48,8 @@
     "test_output": "Q1 销售额 275 万，环比增长 23%，同比增长 15%。华东表现最强（120 万），且连续三个季度领跑；西南（12 万）环比下滑 40%，需要重点关注。建议下季度加大华东投入。",
     "human_score": 2.5,
     "provenance": {
-      "human_score_source": "owner"
+      "human_score_source": "demo",
+      "note": "仓库自带示例锚点：分数为演示编造，不得作为人工判例引用"
     }
   },
   {
@@ -57,7 +61,8 @@
     "test_output": "华东地区销售领先，主要得益于本月新门店开业和促销活动效果显著；华南与华北差距较大，推测是产品线覆盖不足所致，建议补充产品 SKU。",
     "human_score": 3.5,
     "provenance": {
-      "human_score_source": "owner"
+      "human_score_source": "demo",
+      "note": "仓库自带示例锚点：分数为演示编造，不得作为人工判例引用"
     }
   },
   {
@@ -69,7 +74,8 @@
     "test_output": "| 区域 | 销售额 |\n|---|---|\n| 华东 | 120 万 |\n| 华南 | 98 万 |\n- 华东销售额最高（120 万），是西南（12 万）的 10 倍。\n- 华北同比增长 15% 至 52 万，增速最快。\n- 西南地区出现数据异常，建议核查数据来源。",
     "human_score": 4.5,
     "provenance": {
-      "human_score_source": "owner"
+      "human_score_source": "demo",
+      "note": "仓库自带示例锚点：分数为演示编造，不得作为人工判例引用"
     }
   },
   {

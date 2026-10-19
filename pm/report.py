@@ -695,9 +695,21 @@ def _pairwise_lines(state: ReportState) -> list[str]:
         return []
     bw = _base_word(state)
     votes = pw.get("votes") or {}
+    n_cmp = _report_safe_int(pw.get("n_compared"))
+    # 分母是新加的键：老归档里没有它，退化成"实际出票例数"（即不告警），
+    # 而不是反过来把老报告全判成覆盖率不足。
+    n_exp = _report_safe_int(pw.get("n_expected")) or n_cmp
+    # 「多数」是指占**应比较例数**的多数，不是占实际出票例数的多数 ——
+    # 只跑通 1/4 例时那 1 票无论判什么都配不上"多数"两个字。
+    top = max(_report_safe_int(votes.get("better")), _report_safe_int(votes.get("worse")))
+    thin = n_exp > 0 and top * 2 <= n_exp
     verdict_text = {
-        "better": "优化版多数胜出",
-        "worse": f"**{bw}多数胜出（优化未带来优势）**",
+        "better": "优化版倾向胜出（出票不足，不代表整卷）" if thin else "优化版多数胜出",
+        "worse": (
+            f"**{bw}倾向胜出（优化未带来优势；出票不足，不代表整卷）**"
+            if thin
+            else f"**{bw}多数胜出（优化未带来优势）**"
+        ),
         "tie": "两份持平",
         "no_signal": "无有效信号（成对比较全部失败）",
     }.get(str(pw.get("verdict")), str(pw.get("verdict")))
@@ -707,14 +719,22 @@ def _pairwise_lines(state: ReportState) -> list[str]:
     lines.append(f"- 结论：{verdict_text}")
     lines.append(
         f"- 投票：优化版胜 {votes.get('better', 0)} / {bw}胜 {votes.get('worse', 0)} "
-        f"/ 持平 {votes.get('tie', 0)}（共 {pw.get('n_compared', 0)} 例，每例双向评：正序 + 交换 A/B）"
+        f"/ 持平 {votes.get('tie', 0)}（共 {n_cmp} 例"
+        + (f"／应比较 {n_exp} 例" if n_exp != n_cmp else "")
+        + "，每例双向评：正序 + 交换 A/B）"
         + (
-            f"\n- ⚠️ 位置偏置：{pw['position_flips']}/{pw.get('n_compared', 0)} 例两序结论相反"
+            f"\n- ⚠️ 位置偏置：{pw['position_flips']}/{n_cmp} 例两序结论相反"
             "，已一律记为持平（这类用例的胜负由座位决定，不计入结论）"
             if pw.get("position_flips")
             else ""
         )
     )
+    if n_cmp < n_exp:
+        lines.append(
+            f"- ⚠️ 覆盖不足：{n_exp} 例里只有 {n_cmp} 例出票"
+            f"（{_report_safe_int(pw.get('n_skipped'))} 例两侧无输出或成对调用失败）"
+            "——这个结论**不能**按比例外推到整张考卷。"
+        )
     if pw.get("conflict"):
         lines.append(f"- ⚠️ 结论冲突：{pw['conflict']}")
     for d in (pw.get("details") or [])[:6]:

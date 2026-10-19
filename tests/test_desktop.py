@@ -1469,3 +1469,141 @@ def test_footer_is_packed_before_the_notebook(
     assert str(bar.pack_info().get("side")) == "bottom", bar.pack_info()
     order = list(app.root.pack_slaves())
     assert order.index(bar) < order.index(app.nb), "底栏排在笔记本后面 ⇒ expand 会把它挤出去"
+
+
+# ---------------------------------------------------------------------------
+# 3. 外观层：色板/字号/导航/空态/禁用态（这一层全是"只有真看界面才发现"的缺陷）
+# ---------------------------------------------------------------------------
+def test_every_palette_defines_the_same_tokens() -> None:
+    """两套主题必须**同键**。
+
+    真事故（2026-10-19）：浅色那套只覆盖了 7 个键，卡片的 PANEL / 分隔线的 GRID /
+    警告的 WARN / 霓虹面上的 ON_ACCENT 全留在深色值上 —— 换肤后界面里
+    "一块块深空蓝夹在浅色卡片之间"，而默认从深色起，不点"主题"永远看不见。
+    """
+    dark, light = desktop.PALETTES["dark"], desktop.PALETTES["light"]
+    assert set(dark) == set(light), f"两套主题的键对不上：{set(dark) ^ set(light)}"
+    must = {
+        "BG",
+        "PANEL",
+        "CARD",
+        "GRID",
+        "INK",
+        "MUTED",
+        "OK",
+        "BAD",
+        "WARN",
+        "ACCENT",
+        "ON_ACCENT",
+    }
+    assert must <= set(dark), f"色板缺键：{must - set(dark)}"
+
+
+def test_switching_theme_rewrites_every_token_not_just_a_few() -> None:
+    """`apply_theme` 必须把**每一个**键都写成模块级名字，且切回来逐字还原。"""
+    origin = {k: getattr(desktop, k) for k in desktop.PALETTES["dark"]}
+    try:
+        desktop.apply_theme("light")
+        for k, v in desktop.PALETTES["light"].items():
+            assert getattr(desktop, k) == v, f"换到浅色后 {k} 没跟着换"
+        # 这四支就是 10-19 那次的漏网之鱼
+        assert origin["GRID"] != desktop.GRID
+        assert origin["PANEL"] != desktop.PANEL
+        assert origin["WARN"] != desktop.WARN
+    finally:
+        desktop.apply_theme("dark")
+    assert {k: getattr(desktop, k) for k in origin} == origin, "切回深色没有逐字还原"
+
+
+def test_nav_bar_moves_between_the_five_cards(app_and_pump: tuple[desktop.App, Any]) -> None:
+    """左侧导航就是唯一的切卡入口 —— 它必须真接在 `select_tab` 上，且选中态跟手。
+
+    顶部那排标签已被隐藏（样式布局置空），所以导航不接线 = 五张卡只剩 Alt+1..5 能到。
+    """
+    app, _pump = app_and_pump
+    assert len(app._nav_items) == len(app.tab_keys), "导航项与标签数对不上"
+    for idx, (key, btn, _mark) in enumerate(app._nav_items):
+        btn.invoke()
+        assert int(app.nb.index("current")) == idx, f"点 {key} 没切到第 {idx} 张卡"
+        for other, _b, other_mark in app._nav_items:
+            want = desktop.ACCENT if other == key else desktop.PANEL
+            assert str(other_mark.cget("bg")) == want, f"{other} 的选中条颜色不对"
+
+
+def test_empty_pane_hint_never_becomes_pane_text(
+    app_and_pump: tuple[desktop.App, Any],
+) -> None:
+    """空态提示只能是**盖在上面的 Label**，绝不能写进 Text。
+
+    写进 Text 的代价不是"不好看"：`get("1.0","end")` 会把它一起送去体检、写进导出、
+    塞进剪贴板 —— 提示就变成了内容，而用户根本不知道判据读到了它。
+    """
+    app, _pump = app_and_pump
+    hint = app._pane_hints["check"]
+    assert str(hint.cget("text")), "空态该有一句提示"
+    assert str(app.panes["check"].get("1.0", "end")).strip() == "", "空态提示混进了窗格正文"
+    app._show("check", ["命中 1 条"])
+    shown = str(app.panes["check"].get("1.0", "end")).strip()
+    assert shown == "命中 1 条", shown
+    assert str(hint.cget("text")) not in shown
+
+
+def test_no_key_greys_the_run_actions_and_says_why(
+    app_and_pump: tuple[desktop.App, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """④无 Key 时两个花钱按钮置灰，并把**为什么灰**写在卡里（README 承诺过这件事）。
+
+    置灰而不解释，等于一次沉默的拒绝：用户会以为窗口坏了，而不是自己没配 Key。
+    """
+    app, _pump = app_and_pump
+    monkeypatch.setattr(desktop, "run_available", lambda: False)
+    app._sync_run_gate()
+    assert str(app.btn_submit.cget("state")) == "disabled"
+    assert str(app.btn_preflight.cget("state")) == "disabled"
+    gate = str(app.run_gate_lbl.cget("text"))
+    assert "没配 Key" in gate and "①②③⑤" in gate, gate
+
+    monkeypatch.setattr(desktop, "run_available", lambda: True)
+    app._sync_run_gate()
+    assert str(app.btn_submit.cget("state")) == "normal"
+    assert "没配 Key" not in str(app.run_gate_lbl.cget("text"))
+
+
+def test_type_sizes_live_only_in_the_font_table() -> None:
+    """字号不许写在控件上 —— 一处 `("Segoe UI", 9)` 就能让"同一句话同号"变成空话。
+
+    与 `test_every_desktop_helper_is_called_from_inside_the_window` 同一族：
+    那张字号表立起来的意义是**唯一来源**，而唯一来源一旦有旁路就等于没有。
+    """
+    src = Path(desktop.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    allowed = {
+        node.value.lineno
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign) and node.value is not None
+    }
+    stray = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Tuple)
+        and node.elts
+        and isinstance(node.elts[0], ast.Constant)
+        and node.elts[0].value in ("Segoe UI", "Consolas")
+        and node.lineno not in allowed
+    ]
+    assert not stray, f"这些行把字号写死在了控件上（应走 FONT_* / MONO）：{stray}"
+
+
+def test_line_tag_colours_by_shape_only() -> None:
+    """着色只看行首形状：判据不在这一层，所以它绝不许改字、也不许猜语义。"""
+    assert desktop.line_tag("") == ""
+    assert desktop.line_tag("   ") == ""
+    assert desktop.line_tag("命中 2 条（退出码 1）") == "bad"
+    assert desktop.line_tag("新引入 3 条 —— CI 该红") == "bad"
+    assert desktop.line_tag("无命中（退出码 0）") == "ok"
+    assert desktop.line_tag("通过：没有新引入") == "ok"
+    assert desktop.line_tag("⚠️ 评委席降级 4/4 例") == "warn"
+    assert desktop.line_tag("· blanket_missing_branch") == "muted"
+    assert desktop.line_tag("  详情缩进") == "muted"
+    assert desktop.line_tag("@@ -1,2 +1,3 @@") == "hdr"
+    assert desktop.line_tag("自评分 基线 6.51 → 优化后 7.25") == "", "普通行不该被染色"

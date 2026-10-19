@@ -83,6 +83,35 @@ def test_real_anchors_carry_source_for_every_scored_row() -> None:
         assert not missing, f"{name} 有 {len(missing)} 条已打分却没标出处：{missing[:5]}"
 
 
+def test_demo_marker_wins_over_owner_from_another_file(tmp_path) -> None:
+    """同一个 id 在候选集标 owner、在示例集标 demo ⇒ 必须判 demo。
+
+    实测缺陷（2026-10-19）：`load_human_sources` 按字典序扫 `samples*.json`、
+    且规则是"先出现的非 unknown 为准"，而 `samples.candidates.json` 排在
+    `samples.example.json` 之前 ⇒ 活账本那轮 11 条里 6 条示例锚点只认出 1 条，
+    另 5 条带着编造分数冒充了"所有者亲判"，进了 bias 的严格人工那一半。
+    """
+    (tmp_path / "samples.candidates.json").write_text(
+        json.dumps([{"id": "demo-good", "provenance": {"human_score_source": "owner"}}]),
+        encoding="utf-8",
+    )
+    (tmp_path / "samples.example.json").write_text(
+        json.dumps([{"id": "demo-good", "provenance": {"human_score_source": "demo"}}]),
+        encoding="utf-8",
+    )
+    out = C.load_human_sources(tmp_path)
+    assert out["demo-good"] == C.HUMAN_SOURCE_DEMO, out
+
+
+def test_owner_marker_still_wins_when_no_demo_evidence(tmp_path) -> None:
+    """反向护栏：没有示例标记时，候选集的 owner 必须照常生效（别把 demo 优先级用成清空）。"""
+    (tmp_path / "samples.candidates.json").write_text(
+        json.dumps([{"id": "real-a", "provenance": {"human_score_source": "owner"}}]),
+        encoding="utf-8",
+    )
+    assert C.load_human_sources(tmp_path)["real-a"] == C.HUMAN_SOURCE_OWNER
+
+
 def test_proxy_count_agrees_with_score_form() -> None:
     """漂移守卫：锚点 JSON 里的代判条数必须等于打分表备注里的「AI代判」条数。
 

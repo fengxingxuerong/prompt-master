@@ -58,6 +58,10 @@ JUDGE_ROLES = ("evaluator", "evaluator_b", "arbiter")
 # 同源披露本来就是这个项目的习惯（评委同源要检测要报警），锚点侧同源却是口头承认——补平。
 HUMAN_SOURCE_OWNER = "owner"
 HUMAN_SOURCE_AI_PROXY = "ai_proxy"
+# 仓库自带示例锚点：分数是演示编造的，只用于"第一次把流程跑通"。
+# 2026-10-19 之前这 6 条在 samples.json 里标的是 `owner` —— 于是一批编出来的分数
+# 冒充"所有者亲判"进了 bias 的严格人工那一半。现在它们有自己的桶，不再冒充。
+HUMAN_SOURCE_DEMO = "demo"
 HUMAN_SOURCE_UNKNOWN = "unknown"
 
 
@@ -73,6 +77,8 @@ def classify_human_source(item: dict[str, Any]) -> str:
     if not raw:
         return HUMAN_SOURCE_UNKNOWN
     low = raw.lower()
+    if HUMAN_SOURCE_DEMO in low:
+        return HUMAN_SOURCE_DEMO
     if HUMAN_SOURCE_OWNER in low or low.startswith("owner"):
         return HUMAN_SOURCE_OWNER
     if HUMAN_SOURCE_AI_PROXY in low or "代判" in raw:
@@ -89,10 +95,16 @@ def render_human_source_split(pooled: dict[str, Any]) -> list[str]:
     label = {
         HUMAN_SOURCE_OWNER: "所有者亲判",
         HUMAN_SOURCE_AI_PROXY: "AI 代判（与评委 B 同族）",
+        HUMAN_SOURCE_DEMO: "仓库示例（分数为编造，不可引用）",
         HUMAN_SOURCE_UNKNOWN: "未标注出处",
     }
     out = ["", "- 人工分出处拆分（同一批配对重算，零调用）："]
-    for src in (HUMAN_SOURCE_OWNER, HUMAN_SOURCE_AI_PROXY, HUMAN_SOURCE_UNKNOWN):
+    for src in (
+        HUMAN_SOURCE_OWNER,
+        HUMAN_SOURCE_AI_PROXY,
+        HUMAN_SOURCE_DEMO,
+        HUMAN_SOURCE_UNKNOWN,
+    ):
         g = known.get(src)
         if not g:
             continue
@@ -102,7 +114,13 @@ def render_human_source_split(pooled: dict[str, Any]) -> list[str]:
             f"  - {label.get(src, src)}：{g['n_anchors']} 条锚点 / {g['n_pairs']} 条配对，bias {bias_s}"
         )
     ai = known.get(HUMAN_SOURCE_AI_PROXY, {}).get("n_anchors", 0)
-    tot = sum(g.get("n_anchors", 0) for g in known.values())
+    # 分母只算"真的人工分"两桶：示例锚点的分数是编的、未标注的连来路都不知道，
+    # 把它们并进分母会把「代判占比」稀释成一个更小的数，警示就被自己调轻了。
+    tot = sum(
+        g.get("n_anchors", 0)
+        for k, g in known.items()
+        if k in (HUMAN_SOURCE_OWNER, HUMAN_SOURCE_AI_PROXY)
+    )
     if ai and tot and ai / tot >= 0.5:
         out.append(
             f"  - ⚠️ 合并 bias 里 {ai}/{tot} 条锚点的人工分来自 AI 代判 —— 那一部分量的是"
@@ -191,7 +209,14 @@ def load_human_sources(anchor_dir: Path | None = None) -> dict[str, str]:
                 continue
             sid = str(item["id"])
             src = classify_human_source(item)
-            if out.get(sid, HUMAN_SOURCE_UNKNOWN) == HUMAN_SOURCE_UNKNOWN:
+            # demo 是**强证据**：同一个 id 只要在任一锚点文件里被标成示例，
+            # 它就不可能是人工判例。原先只按"先出现的非 unknown 为准"，
+            # 而字典序上 samples.candidates.json 排在 samples.example.json 之前
+            # ⇒ 候选集里那句 owner 会把示例标记盖掉（实测：11 条里 6 条示例
+            # 只有 1 条被认出来，另 5 条冒充了"所有者亲判"）。
+            if out.get(sid, HUMAN_SOURCE_UNKNOWN) == HUMAN_SOURCE_UNKNOWN or (
+                src == HUMAN_SOURCE_DEMO
+            ):
                 out[sid] = src
     return out
 
