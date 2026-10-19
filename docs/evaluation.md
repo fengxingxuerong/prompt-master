@@ -247,8 +247,8 @@ MAE 涨到 2.4 倍不是评委变差，是**考卷变难**。偏差仍然为正�
 `--preflight` 现在也探测仲裁评委（它只在双评委分歧时出场，配错会在跑批中途最贵的那一刻暴露）。
 
 **操作提醒**：校准要走 `run.py calibrate` 才会把结果追加进
-`logs/judge_calibration_history.json` 并与上次同角色的记录比漂移；直接跑根目录的
-`pm/calibration.py`（被它包的那层实现）不落历史。
+`logs/judge_calibration_history.json` 并与上次同角色的记录比漂移；直接跑
+`python -m pm.calibration`（它只打印、不落历史）不落账本。
 
 漂移比较现在带**口径指纹**：每条记录除 bias/mae/r 外还存 `model`（评委模型）、`rubric`
 （`rubric_stamp()`，评分提示词指纹）与 `anchors`（锚点集指纹：`(id, 人工分)` 集合摘要）。
@@ -2195,8 +2195,9 @@ Phoenix 的"judge 模板必须在 golden set 上 F1≥85% 才出厂"，全部是
 
 ### 三十一·五、这一轮落地了什么
 
-- `pm/calibration.py`：`_auc_vs_label` / `_best_cut` / `_loo_cut_accuracy` /
-  `_decision_ci` / `discrimination_stats` / `render_discrimination`；
+- `pm/calibration/stats.py` 与 `render.py`（2026-10-19 拆包后）：`_auc_vs_label` /
+  `_best_cut` / `_loo_cut_accuracy` / `_decision_ci` / `discrimination_stats` /
+  `render_discrimination`；
   `analyze()` 与 `aggregate_history()` **两处**都挂（README 引用的正是聚合那行，
   只挂单轮等于门槛没上门）；聚合侧重抽单位按锚点聚类，与 §十四 的 MAE CI 同口径。
 - `harvest_anchors.py`：`--coverage`（只读，零写入）+ `--prefer-deficient`

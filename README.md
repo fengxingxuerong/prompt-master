@@ -138,14 +138,14 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
    已按准入口径入表为复测⑦）：
    `pm/` 全量实测 **97.15%**（地板 92），拆开看 `pm/` 去掉网关 **96.82%**、
    `pm/modelhub/*` **99.05%**（地板 82）。本轮清了薄弱点清单 C 的两块账：
-   `streaming.py` **89% → 100%**、`calibration.py` 的 `main()` 尾段与 `__main__`
+   `streaming.py` **89% → 100%**、`calibration/` 的 `main()` 尾段与 `__main__`
    守卫补完（**91% → 95%**，剩零散 `except` 单行）；网关大涨的另一半来自在途的
    pool 配置/http 层测试（见 `docs/operations.md` 账本）。
    `pool.py` 331-367（真 urllib 段）仍按原判不建议为数字专门补。这块从 33.5% 补上来：`agents.py` 0→100%、
    `pool.py` 61%→85%、`vkeys.py` 21%→98%、`streaming.py` 7%→89%。
    剩下的缺口集中在 `pool.py` 331-367（真 urllib 那段，要活上游才走得到）与
-   `calibration.py` 的零散 `except` 单行；`streaming.py` 已于 2026-10-11 补到 100%、
-   `calibration.py` 的 `main()` 尾段与 `__main__` 守卫同日补完（薄弱点清单 C 的
+   `calibration/` 的零散 `except` 单行；`streaming.py` 已于 2026-10-11 补到 100%、
+   `calibration/` 的 `main()` 尾段与 `__main__` 守卫同日补完（薄弱点清单 C 的
    "补得起但还没补"两块至此清账）；`server.py` 已于 2026-10-02 补到 100%
    （上一版这里还写着"缺口集中在 server.py 361-444"，那句已经过期，本轮按实测改掉）。
    薄弱的那块恰好是出过"流式通道整条失效而测试全绿"事故的那块。

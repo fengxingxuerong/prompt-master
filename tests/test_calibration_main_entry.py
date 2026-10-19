@@ -1,4 +1,4 @@
-"""`pm/calibration.py` 的 `main()` 尾段与 `__main__` 守卫回归（零出网，评委全桩）。
+"""`pm/calibration/` 的 `main()` 尾段与 `__main__` 守卫回归（零出网，评委全桩）。
 
 为什么单独一个文件：`operations.md` 薄弱点清单（2026-10-02 实测）记过
 "calibration 的大块是文件末尾那段 CLI `__main__` 入口……能用假上游/桩补"。
@@ -114,11 +114,16 @@ def test_main_guard_executes_under_main_name() -> None:
     """`if __name__ == "__main__"` 守卫两行：以 __main__ 之名 exec 本模块，
     ensure_utf8_stdio + SystemExit(main()) 都要走一遍。--help 退出 0，不碰端点。
     相对导入要靠 `__package__` 解析，否则 exec 出的名字空间不是包内成员。"""
-    code = compile(Path(C.__file__).read_text(encoding="utf-8"), str(C.__file__), "exec")
+    # 2026-10-19 拆包：守卫在 pm/calibration/__main__.py，`__package__` 也随之深一层。
+    # 原来读 C.__file__（= __init__.py）并把 __package__ 设成 "pm"，拆包后
+    # `from .history import` 会被解析成 `pm.history` 而 ModuleNotFoundError —— 这条用例
+    # 正是"测试记住旧世界"的典型，随包结构一起改。
+    main_file = Path(C.__file__).with_name("__main__.py")
+    code = compile(main_file.read_text(encoding="utf-8"), str(main_file), "exec")
     globs: dict[str, Any] = {
         "__name__": "__main__",
-        "__file__": str(C.__file__),
-        "__package__": "pm",
+        "__file__": str(main_file),
+        "__package__": "pm.calibration",
     }
     monkey = pytest.MonkeyPatch()
     try:

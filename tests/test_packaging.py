@@ -359,7 +359,8 @@ def test_calibration_engine_is_inside_the_package():
     """校准引擎必须在包里：它原来是仓库根的 `calibrate_judge.py`，`pip install .` 装不走，
     于是装包后的 `calibrate` 子命令只能靠"往 sys.path 塞仓库根"兜底 —— 那只在这份检出里成立。
     """
-    assert (ROOT / "pm" / "calibration.py").exists()
+    # 2026-10-19 拆包：判据从"单文件存在"改为"包存在"，本意不变（引擎必须随包安装）。
+    assert (ROOT / "pm" / "calibration" / "__init__.py").exists()
     assert not (ROOT / "calibrate_judge.py").exists(), "根目录旧脚本没删净：会出现两份引擎"
     cli_src = (ROOT / "pm" / "cli" / "calibrate.py").read_text(encoding="utf-8")
     assert "import calibrate_judge" not in cli_src, "CLI 还在按顶层脚本名导入"
