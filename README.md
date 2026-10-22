@@ -1,6 +1,6 @@
 # PromptMaster
 
-**中文** · [English](README.en.md)
+**中文** · [English](README.en.md) · [Releases](https://github.com/fengxingxuerong/prompt-master/releases)
 
 > 把「让 AI 分析销售数据」这种一句话需求，变成**被测过、被评过、被证伪过一轮**的提示词，
 > 并如实说清哪里还不行。产出四件：最终提示词 / 交付报告 / 可选 SKILL.md / 机器可读 JSON。
@@ -187,5 +187,5 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
    ModelHub 网关是**另一条发布线**（`GATEWAY_VERSION = "1.1.0"`，三处引用同一常量）。
    原先 1.1.0 / 2.0.0 / 2.1.0 / tag v1.4.6 四个数并存且互不相认。写死字面量会被
    `tests/test_version_single_source.py` 拦（已用植入探针验过它真的会红）。
-   git tag 那条 `v1.4.x` 是**套件**发布线，别拿它当产品版本。
+   git tag 那条 `v1.x` 是**套件**发布线（见 [Releases](https://github.com/fengxingxuerong/prompt-master/releases)），别拿它当产品版本。
 5. **安全豁免 W7/W8/W9 未正式收回**（`releases/suite/security-waiver.html`）；公网暴露前必须处理。

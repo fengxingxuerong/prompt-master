@@ -1,5 +1,7 @@
 # PromptMaster
 
+**[中文](README.md) · [Releases](https://github.com/fengxingxuerong/prompt-master/releases)**
+
 > Turn a one-line request into a prompt that has been **tested, scored, and falsified once** —
 > and say plainly what is still wrong with it.
 > Output: final prompt + delivery report (Markdown) + optional `SKILL.md` + machine-readable JSON.
