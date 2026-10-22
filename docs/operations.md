@@ -243,6 +243,35 @@ node examples/browser_runtime_check.cjs http://127.0.0.1:8097/
 | `PM_MAX_LLM_CALLS` | 如 300 | 任务级成本总闸（自治场景强烈建议） |
 | `PM_FAKE_BACKEND` | — | 无 Key 演示模式（progress/stall/dispute/unclear） |
 
+### 发版与 PyPI 发布（2026-10-23 起）
+
+**版本线**：产品版本只有一处事实源 `pm/__init__.py:__version__`（`pyproject` 用 `dynamic` 读它）；
+`git tag v1.x` 是**套件发布线**，与产品线独立，别混。产品线 tag 用 **`v<产品版本>`**（当前 `v2.1.0`）。
+
+一次性检查（任何机器都能跑，不联网、不花钱）：
+
+```bash
+pip install -e ".[release]"        # build + twine（只在发版机器上装）
+python scripts/release_pypi.py --check
+```
+
+`--check` 做四件事，全部是机器判据：① 版本单一事实源与 tag 对齐；② `python -m build`
+出 sdist+wheel；③ `twine check`；④ **内容校验**——wheel 必须带 `case_templates/*.json`、
+`dist-info/licenses/LICENSE`，且**不得**含源码树已删除的模块（脏 `build/` 复活）或 `tests/`。
+第 ④ 条是 2026-10-22 评审实测到的真实事故形态：脏 `build/lib` 把 `pm/llm.py`、`pm/calibration.py`
+重新打进了 wheel（100 个条目里 2 个陈旧），人眼看 `unzip -l` 防不住。
+
+正式上传（**只在 owner 机器**、且 HEAD 必须已打对应 tag）：
+
+```bash
+export PYPI_TOKEN=pypi-...         # 或 TWINE_PASSWORD；用户名固定 __token__
+python scripts/release_pypi.py --upload
+```
+
+上传与构建**分两步**是刻意的：合成一条命令最容易发生"本来只想构建、结果手滑推上去了"。
+`--upload` 会先跑一遍 `--check`，然后要求：工作树干净 + `HEAD` 上已有 `v<版本>` tag，
+否则退出码 2 并告警。PyPI 项目名 `prompt-master`（2026-10-23 查询尚未被占用）。
+
 ### 故障排查入口（按顺序）
 
 ```bash

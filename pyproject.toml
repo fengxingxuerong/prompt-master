@@ -19,7 +19,6 @@ requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -27,6 +26,8 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: Software Development :: Testing",
 ]
+# 许可证只写 license 字段（`License :: OSI Approved :: MIT License` 这个 classifier 会触发
+# setuptools 的「改用 SPDX 表达式」弃用告警；2026-10-23 发版构建实测它只是噪声）。
 # ⚠️ 定位声明（不许漂成"生产可用"）：分数是方向参考、不是验收依据 ——
 # 评测尺具当前没有统计意义上的判别力证据（docs/evaluation.md §三十四）。
 # 这里写的是**兼容范围**（库用户 `pip install prompt-master` 时允许装的版本），
@@ -64,6 +65,9 @@ prompt-master = "pm.cli.console:main"
 [project.optional-dependencies]
 # 使用 Anthropic 作为 Provider 时才需要
 anthropic = ["langchain-anthropic>=0.3.0"]
+# 发版机器专用（2026-10-23）：build/twine 与测试无关，不进 dev 组，也不进 requirements.txt
+# （CI 与开发机都不该为发版多装两个包）。用法见 scripts/release_pypi.py。
+release = ["build>=1.2", "twine>=5.1"]
 # 开发与门禁（pytest/ruff/mypy 已在 requirements.txt 里钉住）
 # pytest-cov/coverage：覆盖率统计（2026-09-13 测试时发现原本没装，补进 dev 组，
 # 避免下次还得临时 pip install 才能出覆盖率数字）
