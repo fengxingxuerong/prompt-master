@@ -44,6 +44,21 @@ python run.py --task "…" --prompt-file 我的提示词.md   # 改已有那版�
 
 ## 一、更多入口
 
+**先选入口**——按你的处境挑一行即可，不必先读完这篇：
+
+| 你的处境 | 用它 | 花钱吗 |
+|---|---|---|
+| 手上已有一版提示词，只想先看有没有硬伤 | `run.py check --prompt-file x.md` | **零调用、零出网** |
+| 想在**自己仓库**的 CI 里只拦"本次新引入"的坑 | `run.py diff --base-ref origin/main x.md`（或 `run.py gate`） | **零调用** |
+| 先知道"跑一轮大概多少次调用" | `run.py --dry-run --task "…"` | **零调用** |
+| 第一次真跑，先确认端点活着 | `run.py --preflight` | 少量调用 |
+| 人在终端，跑完整闭环 | `run.py --task "…"`（交互终端下会**先报价、要一句 y/N**） | 计费 |
+| 长任务不想占终端 | `python run_server.py` + `run.py submit --task "…"`，再 `run.py wait <run_id>` | 计费 |
+| 让别的 Agent 调它 | MCP：`python -m pm.mcp_server`（stdio） | 零调用与计费都有 |
+| 不想碰命令行 | `run.py panel`（浏览器小窗）/ `run.py desktop`（原生窗，可选附件） | 生成计费 |
+
+想看产出长什么样：[`docs/sample-report.md`](docs/sample-report.md)（假后端的形状示例）。
+
 ```bash
 # 装成命令：Agent 配置里不用写 `python /绝对路径/run.py`，换机器也不会断
 pip install . && prompt-master --help
@@ -134,7 +149,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1909 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1916 条，无 Key、禁止真实出网）
 extras/             **可选附件**（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 tests_extras/       附件的回归（41 条）：不在 CI 主套件里，手动 `pytest tests_extras` 才跑
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
@@ -150,7 +165,7 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
 
 1. **仪表未收敛**（见 §三）——产品输出的核心数字仍带 ±1~2 量级的自身抖动，
    而这个"量级"本身也是逐轮摆动的读数，不是这把尺子的固定精度。
-2. **覆盖率有门禁了，但它是地板不是目标**（2026-10-22 本轮复测：全量 **1909 条 rc=0**，
+2. **覆盖率有门禁了，但它是地板不是目标**（2026-10-22 本轮复测：全量 **1916 条 rc=0**，
    `pm/` **96.75%**、`pm/modelhub/*` **98.35%**；地板值未变，见下方配置抄件。
    下面是 2026-10-11 的历史快照，保留它只为看漂移，不是当前值）：
    2026-10-11 独占复测（全量 1669 条 **rc=0**，已按准入口径入表为复测⑦）：

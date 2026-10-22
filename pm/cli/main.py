@@ -28,6 +28,7 @@ from .live_lock import hold as _live_lock_hold
 from .live_lock import lock_path as _live_lock_path
 from .live_lock import wait_seconds as _live_lock_wait
 from .support import (
+    CASES_FILE_HINT,
     EXIT_CONFIG,
     EXIT_FAILED,
     MAX_SEED_CASES,
@@ -302,7 +303,8 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument(
         "--cases-file",
         help='JSON 测试集：[{"input": "...", "expected": "..."}]。'
-        "提供后不再让模型生成用例，expected 参与事实断言（ground-truth 一票否决）",
+        "提供后不再让模型生成用例，expected 参与事实断言（ground-truth 一票否决）"
+        + CASES_FILE_HINT,
     )
     p.add_argument(
         "--assert-mode",

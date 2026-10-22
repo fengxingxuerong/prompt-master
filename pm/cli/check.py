@@ -33,6 +33,7 @@ from pm.textio import TextDecodeError, read_text_auto, warn_if_fallback
 
 from .support import (
     _EXIT_PASSED,
+    CASES_FILE_HINT,
     EXIT_CONFIG,
     EXIT_UNDELIVERED,
     MAX_SEED_CASES,
@@ -192,7 +193,7 @@ def check_command(argv: list[str]) -> int:
     p.add_argument("--prompt-file", help="从文件读取要体检的提示词")
     p.add_argument(
         "--cases-file",
-        help="改体检一份用例集（与 --cases-file 跑批用的是同一条加载路径）",
+        help="改体检一份用例集（与 --cases-file 跑批用的是同一条加载路径）" + CASES_FILE_HINT,
     )
     p.add_argument(
         "--assert-mode",

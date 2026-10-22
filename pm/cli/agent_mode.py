@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from .history import _TERMINAL_STATUS
 from .support import (
+    CASES_FILE_HINT,
     EXIT_FAILED,
     _result_exit_code,
     assert_mode_arg,
@@ -63,7 +64,8 @@ def _build_agent_parser(cmd: str) -> argparse.ArgumentParser:
         ap.add_argument("--cases", type=int, default=3, help="测试用例数量（1-8）")
         ap.add_argument(
             "--cases-file",
-            help='JSON 用例集：[{"input","expected","mode","scenario","hijack_marker"}]',
+            help='JSON 用例集：[{"input","expected","mode","scenario","hijack_marker"}]'
+            + CASES_FILE_HINT,
         )
         ap.add_argument(
             "--assert-mode",

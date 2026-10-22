@@ -30,6 +30,11 @@ LOG_DIR = Path(os.getenv("PM_LOG_DIR") or _DEFAULT_LOG_DIR)
 # 一处改数值、另一处就会悄悄失配 —— 那种"体检说没事、跑起来被拦"的门禁等于没装。
 MAX_SEED_CASES = 8
 
+# 三个解析器（`run.py` / `run.py check` / `run.py submit`）的 `--cases-file` 都要指向同一处模板。
+# 各写一份的话，"模板去哪找"迟早三处不同：2026-10-22 实测**三处都没写**，
+# 用户只能翻 README 的仓库地图才知道有 `case_templates/`。
+CASES_FILE_HINT = "；模板见 case_templates/（可直接喂 --cases-file 的领域用例集）"
+
 
 # 非 verbose 时闭嘴的**传输层** logger。它们按**每次 HTTP 调用**打一行 ——
 # 一轮真实运行 45~102 次调用就是 45~102 行 `HTTP Request: POST … 200 OK`，
