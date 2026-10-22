@@ -59,8 +59,8 @@ With `--json`, stdout is exactly one JSON object; all progress goes to stderr.
 
 | Item | Value |
 |---|---|
-| Tests | **1,916 collected**, no API key, no live network |
-| Coverage | 96.75% on `pm/` (floor 92), 98.35% on `pm/modelhub/*` (floor 82); full run 2026-10-22, 1,907 tests |
+| Tests | **1,924 collected**, no API key, no live network |
+| Coverage | 96.77% on `pm/` (floor 92), 98.35% on `pm/modelhub/*` (floor 82); full run 2026-10-22, 1,924 tests |
 | CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
 | Interfaces | CLI (12 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |
 

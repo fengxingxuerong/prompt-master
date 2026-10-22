@@ -26,6 +26,7 @@ def test_sample_report_keeps_the_core_sections() -> None:
     """结构漂了（少节 / 被截断）要在这里红，而不是让读者先发现。"""
     text = SAMPLE.read_text(encoding="utf-8")
     for section in (
+        "## 结论（先看这一行）",
         "## 评分总览",
         "## 置信度与采样噪声",
         "## 与基线对比",

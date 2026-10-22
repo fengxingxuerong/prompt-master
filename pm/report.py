@@ -133,6 +133,9 @@ from .report_sections import (
     _usage_lines as _usage_lines,
 )
 from .report_sections import (
+    _verdict_lines as _verdict_lines,
+)
+from .report_sections import (
     _version_table_lines as _version_table_lines,
 )
 from .report_sections import (
@@ -152,6 +155,7 @@ def render_report(state: ReportState) -> tuple[str, dict[str, Any]]:
     """
     lines: list[str] = []
     lines += _header_lines(state)
+    lines += _verdict_lines(state)
     lines += _score_overview_lines(state)
     lines += _uncertainty_lines(state)
     lines += _baseline_lines(state)

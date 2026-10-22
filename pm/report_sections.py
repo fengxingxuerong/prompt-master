@@ -60,6 +60,74 @@ def _header_lines(state: ReportState) -> list[str]:
     return lines
 
 
+def _verdict_lines(state: ReportState) -> list[str]:
+    """## 结论（先看这一行）：判定 + 最该先知道的警告，搬到报告最前（2026-10-22）。
+
+    用户视角：判定与小字警告散在中段，读者要翻到第三屏才知道"未达标 / 这个 Δ 不可采信"。
+    本函数**不产生任何新判据** —— 只把各处已经算好的事实搬到前面，并指回详细章节，
+    与其余章节同一条纪律（判据的产地不在渲染层）。
+    """
+    agg = _aggregate(state)
+    status = str(state.get("status", "running"))
+    lines: list[str] = ["## 结论（先看这一行）", ""]
+
+    if status == "failed":
+        lines.append("❌ **本轮失败，没有可交付的提示词。** 原因见文末「运行错误」。")
+    elif not agg:
+        lines.append("⚠️ **本轮没有产生评估结果**，分数与 Δ 都无从谈起（细节见下文各章）。")
+    else:
+        avg = agg.get("avg_score")
+        lower = agg.get("ci_lower")
+        if agg.get("passed"):
+            head = f"✅ **达标**：均分 {avg} ≥ 阈值 {PASS_THRESHOLD}"
+        else:
+            head = f"⚠️ **未达标**：均分 {avg} < 阈值 {PASS_THRESHOLD}"
+            if lower is not None:
+                head += f"，保守下界 {lower} 也没过线"
+        lines.append(head + "。交付的是历史最高分那一版（见文末「最终提示词」）。")
+
+    caveats = _verdict_caveats(state, agg)
+    if caveats:
+        lines.append("")
+        lines.append("**先知道的几件事：**")
+        lines += caveats
+    lines.append("")
+    return lines
+
+
+def _verdict_caveats(state: ReportState, agg: dict[str, Any]) -> list[str]:
+    """结论后面那几条警告：**只在真的成立时出现**，每条都指回自己那一节。"""
+    if not agg:
+        return []
+    out: list[str] = []
+    n_invalid = _infra_invalid_cases(state)
+    if n_invalid:
+        out.append(
+            f"- ⚠️ **Δ 不可采信**：优化臂有 {n_invalid} 条用例没有任何有效样本（见「与基线对比」）。"
+        )
+    elif not _baseline_aggregate(state):
+        out.append(
+            f"- ⚠️ **没有{_base_word(state)}读数** ⇒ 无法回答"
+            + ("「比你的原稿好多少」" if _seed_arm(state) else "「比不优化好多少」")
+            + "（见「与基线对比」）。"
+        )
+    if not agg.get("cases_complete", True):
+        out.append("- ⚠️ **用例数不足，本次不予判定达标**（见「评分总览」）。")
+    absent = judge_seat_absent(state)
+    if absent:
+        n_cases = agg.get("n_cases") or 0
+        out.append(
+            f"- ⚠️ **评委席降级**：{len(absent)}/{n_cases} 条用例有评委缺席，"
+            "那些分数不是双评委共识（见「置信度与采样噪声」）。"
+        )
+    if int(agg.get("n_samples", 1) or 1) < 2:
+        out.append(
+            "- ⚠️ **噪声不可估**：每条用例只采样 1 次，「采样噪声 0.0」是**没测到**"
+            "而不是「打分完全一致」（见「置信度与采样噪声」）。"
+        )
+    return out
+
+
 def _score_overview_lines(state: ReportState) -> list[str]:
     """## 评分总览：判定看保守下界而不是点估计（见置信度章节）。"""
     agg = _aggregate(state)
