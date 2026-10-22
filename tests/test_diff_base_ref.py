@@ -11,8 +11,11 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -148,11 +151,31 @@ def test_resolve_git_base_rejects_empty_ref_and_non_file(tmp_path) -> None:
         resolve_git_base(str(repo / "prompts" / "nope.md"), "HEAD")
 
 
-def test_resolve_git_base_rejects_files_outside_a_repository(tmp_path) -> None:
-    loose = tmp_path / "loose.md"
-    loose.write_text(CLEAN, encoding="utf-8")
-    with pytest.raises(DiffSourceError, match="不在 git 仓库里"):
-        resolve_git_base(str(loose), "HEAD")
+def _dir_outside_any_repo() -> Path:
+    """返回一个**本身不在任何 git 工作树里**的可写父目录。
+
+    检出目录的父目录优先（CI 与开发机上都在仓库之外），退到系统临时目录。
+    """
+    for base in (ROOT.parent, Path(tempfile.gettempdir())):
+        if not any((p / ".git").exists() for p in (base, *base.parents)):
+            return base
+    raise AssertionError("找不到一个仓库外的可写目录")
+
+
+def test_resolve_git_base_rejects_files_outside_a_repository() -> None:
+    # ⚠️ 这里**不能**用 tmp_path：本仓根 conftest 在 Windows 上把 pytest 临时根**首选**
+    #    放进检出目录里的 `.pytest_tmp/`（绕开宿主 %TEMP% 的坏软链），于是 tmp_path 可能
+    #    落在仓库内 —— 那样 `git rev-parse` 会成功，走的就不是"仓库外"这条分支。
+    #    CI Windows 实测踩中：报的是"基线 HEAD 里没有"而不是"不在 git 仓库里"。
+    scratch = _dir_outside_any_repo() / f"pm-loose-diffbase-{os.getpid()}"
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        loose = scratch / "loose.md"
+        loose.write_text(CLEAN, encoding="utf-8")
+        with pytest.raises(DiffSourceError, match="不在 git 仓库里"):
+            resolve_git_base(str(loose), "HEAD")
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_resolve_git_base_rejects_missing_and_empty_base_file(tmp_path) -> None:
