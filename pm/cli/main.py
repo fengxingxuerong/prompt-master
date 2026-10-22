@@ -368,7 +368,13 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         help="跳过真实运行前的成本确认（交互终端下默认先报价并要求 y/N 确认；"
         "--json / 非交互 / 假后端演示模式本来就不问，无需此开关）",
     )
-    p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="详细日志：DEBUG 级（缺省是 INFO，且已静默 httpx2/httpcore2 这类"
+        "每次调用打一行的传输层噪声）",
+    )
     return p
 
 

@@ -31,6 +31,24 @@ LOG_DIR = Path(os.getenv("PM_LOG_DIR") or _DEFAULT_LOG_DIR)
 MAX_SEED_CASES = 8
 
 
+# 非 verbose 时闭嘴的**传输层** logger。它们按**每次 HTTP 调用**打一行 ——
+# 一轮真实运行 45~102 次调用就是 45~102 行 `HTTP Request: POST … 200 OK`，
+# 而"请求成功"对用户不是信息，是流水账。
+# ⚠️ 名单必须跟着**实际**HTTP 栈走：openai / langsmith 已从 httpx 迁到 **httpx2**
+#    （2026-10-22 实测 `httpx2-2.12.0`，Required-by: langsmith, openai），
+#    只静默 httpx/httpcore 等于没静默 —— httpx2 照样一行一次调用刷屏。
+# `-v`（DEBUG 档）时一条都不静默：那一档就是要看到底。
+_QUIET_LOGGERS = (
+    "httpx",
+    "httpx2",
+    "httpcore",
+    "httpcore2",
+    "openai",
+    "urllib3",
+    "langsmith",
+)
+
+
 def setup_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
@@ -38,10 +56,14 @@ def setup_logging(verbose: bool) -> None:
         format="%(asctime)s %(levelname)-7s %(name)-12s %(message)s",
         datefmt="%H:%M:%S",
     )
-    if not verbose:
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
-        logging.getLogger("openai").setLevel(logging.WARNING)
+    # basicConfig 在 root 已经有 handler 时会**整段 no-op**（含 level）——嵌在别的进程里
+    # 跑时 `-v` 会静默失效。显式再设一次 root level，让档位与调用方无关。
+    logging.getLogger().setLevel(level)
+    # -v 时显式放回 NOTSET（继承 root=DEBUG）：否则同一进程里先跑过非 verbose、再开 -v，
+    # 这些 logger 会被上一次留下的 WARNING 钉住，"-v 看起来没生效"。
+    quiet = logging.NOTSET if verbose else logging.WARNING
+    for name in _QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(quiet)
 
 
 def read_seed_prompt(p: argparse.ArgumentParser, args: argparse.Namespace) -> str:
