@@ -1749,3 +1749,75 @@ R4 `live_run_support_triage_20261014_r4.err:111`，聚合行在 02:24:33（`avg=
 - 校准读数**没有变化**：owner 亲判锚点仍缺，Δ/达标类结论继续不采信；本轮未跑真端点。
 - Windows 真机上的 `.env` 优先级只在本机跑过（Linux CI 会跑同一套 subprocess 用例），
   远端 CI 结果未等。
+
+## Round 35（2026-10-22，PromptMaster 本产品）—— 收口 Round 34：4 处本地红归零 + CI 的 windows job 照出"仓库外"用例的临时根假设
+
+**本轮判据**：Round 34 那一批留在工作区、**且是红的**。本轮只做收口 —— 把红归零 → 落库 → 推远端 → 等 CI。
+不新增任何"优化效果"结论。
+
+### 接手状态（先量再动）
+
+- 工作区：36 个跟踪文件改动 + 9 个真·新文件未提交（Round 34 + extras 桌面端"项目对话"），另有 6 笔
+  10-19 的重构提交未推送。
+- **活体 `pytest tests/` 收集 1893 条，4 处门禁红**；而 Round 34 正文与文档抄件都还写着 1873（差 20）。
+
+### 四处红 → 逐条归因与修（不做"改预期迁就实现"）
+
+1. `test_test_count_copies_match_the_live_collection`：4 处抄件 **1873 → 1893**
+   （`README.md` / `README.en.md` / `docs/operations.md` / `.pre-commit-config.yaml`）——抄件没跟上。
+2. `test_complexity_ratchet`：`pm/cli/agent_mode.py::agent_subcommand` **11 → 12**。按仓规**拆**
+   （不登记豁免）：拆成"解析 + 路由" + 每子命令一个函数（submit/status/report/wait），顶层 CC 落到
+   ≤10；`python tests/test_complexity_ratchet.py --rewrite` 同步台账（32 → 31 条，无新增）。
+3. `test_dynamic_pm_keys_are_known`：`pm/cli/main.py` 出现新的动态键 `f"PM_{role.upper()}_API_KEY"`。
+   该键尾 `_API_KEY` 已被 `isolate_host_connection_env` 的后缀规则整类覆盖 ⇒ 加白名单并写清理由。
+4. `test_assertions::test_cli_per_case_mode_overrides_global_and_validates`：旧断言只清
+   `PM_API_KEY` / `PM_TARGET_API_KEY`，而新 Key 闸门还认 `PM_API_KEYS`；仓库 `.env` 那份多 Key 池被
+   `load_dotenv()` 补进子进程 ⇒ 闸门误判"有 Key"而放行到真跑，用例再走不到 Key 检查那一站。修：该
+   用例补清 `PM_API_KEYS`（它本来就承诺"掐断一切 Key 来源"），不是放松断言。
+
+### 提交与推送
+
+- 分 **2 笔语义提交**：`bffc785`（Round 34 + 配套收口，44 文件）、`4f44534`（extras 桌面端"项目对话"，
+  7 文件）。只拆两笔的原因：`test_test_count_copies_match_the_live_collection` 把"新测试文件 + 文档
+  数字 + `pyproject` 的 mypy 覆盖"绑成同一刀（活体收集数必须等于抄件），中间态硬拆必红。
+- 连同原有 6 笔 10-19 重构，共 **8 笔**推 `origin/main`。
+
+### CI 真跑照出 windows job 红（本轮最硬的一条）
+
+- 现象：`test (3.11/3.12/3.13)` 全绿，**`windows` 挂在 `Tests (pytest)`**；唯一失败
+  `tests/test_diff_base_ref.py::test_resolve_git_base_rejects_files_outside_a_repository`
+  （期望 `不在 git 仓库里`，实得 `基线 HEAD 里没有 .pytest_tmp/…/loose.md：…`）。
+- 根因：该用例假设 `tmp_path` 在仓库外；但本仓根 `conftest.py` 在 **Windows** 上把 pytest 临时根
+  **首选**放进检出目录内的 `.pytest_tmp/`（绕开宿主 `%TEMP%` 的坏软链，见 `choose_temp_root`）⇒
+  `tmp_path` 落在仓库内，`git rev-parse` 成功，走的是"新文件没有可对比的旧版本"分支。
+- **本机复现（不靠猜）**：`PYTEST_DEBUG_TEMPROOT` 指进检出目录，即复刻出与 windows runner 一致的红。
+- 修：该用例改用**确定的仓库外目录**（检出目录的父目录优先，退系统临时目录；先确认祖先无 `.git`），
+  不自造 `.git`；两种条件（temproot 在仓库内 / 外）都验绿。提交 `b9fffc7`。
+- CI 复跑：**4/4 success**（`b9fffc7`）。
+
+### 收尾
+
+- 仓库根一次性草稿（`pelican-*.png` ×4 + `鹈鹕骑自行车动画/`）按用户可恢复偏好移入 **Windows 回收站**
+  （`SHFileOperationW` + `FOF_ALLOWUNDO`，非硬删）；`.gitignore` 保留两条防复发条目（同 `宣传片/` 先例）。
+
+### 验收读数（本机，CI 同口径）
+
+- `pytest tests/` **1893 条全绿**；覆盖率 `pm/` **96.75%**（地板 92）、`pm/modelhub/*` **98%**（地板 82）。
+- `ruff check` / `ruff format --check` / `mypy --strict` 全绿；`selftest` / `prompt-gate` /
+  `eval_prompts` / 三服务套件（18 / ok / 46）/ stub e2e 全绿。
+- 远端：`main` = `b9fffc7`，CI **4/4 success**。
+
+### 更正 Round 34（诚实记录）
+
+- Round 34 正文写"全量 1873 collected / rc=0"，但它落库时的树实际是 **1893 + 4 处红** —— 说明那批
+  改动在该段写下之后又长出了约 20 条用例与几处未收口的改动。**Round 34 的"全绿"读数与它所在的树
+  不一致，不得引用**；以本轮收口后的 1893 全绿为准。Round 34 的 WIP 直到本轮（`bffc785`）才真正落库。
+
+### 长期沉淀（可复用）
+
+- **"本地绿、CI 红"的新形态：测试的临时目录假设**。当 conftest 因 `%TEMP%` 差异把 temproot 放进检出
+  目录时，"在仓库外 / 在仓库里"这类前提会随平台翻转 —— 凡依赖位置的用例必须**显式挑目录**，不能赌
+  `tmp_path` 落在哪。
+- **复现优先**：`PYTEST_DEBUG_TEMPROOT` 指进检出目录即可在本机复刻 windows runner 的形态，不必等 CI。
+- 被多条门禁交叉绑定的工作包（用例数抄件 / mypy 覆盖 / docs 同数）**只能同刀提交**，硬拆中间态必红。
+
