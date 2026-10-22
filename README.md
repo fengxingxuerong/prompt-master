@@ -30,6 +30,8 @@ python run.py --task "让 AI 分析销售数据" --target-model deepseek-v3   # 
 python run.py --task "…" --prompt-file 我的提示词.md   # 改已有那版，Δ = 比你自己好多少
 ```
 
+想看**交付报告长什么样**：[`docs/sample-report.md`](docs/sample-report.md)（假后端产出的**形状示例**：分节结构真实、读数全是桩）。
+
 退出码是给 Agent 做分支的协议：`0` 达标 / `1` 未达标但已交付 / `2` 参数或配置错 / `3` 运行失败。
 加 `--json` 时 stdout 恰好一个 JSON 对象，进度全走 stderr。
 
@@ -132,7 +134,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1907 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1909 条，无 Key、禁止真实出网）
 extras/             **可选附件**（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 tests_extras/       附件的回归（41 条）：不在 CI 主套件里，手动 `pytest tests_extras` 才跑
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
@@ -148,7 +150,7 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
 
 1. **仪表未收敛**（见 §三）——产品输出的核心数字仍带 ±1~2 量级的自身抖动，
    而这个"量级"本身也是逐轮摆动的读数，不是这把尺子的固定精度。
-2. **覆盖率有门禁了，但它是地板不是目标**（2026-10-22 本轮复测：全量 **1907 条 rc=0**，
+2. **覆盖率有门禁了，但它是地板不是目标**（2026-10-22 本轮复测：全量 **1909 条 rc=0**，
    `pm/` **96.75%**、`pm/modelhub/*` **98.35%**；地板值未变，见下方配置抄件。
    下面是 2026-10-11 的历史快照，保留它只为看漂移，不是当前值）：
    2026-10-11 独占复测（全量 1669 条 **rc=0**，已按准入口径入表为复测⑦）：
