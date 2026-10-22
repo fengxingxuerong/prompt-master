@@ -1821,3 +1821,56 @@ R4 `live_run_support_triage_20261014_r4.err:111`，聚合行在 02:24:33（`avg=
 - **复现优先**：`PYTEST_DEBUG_TEMPROOT` 指进检出目录即可在本机复刻 windows runner 的形态，不必等 CI。
 - 被多条门禁交叉绑定的工作包（用例数抄件 / mypy 覆盖 / docs 同数）**只能同刀提交**，硬拆中间态必红。
 
+## Round 36（2026-10-22，PromptMaster 本产品）—— 用户视角优化：成本闸门 / 日志降噪 / 可预览 / 首屏结论 / 可发现性 / README 重构
+
+**本轮判据**：不新增任何"优化效果"结论（那要 owner 亲判锚点），只修"用户看得见、用得上"的路径。
+方法论：以"第一次打开这个仓库的人"的视角真走一遍，找出 10 处摩擦，按**会不会真伤到用户**排序，逐项收口。
+
+### 收口的 6 项
+
+| 项 | 用户收益 | 提交 |
+|---|---|---|
+| P0-1 真实运行成本闸门 | 交互终端下 `--task` 先报价再要 y/N（`--yes` 跳过）；Agent / CI / 假后端不阻塞；取消退 2 | `38785b0` |
+| P0-2 默认日志降噪 | 首屏不再是一行一次的 `httpx2 HTTP Request…` | `25b1a22` |
+| P1-3 可预览样例产物 | 不花钱就知道报告长什么样（`docs/sample-report.md`，读数明确标注为桩） | `b5985d0` |
+| P2-7 / P2-10 可发现性 | README 处境决策表；`--cases-file` 三处帮助都指向 `case_templates/` | `0e83ad9` |
+| P2-9 报告首屏结论 | `## 结论（先看这一行）`：判定 + 最多 5 条警告，各指回细节章节 | `610fbf4` |
+| B README 用户向重构 | 208 → 147 行；工程口径搬 `docs/operations.md` 第十四节（**只搬不删**） | `110e15e` |
+
+### 两处"根因不在表面"的发现
+
+1. **日志降噪的根因是静默名单停在了旧 HTTP 栈**：`setup_logging` 只压 `httpx/httpcore/openai`，
+   而 `openai` / `langsmith` 早已迁到 **`httpx2`**（实测 `httpx2-2.12.0`，Required-by 两者）
+   ⇒ 所谓"已静默"一行没少。守卫新增"名单必须覆盖**当场已安装**的 HTTP 客户端"——换一代客户端就红。
+2. **`--cases-file` 的帮助三处都没说模板在哪**（`run.py` / `run.py check` / `run.py submit`），
+   用户只能翻 README 的仓库地图。收成一份 `support.CASES_FILE_HINT`，并有用例验"真的印在 `--help` 里"。
+
+### 一次自查失误（如实记）
+
+按"无 Key 首次体验"敲 `run.py --task "…"` 时，仓库 `.env` 里有真 Key、`load_dotenv` 生效，
+**当场真跑起来**（打到真端点，见 200 与一次 429 换 Key），约 5~8 发调用后被超时杀掉；
+而该路径只在**结束时**落盘 ⇒ 那几发的产物无法从磁盘还原。
+教训：探测"用户体验"时，凡可能触网/计费的路径先用"清空 Key + 死端点"或假后端。
+—— P0-1 这条需求正是这次失误反推出来的（README 只在一句括号里写着"先 `--preflight`"）。
+
+### 两处"别只看聚合"的实测
+
+- **GitHub API 的运行级 `conclusion` 会早于 job 级报 success**：`0e83ad9` 那轮 run 说
+  `completed success`，而 windows 与 3.11 两个 job 仍是 `in_progress`。**以 job 级为准**。
+- **windows job 偶发 flaky**：`tests/test_panel.py` 两条用例里的 `node` 子进程在 runner 上超时
+  （`node --check` 60s），带凭据 `rerun-failed-jobs` 重跑即绿 ⇒ 判为环境型 flaky（同轮 Linux 3/3 全绿）。
+
+### 验收读数
+
+- 全量 **1924 条全绿**（本批 +28 条守卫）；覆盖率 `pm/` **96.77%**、`pm/modelhub/*` **98.35%**。
+- CI：上述 6 笔提交逐 job 4/4 success（`0e83ad9` 那次 windows 重跑后绿）。
+- 抄件同步：计数 1893 → 1924（四处同改）、README 覆盖率快照 96.99% → 96.77%。
+
+### 未做（明说）
+
+- 报告首屏结论**只搬运事实、不产生新判据**；"效果结论仍不采信"这条边界没有变。
+- 未发 PyPI（需要 owner 的账号/token）—— `pip install .` 仍是唯一安装路径。
+- 未跑真端点取"真实读数"的样例（需 owner 同意烧钱）。
+- `run.py demo` 子命令**主动放弃**：README 已有假后端一行命令 + 样例报告，边际价值低于多养一个子命令的成本。
+
+
