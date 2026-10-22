@@ -26,7 +26,7 @@ site-packages 的祖先目录，用户项目里的配置会被静默忽略）。
 |---|---|---|
 | `0` | 达标交付（passed） | 直接取用 `best_prompt` |
 | `1` | 未达标但已交付（max_iterations / early_stopped） | 读报告遗留问题，决定人工介入或调参重跑 |
-| `2` | 参数/配置错误（含无 Key、server 未启动） | 修正参数或先启动 server，**不要原样重试** |
+| `2` | 参数/配置错误（含无 Key、server 未启动、交互下取消成本确认） | 修正参数或先启动 server，**不要原样重试** |
 | `3` | 运行失败（status=failed / 未捕获异常） | 看 `errors` 字段；重试安全（缓存命中不重复计费） |
 
 ### 同步模式（短任务 / fast 档）
@@ -111,6 +111,21 @@ python run.py --dry-run --task "..." --cases-file my_cases.json --max-iter 2
 # → estimated_llm_calls: {min, max}；不联网不需要 Key。
 # 实测校准：全配置 4 用例双采样 2 轮预估 45~83，第 13 轮实际 81 次 ✓
 ```
+
+### 真实运行前的成本确认（只对"能问人"的终端）
+
+```bash
+python run.py --task "..."            # 交互终端下先报价，再要一句 y/N（默认为否）
+python run.py --task "..." --yes      # 确认过就不再问；长任务改用 run_server.py + submit
+```
+
+- 只在**能问人**时拦：TTY 且非 `--json` 且非 `PM_FAKE_BACKEND` 假后端。**Agent / CI / 管道
+  一律直接放行** —— 非交互场景没人能回答 `y/N`，拦下来等于把自动化卡死（这条有端到端用例钉着）。
+- 报价与 `--dry-run` **同一个函数**（`estimated_llm_calls` 逐字一致），不是两处各算一份；
+  配了 `PM_PRICE_*_PER_M` 时连金额区间一起报。
+- 非 `y/yes`（含直接回车、管道读到 EOF）按**取消**处理：不发起任何调用，退 `2`。
+- `--yes` 是唯一的跳过开关；`--selftest` / `--preflight` / `--dry-run` / `check` / `diff` / `gate`
+  这些不花钱的路径本来就不经过它。
 
 ### 集成注意
 

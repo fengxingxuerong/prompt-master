@@ -195,7 +195,7 @@ def main() -> int:
     if args.dry_run:
         return _dry_run_exit(args, seed_cases)
 
-    if not _api_key_gate(p):
+    if not _run_preconditions(p, args, seed_cases):
         return EXIT_CONFIG
 
     init = initial_state(
@@ -362,6 +362,12 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         help="成本预估：不联网不调用，按当前参数估算 LLM 调用次数区间（JSON 输出）。"
         "智能体可在提交前用它做预算决策",
     )
+    p.add_argument(
+        "--yes",
+        action="store_true",
+        help="跳过真实运行前的成本确认（交互终端下默认先报价并要求 y/N 确认；"
+        "--json / 非交互 / 假后端演示模式本来就不问，无需此开关）",
+    )
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -522,7 +528,12 @@ def _reject_rule_like_expected(
 # ---------------------------------------------------------------------------
 
 
-def _dry_run_exit(args: argparse.Namespace, seed_cases: list[dict[str, Any]]) -> int:
+def _estimate_calls(args: argparse.Namespace, seed_cases: list[dict[str, Any]]) -> dict[str, Any]:
+    """真实运行前的一次调用数与金额预估（不联网、不调用）。
+
+    **唯一事实源**：`--dry-run` 的 JSON 与交互成本闸门都读这一个函数 ——
+    两处各算一份的话，报价迟早跟实际参数漂开，而报价正是用户唯一能拿来自查的东西。
+    """
     from pm.nodes import _active_judges, _samples_per_case
 
     k = _samples_per_case()
@@ -549,7 +560,11 @@ def _dry_run_exit(args: argparse.Namespace, seed_cases: list[dict[str, Any]]) ->
         "质量门重试与双评委仲裁会向上浮动；缓存命中会向下浮动",
     }
     _attach_estimated_cost(payload, est_min, est_max)
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return payload
+
+
+def _dry_run_exit(args: argparse.Namespace, seed_cases: list[dict[str, Any]]) -> int:
+    print(json.dumps(_estimate_calls(args, seed_cases), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -681,6 +696,66 @@ def _api_key_gate(p: argparse.ArgumentParser) -> bool:
         file=sys.stderr,
     )
     return True
+
+
+def _confirm_expensive_run(args: argparse.Namespace, seed_cases: list[dict[str, Any]]) -> bool:
+    """交互式真实运行前的**成本闸门**：先报价，再要一句显式确认。
+
+    True = 可以继续；False = 用户取消（已打印说明，调用方统一退 2）。
+
+    为什么只拦"能问人"的场景：Agent / CI / 管道里没有人能回答 `y/N`，拦下来等于把
+    自动化卡死 —— 所以 `--json`、非 TTY、假后端演示模式一律直接放行。
+    与桌面端"提交前把预估区间写进确认框"是同一意图，这里补上此前只有桌面有的那份
+    （真实事故形状：`.env` 里有 Key 的人敲下 `--task` 就直接开跑几十次计费调用）。
+    """
+    if args.yes or args.json or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return True
+    from pm.testing import active_scenario
+
+    if active_scenario():  # 假后端整轮不出网、零成本，没什么可确认的
+        return True
+
+    est = _estimate_calls(args, seed_cases)
+    calls = est["estimated_llm_calls"]
+    cost = est.get("estimated_cost") or {}
+    amount = ""
+    if cost.get("estimated_total_max") is not None:
+        amount = (
+            f"，预估金额 {cost['estimated_total_min']} ~ {cost['estimated_total_max']}"
+            "（单位随 PM_PRICE_*_PER_M）"
+        )
+    print(
+        f"\n这一轮是**真实运行**：预计 {calls['min']}~{calls['max']} 次 LLM 调用{amount}。",
+        file=sys.stderr,
+    )
+    print(
+        "  只看报价、先不跑：  run.py --dry-run …（零调用）\n"
+        "  先确认端点活着：    run.py --preflight\n"
+        "  长任务别占终端：    python run_server.py & 然后 run.py submit …\n"
+        "  确认过就不再问：    run.py --yes …",
+        file=sys.stderr,
+    )
+    try:
+        answer = input("确认开始？（y/N）> ").strip().lower()
+    except EOFError:
+        answer = ""
+    if answer in ("y", "yes"):
+        return True
+    print("已取消：本次没有发生任何调用。", file=sys.stderr)
+    return False
+
+
+def _run_preconditions(
+    p: argparse.ArgumentParser, args: argparse.Namespace, seed_cases: list[dict[str, Any]]
+) -> bool:
+    """真实运行的两道前置闸：① 有 Key；② 交互场景下用户确认过成本。
+
+    任一不过都已在 stderr 给了人话，调用方统一退 2。合并成单一调用点，是为了让
+    `main()` 的判定顺序仍是"一行一剂量"（原先那里只挂了 Key 闸门）。
+    """
+    if not _api_key_gate(p):
+        return False
+    return _confirm_expensive_run(args, seed_cases)
 
 
 def _print_run_outcome(
