@@ -315,3 +315,65 @@ python run.py calibrate       # ④ 评委可信度校准 + 漂移对比
 `tests/test_prompt_eval.py::test_live_workflow_uses_the_documented_environment_name`
 钉住"工作流里的名字 == 本文写的名字"，改一边就会红。
 
+## 十四、从根 README 迁入的仓库结构与实测口径（2026-10-22）
+
+> 这些原先在根 README（访客第一眼读的那份）。2026-10-22 的 README 用户向重构把它们搬到这里，
+> 内容一字未删、只是搬家；README 只留"节选地图 + 一句覆盖率结论"。
+> ⚠️ 本文不要再新增"覆盖率分项线"的可执行抄件：地板那三处（`pyproject.toml` / `ci.yml` / 本文）
+> 由 `tests/test_packaging.py::test_coverage_floors_agree_across_all_copies` 钉着同数，
+> 根 README 里那两处 `（地板 N）` 也算其中一份。
+
+### 仓库结构（完整）
+
+```
+pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ 网关、web/ 控制台、
+                    scoring.py 评分协议、memory.py 资产检索、scheduler.py 任务调度）
+run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
+docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
+                    evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
+tests/              pytest 用例（CI 门禁；1924 条，无 Key、禁止真实出网）
+extras/             **可选附件**（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
+tests_extras/       附件的回归（41 条）：不在 CI 主套件里，手动 `pytest tests_extras` 才跑
+tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
+judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
+                    AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）
+case_templates/     可直接喂 --cases-file 的 5 份领域用例集
+releases/           三服务套件与历史发布快照（不是本产品）
+logs/               运行产物（run_*.json / report_*.md / 缓存），gitignored，会持续膨胀
+scripts/            一次性探针与 A/B 对照脚本，非产品代码
+```
+
+### 覆盖率：历史快照与逐轮漂移
+
+- 2026-10-11 独占复测（全量 1669 条 **rc=0**，已按准入口径入表为复测⑦）：
+  `pm/` 全量实测 **97.15%**（地板 92），拆开看 `pm/` 去掉网关 **96.82%**、
+  `pm/modelhub/*` **99.05%**（地板 82）。本轮清了薄弱点清单 C 的两块账：
+  `streaming.py` **89% → 100%**、`calibration/` 的 `main()` 尾段与 `__main__`
+  守卫补完（**91% → 95%**，剩零散 `except` 单行）；网关大涨的另一半来自在途的
+  pool 配置/http 层测试（见本文账本）。
+  `pool.py` 331-367（真 urllib 段）仍按原判不建议为数字专门补。这块从 33.5% 补上来：
+  `agents.py` 0→100%、`pool.py` 61%→85%、`vkeys.py` 21%→98%、`streaming.py` 7%→89%。
+  剩下的缺口集中在 `pool.py` 331-367（真 urllib 那段，要活上游才走得到）与
+  `calibration/` 的零散 `except` 单行；`streaming.py` 已于 2026-10-11 补到 100%、
+  `calibration/` 的 `main()` 尾段与 `__main__` 守卫同日补完（薄弱点清单 C 的
+  "补得起但还没补"两块至此清账）；`server.py` 已于 2026-10-02 补到 100%
+  （上一版 README 这里还写着"缺口集中在 server.py 361-444"，那句已经过期，按实测改掉）。
+  薄弱的那块恰好是出过"流式通道整条失效而测试全绿"事故的那块。
+- ⚠️ 同日更早两轮实测是 95.69% 与 95.72%，差值全部落在 `pm/modelhub/vkeys.py` 的
+  27↔30 条 miss 上 —— 那是"退避分支只被真竞态撞上"造成的**指标不可复现**。
+  已补成不依赖竞态的确定性用例（`tests/test_modelhub_contention_paths.py`），
+  现在连跑两遍**逐文件 miss 数完全一致**（96.22% 两轮同值）。
+- 逐轮实测表与口径见本文前面几节；实测值本身仍不在闸门里：它要跑完整覆盖率才有，
+  代价是一次套件。上面这些快照**也会漂**，引用覆盖率数字前先重跑一次那条命令，别抄文档。
+
+### 多进程前提与跨进程台账
+
+- **多进程是显式前提，不是默认**：任务表默认进程内内存（`--workers > 1` 必须先设 `PM_TASK_DB`）、
+  缓存默认 JSON 每进程一份、限流是进程内滑窗。单进程才成立的东西别横向复制。
+- 文件型的两份台账（`data/vkeys.json`、`data/agents.json`）自 2026-09-25 起有跨进程写锁
+  （`pm/modelhub/vkeys.py` 的 `.lock` 句柄）—— 修前实测两个进程各发 150 把密钥，盘上只剩
+  126~151 把，3 轮里 2 轮有一路直接崩在"文件不可读"上；现在跨进程各发 60 把是 120/120（3/3 轮）。
+- 2026-10-13 又抓到同族的第二形：**锁文件自身的 `os.open`** 在并发创建时会被瞬态
+  `EACCES` 拒（压测 5 轮里 2 例签发者当场崩）——`_process_lock` 的 open 补上与读/写路径
+  同款的退避后，25 轮 ×2 进程 ×60 把零失败。
+
