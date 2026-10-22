@@ -512,23 +512,16 @@ def _reject_rule_like_expected(
     预检：contains/exact 比的是字面片段，而人写的 expected 常常是需求规则。
     那种写法永远命不中，只会把基线与优化版一起打死 —— 与其跑完 20 次计费调用
     再看报告，不如现在就拦住（真实跑踩过一次，见 qa_report 第十二节）。
-    """
-    from pm.assertions import looks_like_rule
 
-    rule_like = [
-        i + 1
-        for i, c in enumerate(seed_cases)
-        if c["mode"] in {"contains", "exact"} and looks_like_rule(c.get("expected", ""))
-    ]
-    if not rule_like:
-        return
-    p.error(
-        f"--cases-file 第 {', '.join(map(str, rule_like))} 条的 expected 读起来是需求规则而不是"
-        "字面片段，contains/exact 永远命不中。二选一："
-        '① 改成输出里真会出现的一段字（如 "未提供：订单号"）；'
-        '② 给这几条加 "mode": "rule"（或整体 --assert-mode rule），'
-        "交给评委逐条核验（默认只提醒不否决，需要硬约束再设 PM_RULE_VETO=1）。"
-    )
+    判据与话术已收口到 `pm.assertions.rule_like_expected_detail`（2026-10-23）：
+    REST /api/optimize 此前没有这道闸，同一份用例从 API 进来会被静默降级成
+    "仅提醒"，一票否决变成装饰 —— 两个入口必须同一把尺。
+    """
+    from pm.assertions import rule_like_expected_detail
+
+    detail = rule_like_expected_detail(seed_cases, origin="--cases-file")
+    if detail:
+        p.error(detail)
 
 
 # ---------------------------------------------------------------------------

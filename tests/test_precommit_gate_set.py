@@ -139,7 +139,7 @@ _LOCAL_ONLY_CI_GATES = {
         "不再含 desktop.py）；本地钩子跑同一套 tests/，不需要这层包装。",
         "side": "ci",
     },
-    "--fail-under=82": {
+    "--fail-under=93": {
         "why": "modelhub 分项覆盖率线读的是**上一步 pytest 产出的 .coverage**；"
         "而本地的 pytest 钩子不带 --cov，钩子跑完没有这份文件。"
         "真跑它会读到上一轮（甚至别的项目）留下的陈旧 .coverage，"

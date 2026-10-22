@@ -291,3 +291,38 @@ def no_ambient_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
         "no_proxy",
     ):
         monkeypatch.delenv(k, raising=False)
+
+
+# ---------------------------------------------------------------------------
+# 终端汇总：把「跳过数与原因」打成一眼可见的行（2026-10-23 补）
+# ---------------------------------------------------------------------------
+# 背景：pyproject 的 addopts 带一个 -q，CI 命令行曾再叠一个（=-qq），「N passed,
+# M skipped」的汇总行从 CI 日志里彻底消失——而约百条「依赖本地 logs/ 归档」的
+# 用例在干净检出（=CI）里会**合法跳过**，"1924 条"读起来就像"都跑了"。
+# -qq 已在 2026-10-23 修掉；这一段是第二层：跳过是合法的（账本不在本机就不该
+# 硬跑），但必须**可数、可读**。在 -qq 被谁顺手加回来时，它也是唯一的可见出口。
+# ---------------------------------------------------------------------------
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    stats = getattr(terminalreporter, "stats", {}) or {}
+    skipped = list(stats.get("skipped", []) or [])
+    passed = len(stats.get("passed", []) or [])
+    failed = len(stats.get("failed", []) or []) + len(stats.get("error", []) or [])
+    terminalreporter.write_sep(
+        "=", f"终端汇总：passed={passed} skipped={len(skipped)} failed/errored={failed}"
+    )
+    if not skipped:
+        return
+    # 原因聚合：skip 的 longrepr 是 (path, lineno, reason) 三元组；把个性化片段
+    # （路径/计数）截掉只留头部，同因的合并计数。
+    reasons: dict[str, int] = {}
+    for rep in skipped:
+        lr = getattr(rep, "longrepr", None)
+        if isinstance(lr, tuple) and len(lr) == 3:
+            reason = str(lr[2])
+        else:
+            reason = str(lr) if lr else "（无原因）"
+        key = reason[:48]
+        reasons[key] = reasons.get(key, 0) + 1
+    terminalreporter.write_line("跳过原因（同因合并，前 48 字符）：")
+    for reason, n in sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0]))[:10]:
+        terminalreporter.write_line(f"  ×{n}  {reason}")

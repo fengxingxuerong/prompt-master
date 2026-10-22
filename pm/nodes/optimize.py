@@ -57,16 +57,26 @@ def _deliver_on_budget_exhausted(
     分岔按数据走，不按希望走——`early_stopped` 的语义是"交付了东西但没达标"，
     手里没货时用它就是在假交付。抽成函数而不是就地写：`optimize_node` 的复杂度
     棘轮（CC 上限 10）不该为一条兜底分支让路。
+
+    成本台账（2026-10-23 修）：预算烧完前已发出的真实请求（全部失败）两个分支都要
+    入账——否则报告头「LLM 调用次数」系统性偏低（revise 的预算分支同日同修）。
+    失败请求在 llm_usage.failed_calls 另有一份按角色的明细，与这个轮级总账不重复。
     """
+    spent = int(getattr(exc, "details", {}).get("requests") or 0)
     fallback = str(state.get("prompt") or "").strip() or seed
     if not fallback:
         logger.exception("optimize 失败（且无任何可交付版本）")
         return _apply(
             state,
             node,
-            {"status": "failed", "errors": [f"optimize: {exc}"]},
+            {
+                "status": "failed",
+                "errors": [f"optimize: {exc}"],
+                "llm_calls": state.get("llm_calls", 0) + spent,
+            },
             "optimize_failed",
             error=str(exc),
+            requests=spent,
         )
     versions = list(state.get("prompt_versions", []))
     if not any(str(v.get("prompt") or "").strip() == fallback for v in versions):
@@ -83,9 +93,11 @@ def _deliver_on_budget_exhausted(
             "prompt": fallback,
             "prompt_versions": versions,
             "should_revise": False,
+            "llm_calls": state.get("llm_calls", 0) + spent,
         },
         "optimize_budget_exhausted",
         error=str(exc),
+        requests=spent,
     )
 
 

@@ -13,7 +13,7 @@
 
 ### 📋 变更清单与回归证据
 
-完整清单见 [`releases/suite/CHANGELOG-v1.5.0.md`](releases/suite/CHANGELOG-v1.5.0.md)。
+完整清单见 [`CHANGELOG-v1.5.0.md`](CHANGELOG-v1.5.0.md)。
 
 | 项 | 结果 |
 |---|---|

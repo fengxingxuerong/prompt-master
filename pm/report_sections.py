@@ -20,6 +20,8 @@ from .report_helpers import (
     _delta_avg,
     _evaluations,
     _infra_invalid_cases,
+    _is_demo_run,
+    _memory_hint,
     _pairwise,
     _report_safe_int,
     _seed_arm,
@@ -28,6 +30,7 @@ from .report_helpers import (
     pick_best,
 )
 from .schemas import (
+    PASS_SHORTFALL_TOLERANCE,
     PASS_THRESHOLD,
     effective_disagreement_threshold,
     judge_disagreement_threshold,
@@ -38,6 +41,10 @@ from .schemas import (
 def _header_lines(state: ReportState) -> list[str]:
     """报告头：run 身份、状态、模式。模式必须在头部就说清——否则读者把 Δ 当成
     "比不优化好多少"读，而它实际是"比交来的那份原稿好多少"。
+
+    2026-10-23 补两条同样"决定这轮读数怎么读"的头部事实：
+    - 假后端演示轮（分数是形状示例不是真实评测——此前报告长得和真跑一模一样）；
+    - 优化参考（memory 注入会让同任务在不同机器上产出不同，不披露就是隐藏输入）。
     """
     status = state.get("status", "running")
     iteration = state.get("iteration", 0)
@@ -46,10 +53,23 @@ def _header_lines(state: ReportState) -> list[str]:
     lines.append("")
     lines.append(f"- run_id：`{state.get('run_id')}`")
     lines.append(f"- 状态：`{status}`")
+    if _is_demo_run(state):
+        lines.append(
+            "- ⚠️ 运行通道：**假后端（PM_FAKE_BACKEND）**——分数、Δ 与成本是链路"
+            "形状的演示输出，**不是真实评测读数**，勿当验收或对比依据引用"
+        )
     lines.append(f"- 迭代轮次：{iteration} / {state.get('max_iterations', 3)}")
     if state.get("early_stop_reason"):
         lines.append(f"- 提前终止：{state['early_stop_reason']}")
     lines.append(f"- 目标模型：`{state.get('target_model')}`")
+    hint = _memory_hint(state)
+    if hint:
+        sim = hint.get("similarity")
+        lines.append(
+            f"- 优化参考：生成时命中历史达标资产 `{hint.get('run_id')}`"
+            + (f"（相似度 {sim}）" if isinstance(sim, (int, float)) else "")
+            + "，已注入生成上下文——同任务在无历史资产的机器上可能产出不同"
+        )
     if _seed_arm(state):
         lines.append(
             f"- 模式：原稿改进（输入原稿 {len(_seed_arm(state))} 字符；"
@@ -58,6 +78,50 @@ def _header_lines(state: ReportState) -> list[str]:
     lines.append(f"- LLM 调用次数：{state.get('llm_calls', 0)}")
     lines.append("")
     return lines
+
+
+def _verdict_head(agg: dict[str, Any]) -> str:
+    """结论那一行的措辞必须与数字自洽（2026-10-23 修）。
+
+    旧版未达标分支无条件写「均分 {avg} < 阈值 {T}」——而未达标也可能卡在
+    短板容忍带或事实断言上，均分本身已过线，实测印出过「均分 8.5 < 阈值 8.0」
+    这种事实错误，而结论行是读者唯一必读的一行。这里对着 `AggregateScore.passed`
+    的每道闸逐一描述，不新算任何数。
+    """
+    avg = agg.get("avg_score")
+    tol_line = PASS_THRESHOLD - PASS_SHORTFALL_TOLERANCE
+    if agg.get("passed"):
+        return f"✅ **达标**：均分 {avg} ≥ 阈值 {PASS_THRESHOLD}"
+    reasons: list[str] = []
+    blockers: list[str] = []
+    lower = agg.get("ci_lower")
+    min_s = agg.get("min_score")
+    if isinstance(lower, (int, float)) and float(lower) < tol_line:
+        blockers.append(f"保守下界 {lower}")
+    if isinstance(min_s, (int, float)) and float(min_s) < tol_line:
+        blockers.append(f"最低分 {min_s}")
+    if blockers:
+        reasons.append(
+            f"{' 与 '.join(blockers)} 低于容忍线 {tol_line:g}"
+            f"（阈值 − {PASS_SHORTFALL_TOLERANCE:g}）"
+        )
+    if agg.get("assertion_veto"):
+        reasons.append(
+            f"事实断言未全过（{agg.get('n_assertions_failed')}/{agg.get('n_assertions')}），一票否决"
+        )
+    if not agg.get("cases_complete", True):
+        reasons.append(
+            f"用例数不完整（{agg.get('n_cases')}/{agg.get('n_cases_expected')}），不予判定达标"
+        )
+    # 顺序敏感：均分条款先入列，再判空——否则「只卡均分一道闸」的轮会
+    # 掉进兜底分支，读者看不到是分数没过线。
+    if isinstance(avg, (int, float)) and float(avg) < PASS_THRESHOLD:
+        reasons.insert(0, f"均分 {avg} < 阈值 {PASS_THRESHOLD}")
+    if not reasons:
+        return "⚠️ **未达标**（判定依据见「评分总览」）"
+    if isinstance(avg, (int, float)) and float(avg) >= PASS_THRESHOLD:
+        return f"⚠️ **未达标**：均分 {avg} 已达阈值 {PASS_THRESHOLD}，但" + "；".join(reasons)
+    return "⚠️ **未达标**：" + "；".join(reasons)
 
 
 def _verdict_lines(state: ReportState) -> list[str]:
@@ -76,15 +140,7 @@ def _verdict_lines(state: ReportState) -> list[str]:
     elif not agg:
         lines.append("⚠️ **本轮没有产生评估结果**，分数与 Δ 都无从谈起（细节见下文各章）。")
     else:
-        avg = agg.get("avg_score")
-        lower = agg.get("ci_lower")
-        if agg.get("passed"):
-            head = f"✅ **达标**：均分 {avg} ≥ 阈值 {PASS_THRESHOLD}"
-        else:
-            head = f"⚠️ **未达标**：均分 {avg} < 阈值 {PASS_THRESHOLD}"
-            if lower is not None:
-                head += f"，保守下界 {lower} 也没过线"
-        lines.append(head + "。交付的是历史最高分那一版（见文末「最终提示词」）。")
+        lines.append(_verdict_head(agg) + "。交付的是历史最高分那一版（见文末「最终提示词」）。")
 
     caveats = _verdict_caveats(state, agg)
     if caveats:
@@ -128,6 +184,30 @@ def _verdict_caveats(state: ReportState, agg: dict[str, Any]) -> list[str]:
     return out
 
 
+def _scoring_protocol_lines(state: ReportState) -> list[str]:
+    """本轮分数出自哪套评分协议、是否两种口径混用（2026-10-23 补）。
+
+    判定式清单太薄时会**逐例回退**印象式——judge 节点的留痕此前只有一条
+    stderr warning，报告自己说过"必须留痕…否则聚合分成了两种口径的平均"，
+    却不把它印出来：同一轮一部分二值判定、一部分五维印象，Δ 与跨轮对比都
+    读不出东西。报告必须自含，判据取每条评估归档的 `scoring_mode` 字段。
+    """
+    evals = _evaluations(state)
+    if not evals:
+        return []
+    n_checklist = sum(1 for e in evals if str(e.get("scoring_mode")) == "checklist")
+    n_impression = len(evals) - n_checklist
+    if n_checklist and n_impression:
+        return [
+            f"- ⚠️ 评分协议混用：{n_checklist} 例判定式／{n_impression} 例印象式"
+            "（判定式清单太薄的用例逐例回退了印象式）——本轮聚合分是两种口径的平均，"
+            "不能与纯协议轮直接对比"
+        ]
+    if n_checklist:
+        return ["- 评分协议：判定式（评委只答二值判定，维度分与总分由代码计算）"]
+    return ["- 评分协议：印象式（评委给五个 1-10 整数，代码按固定权重合成总分）"]
+
+
 def _score_overview_lines(state: ReportState) -> list[str]:
     """## 评分总览：判定看保守下界而不是点估计（见置信度章节）。"""
     agg = _aggregate(state)
@@ -144,6 +224,7 @@ def _score_overview_lines(state: ReportState) -> list[str]:
         lines.append(f"| 通过用例 | {agg.get('n_passed')} |")
         verdict = f"通过（≥{PASS_THRESHOLD}）" if agg.get("passed") else "未达标"
         lines.append(f"| 判定 | {verdict} |")
+        lines.extend(_scoring_protocol_lines(state))
     else:
         lines.append("_未产生评估结果_")
     lines.append("")
@@ -195,19 +276,31 @@ def _noise_band_lines(agg: dict[str, Any]) -> list[str]:
             "不是交叉验证变强了）"
         )
     lines.append(
-        f"- 均分保守下界：**{agg.get('ci_lower')}**（判定看这个而不是看点估计 {agg.get('avg_score')}）"
+        f"- 均分保守下界：**{agg.get('ci_lower')}**（判定要求它 ≥ "
+        f"{PASS_THRESHOLD - PASS_SHORTFALL_TOLERANCE:g}，即容忍带下限，"
+        f"而不是只看均分 {agg.get('avg_score')}）"
     )
     unstable = agg.get("unstable_cases") or []
     if unstable:
         lines.append(f"- ⚠️ 结论不稳的用例：{', '.join('#' + str(i) for i in unstable)}")
     # ⚠️ 0.0 是二义读数：既是"重复打分完全一致"（好），也是"压根没重复采样、测不出来"。
     # 默认 PM_SAMPLES_PER_CASE=1 落在后者，而报告曾照印 0.0，读的人会当成"噪声极小"。
+    # 2026-10-23 补第二形：采样≥2 但所有极差都是 0（确定性桩后端/温控极死）——
+    # `noise_measurable` 同样为 False，旧文案却硬写"只采样 1 次"，与上一行自相矛盾。
     if not agg.get("noise_measurable", False):
-        lines.append(
-            "- ⚠️ **噪声不可估**：本轮每条用例只采样 1 次，上面那个 `采样噪声 0.0` "
-            "是「没测到」而不是「重复打分完全一致」。要拿到真实的噪声带，"
-            "把 `PM_SAMPLES_PER_CASE` 调到 ≥2 重跑。"
-        )
+        n_samples = int(agg.get("n_samples", 1) or 1)
+        if n_samples >= 2:
+            lines.append(
+                f"- ⚠️ **噪声不可估**：虽然每条用例采样了 {n_samples} 次，但极差全为 0"
+                "（重复打分完全一致，常见于确定性桩后端）——这台仪表的噪声带**测不出来**，"
+                "`采样噪声 0.0` 读作「没测到」而不是「精确」；换真实端点或更高采样数再看。"
+            )
+        else:
+            lines.append(
+                "- ⚠️ **噪声不可估**：本轮每条用例只采样 1 次，上面那个 `采样噪声 0.0` "
+                "是「没测到」而不是「重复打分完全一致」。要拿到真实的噪声带，"
+                "把 `PM_SAMPLES_PER_CASE` 调到 ≥2 重跑。"
+            )
     return lines
 
 
@@ -419,11 +512,13 @@ def _revision_delta_lines(state: ReportState) -> list[str]:
     delta = state.get("revision_delta") or {}
     if not (isinstance(delta, dict) and (delta.get("fixed") or delta.get("broken"))):
         return []
+    fixed, broken = delta.get("fixed") or [], delta.get("broken") or []
+    # 空列表不渲染成空括号（……弄坏 0 条（）），2026-10-23 顺手修
+    fixed_s = f"（{'、'.join('#' + str(i) for i in fixed)}）" if fixed else ""
+    broken_s = f"（{'、'.join('#' + str(i) for i in broken)}）" if broken else ""
     return [
-        f"- 与上一版逐条对照：修好 {len(delta['fixed'])} 条"
-        f"（{'、'.join('#' + str(i) for i in delta['fixed'])}）"
-        f"／弄坏 {len(delta['broken'])} 条"
-        f"（{'、'.join('#' + str(i) for i in delta['broken'])}）"
+        f"- 与上一版逐条对照：修好 {len(fixed)} 条{fixed_s}"
+        f"／弄坏 {len(broken)} 条{broken_s}"
         f"，净值 {delta.get('net', 0)}"
     ]
 

@@ -530,11 +530,14 @@ def _evaluate_one(
     final_ev = _merge_judge_results(results, idx, user_prompt, checklist, numbers)
     if final_ev.judge == "arbiter":
         n_calls += 1  # 仲裁也是一次 LLM 调用
+    # 2026-10-23 修：sample_index 必须在落缓存**之前**写上——缓存键含采样序号，
+    # 但旧顺序把「序号还没写上」的评估存了进去，命中后代表样本的溯源序号恒为 0
+    # （_collapse_samples 保留代表样本的取证字段，sample_index 就是其一）。
+    final_ev.sample_index = sample_idx
     # 仅当**全部**评委都成功时才落盘：否则单评委退化结果会被写进双评委缓存键，
     # 断点续跑命中后该用例永久跳过交叉验证 —— P0 防线会被静默关闭（A1）。
     if cache is not None and len(results) == len(judges):
         cache.put(ck, final_ev.model_dump())
-    final_ev.sample_index = sample_idx
     return final_ev.model_dump(), n_calls, False
 
 

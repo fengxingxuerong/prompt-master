@@ -500,6 +500,8 @@ def test_revise_node_call_budget_exceeded_degrades_to_early_stopped(
     assert "failed" not in dumped or "early_stopped" in dumped
     assert "600s 用尽" in dumped or "墙钟预算" in dumped, "预算细节要进 errors 供报告披露"
     assert "保留" in dumped
+    # 2026-10-23 修：预算烧完前已发出的 3 次真实请求也要入账（此前系统性漏记）
+    assert out.get("llm_calls", 0) == 3, f"预算耗尽的调用数被漏记：{dumped[:300]}"
 
 
 def test_optimizer_budget_exceeded_delivers_the_seed_instead_of_failing(
@@ -533,7 +535,10 @@ def test_optimizer_budget_exceeded_delivers_the_seed_instead_of_failing(
     assert out["prompt"] == "用户的原稿正文", out
     assert [v["prompt"] for v in out["prompt_versions"]] == ["用户的原稿正文"], out
     assert "预算耗尽" in out["early_stop_reason"], out
+    # 2026-10-23 修：预算烧完前已发出的 1 次真实请求也要入账（此前两个分支都漏记）
+    assert out["llm_calls"] == 2, f"预算耗尽的调用数被漏记：{out.get('llm_calls')}"
 
     empty = {**seeded, "seed_prompt": ""}
     out2 = optimize_node(empty)  # type: ignore[arg-type]
     assert out2["status"] == "failed", "没有任何可交付版本时不该假装 early_stopped"
+    assert out2["llm_calls"] == 2, "failed 分支同样要入账烧掉的请求"

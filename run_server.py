@@ -43,6 +43,16 @@ def main() -> None:
     ap.add_argument("--reload", action="store_true", help="开发模式热重载")
     args = ap.parse_args()
 
+    # fail-closed（2026-10-23）：非回环绑定且未设 PM_API_TOKEN 时拒绝启动，
+    # 而不是打一条 warning 就把"能烧 API 余额"的写接口交给同网段。
+    # Docker 容器默认 --host 0.0.0.0，因此容器里也必须带 PM_API_TOKEN 才起得来。
+    from pm.netguard import refuse_exposed_without_token
+
+    refusal = refuse_exposed_without_token(args.host)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        raise SystemExit(2)
+
     if args.workers > 1:
         # 多 worker 的前提是"记录能被所有进程看到"：任务表默认是进程内字典，
         # 那样 status/report 会随机 404。设了 PM_TASK_DB 走 SQLite 共享记录才放开。

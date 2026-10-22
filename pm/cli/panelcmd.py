@@ -66,6 +66,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _serve(args: argparse.Namespace) -> int:
+    # fail-closed（2026-10-23）：非回环绑定且未设 PM_API_TOKEN 时拒绝启动。
+    # 此前 _guard_open_host 只"吵出来"却照样起服务——面板①③卡会在本机起子进程、
+    # ②卡能读 case_templates/ 的文件名，把这些交给同网段不能只靠一句 warning。
+    from pm.netguard import refuse_exposed_without_token
+
+    refusal = refuse_exposed_without_token(args.host, service="PromptMaster 面板")
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 2
+
     try:
         import uvicorn
     except ImportError:

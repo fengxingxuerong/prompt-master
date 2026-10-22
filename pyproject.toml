@@ -9,7 +9,26 @@ name = "prompt-master"
 # 谁都不敢说"当前版本是多少"（2026-09-25 收口，tests/test_version_single_source.py 守住）。
 dynamic = ["version"]
 description = "提示词自动生成 / 测试 / 评估 / 迭代优化闭环（LangGraph）"
+readme = "README.md"
+# 2026-10-23 补齐 PyPI 元数据（此前 license/authors/urls/classifiers 全缺）。
+# license 用表形式 {text}：PEP 639 的 `license = "MIT"` 字符串形式需要 setuptools>=77，
+# 而 build-system 只承诺 >=68 —— 表形式两头都兼容（新 setuptools 只是告警，不失败）。
+license = {text = "MIT"}
+authors = [{name = "PromptMaster Contributors"}]
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+]
+# ⚠️ 定位声明（不许漂成"生产可用"）：分数是方向参考、不是验收依据 ——
+# 评测尺具当前没有统计意义上的判别力证据（docs/evaluation.md §三十四）。
 # 这里写的是**兼容范围**（库用户 `pip install prompt-master` 时允许装的版本），
 # requirements.txt 才是 CI/生产的**精确锁**（`==`，可复现）。两层职责不同：
 #   范围 `~=1.2.11` = >=1.2.11,<1.3 —— 只放开补丁位，不放开小版本；
@@ -30,6 +49,11 @@ dependencies = [
     # pm/mcp_server.py（智能体标准协议接入）。必须 <2，理由见上方注释。
     "mcp>=1.30,<2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/fengxingxuerong/prompt-master"
+Documentation = "https://github.com/fengxingxuerong/prompt-master/tree/main/docs"
+Issues = "https://github.com/fengxingxuerong/prompt-master/issues"
 
 [project.scripts]
 # 装完包就有命令可用（以前没有这一段：`pip install .` 装出来是"有包没入口"，
@@ -59,6 +83,12 @@ dev = [
 # 平铺布局下 setuptools 自动发现会把 run.py / run_server.py 当成顶层模块，
 # 这里只安装 pm 包（含 pm.nodes / pm.cli / pm.web 子包）；两个入口脚本依旧用 `python run.py ...` 从仓根跑。
 packages = ["pm", "pm.nodes", "pm.cli", "pm.web", "pm.modelhub", "pm.calibration", "pm.llm"]
+
+# 2026-10-23 修安装态断裂：case_templates 不随包目录走（在仓库根），此前根本不进 wheel
+# —— 装包态面板模板白名单恒为空。data-files 把模板装到 <安装前缀>/case_templates/，
+# 解析侧（pm/cliforward._template_dirs）按"仓库根优先、sys.prefix 兜底"的顺序找。
+[tool.setuptools.data-files]
+case_templates = ["case_templates/*.json"]
 
 [tool.setuptools.dynamic]
 # 见 [project] 的 dynamic：版本号取自 pm/__init__.py:__version__（setuptools 按 AST 静态读，不 import）

@@ -9,6 +9,8 @@ subprocess 转发与一份模板白名单，那就出现三份"看起来一样"�
 直接 monkeypatch `pm.mcp_server.subprocess.run` 并断言 MCP 自己那一份的行为，搬动会把
 "哪个出口被谁钉着"这层证据搅浑。两份的加固项（list 参数不走 shell、stdin 接 DEVNULL、
 PYTHONIOENCODING、退出码 0~3）由 `tests/test_panel.py` 的逐条对齐用例钉住 —— 漂了就红。
+**入口解析**（2026-10-23 起）两份共用本文件的 `cli_entry()`：装包态没有 run.py，
+转发必须退到 `python -m pm.cli.console`，这条口径只许有一份。
 """
 
 from __future__ import annotations
@@ -28,6 +30,21 @@ TEMPLATE_DIR = ROOT / "case_templates"
 # 退出码协议：0 达标 / 1 未达标但已交付 / 2 参数或配置 / 3 运行失败。
 # 把这四个都当"正常返回"，因为体检命中规则时就是 1 —— 那是一次成功的调用，不是崩溃。
 OK_EXIT_CODES = (0, 1, 2, 3)
+
+
+def cli_entry() -> tuple[list[str], str | None]:
+    """CLI 入口的子进程形态（2026-10-23 修安装态断裂）。
+
+    检出态：`python <仓库根>/run.py`、cwd=仓库根 —— 行为与旧版逐字一致。
+    安装态（`pip install .` 后 site-packages 里没有 run.py）：退到
+    `python -m pm.cli.console`、cwd=继承调用方 —— console 与 run.py 共用同一套
+    启动引导与 main()，`.env` 的发现顺序本来就是"按当前工作目录向上找"
+    （pm/cli/console.py）。此前装包后这里解析出 site-packages 下不存在的 run.py：
+    面板/桌面/MCP/历史的 subprocess 转发整条断掉（2026-10-22 发布评审实测）。
+    """
+    if RUN_PY.is_file():
+        return [sys.executable, str(RUN_PY)], str(ROOT)
+    return [sys.executable, "-m", "pm.cli.console"], None
 
 
 class ForwardError(RuntimeError):
@@ -50,14 +67,15 @@ def _spawn_cli(args: list[str], timeout: float | None) -> subprocess.CompletedPr
       一碰继承来的空管道就永久阻塞（实测 60s 超时，而同一命令在 shell 里 0.9s）；
     - **PYTHONIOENCODING=utf-8**：这台机器的默认码页是 cp936，不显式设就把中文输出打崩。
     """
+    argv, cwd = cli_entry()
     return subprocess.run(
-        [sys.executable, str(RUN_PY), *args],
+        [*argv, *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         timeout=timeout,
-        cwd=str(ROOT),
+        cwd=cwd,
         stdin=subprocess.DEVNULL,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
@@ -85,27 +103,49 @@ def run_cli_text(args: list[str], timeout: float | None = 120.0) -> tuple[str, i
     return proc.stdout, proc.returncode
 
 
+def _template_dirs() -> list[Path]:
+    """模板目录的解析顺序（2026-10-23 修安装态断裂）。
+
+    检出态：仓库根 `case_templates/` 优先——行为不变。
+    安装态：退到 `sys.prefix / case_templates`——pyproject 的
+    `[tool.setuptools.data-files]` 把模板装到那里。两个都不存在时返回空表：
+    界面少几个选项而不会整页崩（与 `template_names` 原注释同一纪律）。
+    """
+    dirs: list[Path] = [TEMPLATE_DIR]
+    installed = Path(sys.prefix) / "case_templates"
+    if installed not in dirs:
+        dirs.append(installed)
+    return [d for d in dirs if d.is_dir()]
+
+
 def template_names() -> list[str]:
-    """当场列举 `case_templates/*.json`，不缓存。
+    """当场列举各目录里的 `*.json`（白名单的取材地），不缓存、按名去重。
 
     这里**不写 try/except**：实测 Python 3.12 的 `Path.glob` 对不可读目录只返回空迭代
     （本机那个 ACL 坏掉的 `.pytest_tmp` 就是这样），异常分支够不到；目录不存在时同样退成
     空表，界面少几个选项而不会整页崩。
     """
-    return sorted(p.name for p in TEMPLATE_DIR.glob("*.json") if p.is_file())
+    names: dict[str, None] = {}
+    for d in _template_dirs():
+        for p in d.glob("*.json"):
+            if p.is_file():
+                names.setdefault(p.name, None)
+    return sorted(names)
 
 
 def template_path(name: str) -> Path:
     """把模板名解析成真实文件 —— **白名单**而不是"看起来没 `..` 就行"。
 
-    贴一个 `../../.env` 就能把仓库外的文件读出来回显，所以只认当场列举得到的名字。
+    贴一个 `../../.env` 就能把仓库外的文件读出来回显，所以只认当场列举得到的名字；
+    解析时在候选目录里找到第一个含该文件的落点。
     """
     if not name or name not in template_names():
         raise TemplateNotFound(f"模板不存在：{name}（只认 case_templates/ 里的名字）")
-    p = TEMPLATE_DIR / name
-    if not p.is_file():
-        raise TemplateNotFound(f"模板文件读不到：{name}")
-    return p
+    for d in _template_dirs():
+        p = d / name
+        if p.is_file():
+            return p
+    raise TemplateNotFound(f"模板文件读不到：{name}")
 
 
 def list_templates() -> list[dict[str, Any]]:
@@ -113,7 +153,7 @@ def list_templates() -> list[dict[str, Any]]:
     out = []
     for name in template_names():
         try:
-            raw = json.loads((TEMPLATE_DIR / name).read_text(encoding="utf-8"))
+            raw = json.loads(template_path(name).read_text(encoding="utf-8"))
             count = len(raw) if isinstance(raw, list) else 0
         except (OSError, json.JSONDecodeError):
             count = 0
@@ -133,13 +173,13 @@ def run_cli_json_live(
     加固项与 `_spawn_cli` 逐条相同（list 参数、stdin=DEVNULL、PYTHONIOENCODING、退出码 0~3）。
     """
     proc = subprocess.Popen(
-        [sys.executable, str(RUN_PY), *args],
+        [*cli_entry()[0], *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        cwd=str(ROOT),
+        cwd=cli_entry()[1],
         stdin=subprocess.DEVNULL,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )

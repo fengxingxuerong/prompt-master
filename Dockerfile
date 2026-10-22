@@ -10,12 +10,15 @@
 # 构建与运行：
 #   docker build -t prompt-master .
 #   docker run --rm -p 8080:8080 -v "$PWD/data:/data" \
-#     -e PM_API_KEY=sk-xxx -e PM_TARGET_MODEL=deepseek-v3 prompt-master
+#     -e PM_API_KEY=sk-xxx -e PM_TARGET_MODEL=deepseek-v3 \
+#     -e PM_API_TOKEN=<随机长串> prompt-master
+#
+# ⚠️ fail-closed（2026-10-23）：容器默认 --host 0.0.0.0，未设 PM_API_TOKEN 会**拒绝启动**
+#    （退出码 2，stderr 给出两条出路）。这是有意为之：映射端口 = 把"能烧 API 余额"的
+#    写接口交给能连到端口的所有人——旧版只打 warning 照常启动，等于没有门。
 #
 # 多 worker（记录走 SQLite，不要用默认的内存记录）：
 #   docker run ... prompt-master python run_server.py --host 0.0.0.0 --workers 4
-#
-# 注意：映射到宿主机时务必设 PM_API_TOKEN，否则等于把"能烧 API 余额"的入口公开出去。
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \

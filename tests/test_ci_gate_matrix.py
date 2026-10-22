@@ -207,11 +207,13 @@ _ALLOWED_JOB_DIFFERENCES: dict[str, tuple[str, str]] = {
         "没有这层包装，「CI 为什么红」在没有登录态的机器上只能靠猜——上一轮就是这么猜错的。"
         "判据、用例集合、退出码都不变。",
     ),
-    "pytest tests/ -q": (
+    "pytest tests/": (
         "both",
         "**同一条门禁、不同参数**：linux 侧带 --cov=pm --cov-report=term-missing "
         "并产出 .coverage 供 modelhub 分项线消费，windows 侧不带"
-        "（它没跑 --cov，分项线在那边没有输入）。不是少跑一条测试。",
+        "（它没跑 --cov，分项线在那边没有输入）。不是少跑一条测试。"
+        "（2026-10-23 两侧都不再显式传 -q：addopts 已带一个 -q，"
+        "再叠一个会把 passed/skipped 汇总行从 CI 日志里吞掉。）",
     ),
     "run_e2e_stub": (
         "both",
@@ -224,7 +226,7 @@ _ALLOWED_JOB_DIFFERENCES: dict[str, tuple[str, str]] = {
         "linux",
         "与平台无关；且 Windows 侧检出的多半是 CRLF/路径类噪声，ubuntu 跑一次即全量覆盖",
     ),
-    "--fail-under=82": (
+    "--fail-under=93": (
         "linux",
         "modelhub 分项覆盖率线读的是上一步 pytest 产出的 .coverage；"
         "windows job 不带 --cov，这条在那边**没有输入**，跑了只会读上一份陈旧数据。",

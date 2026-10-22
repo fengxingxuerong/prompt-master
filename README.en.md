@@ -82,7 +82,7 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 
 1. **You just want a nicer-sounding prompt** → use [prompt-optimizer](https://github.com/linshenkx/prompt-optimizer).
 2. **You need 100+ providers or red-team scanning** → use [promptfoo](https://github.com/promptfoo/promptfoo).
-3. **You need a statistically defensible "it got better"** → not yet. Judge discrimination has no statistical support (see above).
+3. **You need a statistically defensible "it got better"** → not yet. The live ledger's AUC is nominally above chance (lower CI bound > 0.5), but it is measured against 11 anchors of which 6 carry fabricated labels — nominal significance is not evidence that the judge is trustworthy (see the 2026-10-23 adjudication in `docs/evaluation.md` §三十四).
 4. **You need LangChain / LlamaIndex integration** → it only speaks `openai` / `anthropic`-compatible endpoints.
 
 ## What is actually different
@@ -102,8 +102,8 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 
 | Item | Value |
 |---|---|
-| Tests | **1,924 collected**, no API key, no live network |
-| Coverage | 96.77% on `pm/` (floor 92), 98.35% on `pm/modelhub/*` (floor 82); full run 2026-10-22, 1,924 tests |
+| Tests | **1,965 collected**, no API key, no live network |
+| Coverage | gated at floor 92 on `pm/` and floor 93 on `pm/modelhub/*`; measured values drift per round — the only maintained table lives in `docs/operations.md` (this README no longer copies snapshots) |
 | CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
 | Interfaces | CLI (12 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |
 
@@ -111,7 +111,7 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 
 1. **The instrument has not converged** (see above): core numbers carry ±1–2 of their own jitter,
    and that magnitude itself moves round to round.
-2. **Coverage is gated, but it is a floor, not a goal** (`pm/` floor 92, `pm/modelhub/*` floor 82).
+2. **Coverage is gated, but it is a floor, not a goal** (`pm/` floor 92, `pm/modelhub/*` floor 93).
    Measured values and round-by-round drift live in `docs/operations.md`; this README no longer copies them.
 3. **Multi-process is an explicit precondition, not a default**: in-process task table, per-process cache,
    in-process rate limiter. See `docs/operations.md` for the cross-process ledger tests.

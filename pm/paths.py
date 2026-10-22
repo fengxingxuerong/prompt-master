@@ -19,6 +19,18 @@ from pathlib import Path
 
 
 def log_dir() -> Path:
-    """产物目录的取法：每次调用都现读一遍 `PM_LOG_DIR`。"""
+    """产物目录的取法：每次调用都现读一遍 `PM_LOG_DIR`；没设时按运行形态分流。
+
+    - **检出态**（包目录旁有 `run.py`）：仓库根/logs —— 与旧版逐字一致。
+    - **安装态**（`pip install .`，包躺在 site-packages）：`<当前工作目录>/logs`
+      —— site-packages 可能不可写，更不该当产物目录（2026-10-22 发布评审实测：
+      装包后 logs 落进 site-packages）。与 console 的 `.env` 发现顺序同一哲学：
+      装包态跟着调用方的工作目录走。
+    """
     raw = os.getenv("PM_LOG_DIR", "").strip()
-    return Path(raw) if raw else Path(__file__).resolve().parent.parent / "logs"
+    if raw:
+        return Path(raw)
+    pkg_root = Path(__file__).resolve().parent.parent
+    if (pkg_root / "run.py").is_file():
+        return pkg_root / "logs"
+    return Path.cwd() / "logs"

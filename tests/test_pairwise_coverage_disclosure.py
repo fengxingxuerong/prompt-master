@@ -130,3 +130,35 @@ def test_empty_both_sides_counts_as_skipped(monkeypatch: pytest.MonkeyPatch) -> 
     assert pw["n_compared"] == 1
     assert pw["n_expected"] == 2
     assert pw["n_skipped"] == 1
+
+
+def test_one_sided_failure_is_skip_not_position_bias(monkeypatch: pytest.MonkeyPatch) -> None:
+    """单向成对调用失败 ≠ 位置偏置（2026-10-23 修错归因）。
+
+    旧逻辑 `agree = fwd is not None and fwd == rev`：反序（基线在 A）那一次
+    comparator 调用失败时 fwd=成功、rev=None ⇒ 必判 flip——于是 API 失败被写成
+    「位置偏置改写了结论」，告警文案全错。正确归因：这一例没测出胜负，记 skip，
+    position_flips 只数**两序都成功且结论相反**的真偏置。
+    """
+
+    def _call(role, model_cls, system, user, max_retries=3, overrides=None):
+        a_block = user.split("<CANDIDATE_A>")[1].split("</CANDIDATE_A>")[0]
+        if "BASELINE" in a_block:
+            # 反序（基线坐在 A）的那次调用失败 ⇒ 单向失败
+            raise RuntimeError("comparator 反序超时")
+        return (
+            PreferenceResult(winner="A", reason="更完整", decisive=True),
+            {"model": "f", "channel": "fake", "attempts": 1, "latency_ms": 1},
+        )
+
+    monkeypatch.setenv("PM_PAIRWISE", "1")
+    with backend.use(backend.CallHook(structured=_call, disable_cache=True)):
+        pw = compare_node(_state(3))["pairwise"]
+    assert pw["n_skipped"] == 3, "三例都是单向失败，应全部记 skip"
+    assert pw["n_compared"] == 0
+    assert pw["position_flips"] == 0, "调用失败不许被归因成位置偏置"
+    assert pw["votes"] == {"better": 0, "worse": 0, "tie": 0}
+    assert pw["verdict"] == "no_signal"
+    text = "\n".join(_pairwise_lines({"pairwise": pw}))
+    assert "位置偏置" not in text, "没有真偏置时，报告不许出现这个词"
+    assert "成对调用失败" in text or "覆盖不足" in text

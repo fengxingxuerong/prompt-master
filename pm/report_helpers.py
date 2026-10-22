@@ -233,6 +233,33 @@ def _test_runs(state: ReportState) -> list[dict[str, Any]]:
     return [r for r in (state.get("test_runs") or []) if isinstance(r, dict)]
 
 
+def _is_demo_run(state: ReportState) -> bool:
+    """是否假后端演示轮。
+
+    判据与 history / library / memory 同一出处：trace 事件里 `channel == "fake"`
+    （`pm.testing` 的假后端每次 LLM 调用都会写这个标记）。报告此前不披露这件事
+    （2026-10-23 修）：演示轮的报告与真跑长得一模一样，「达标 + 8.x 分 + 基线 Δ」
+    会被原样截图引用——而 history/library 自己都按 demo 把这种轮剔除了。
+    """
+    return any(
+        isinstance(t, Mapping) and str(t.get("channel")) == "fake"
+        for t in (state.get("trace") or [])
+    )
+
+
+def _memory_hint(state: ReportState) -> dict[str, Any]:
+    """优化节点命中历史达标资产时落在 trace 里的那条记录（没有就是空 dict）。
+
+    报告要披露「这版提示词生成时参考过哪次历史运行」：不写出来，读者会以为
+    产物只由本轮输入决定；而 memory 注入会让同一个 task 在有/无历史资产的
+    机器上产出不同（同输入不同输出），属于必须留痕的一类。
+    """
+    for t in state.get("trace") or []:
+        if isinstance(t, Mapping) and isinstance(t.get("memory_hint"), Mapping):
+            return dict(t["memory_hint"])
+    return {}
+
+
 def _delta_avg(state: ReportState) -> float | None:
     """均分口径的 Δ：没跑基线时是 None（冲突检测就靠这个 None 保持沉默）。"""
     base = _baseline_aggregate(state)

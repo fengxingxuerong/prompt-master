@@ -49,7 +49,15 @@ def _env_float(name: str, default: float, *, positive_only: bool = False) -> flo
     return val if (not positive_only or val > 0) else default
 
 
-PASS_THRESHOLD = _env_float("PM_PASS_THRESHOLD", 8.0, positive_only=True)  # >= 阈值视为生产可用
+PASS_THRESHOLD = _env_float(
+    "PM_PASS_THRESHOLD", 8.0, positive_only=True
+)  # 达标判定线：均分 ≥ 此值、且短板在容忍带内才判 passed。方向参考，不是效果验收（README「它给的分，能信多少」）
+# 短板容忍带：均分达标时，单条用例最低分与保守下界允许比判定线低这么多。
+# 口径唯一出处是 EVALUATOR_SYSTEM 的评分区间（「7-7.9：接近可用……只是"均分达标时
+# 单条用例的容忍下限"」）——rubric 文案与本常数说的是同一条线，改要两边同改。
+# 为什么必须有容忍带：评委仪表自报 ±1~2 的抖动（README「已知边界」），
+# 零容忍会让"实际没变坏"的版本因一次仪表抖动被反复判死。
+PASS_SHORTFALL_TOLERANCE = 1.0
 
 # 评委抖动（复现性）：同一份输入重复打分时量到的**最大极差**。
 # 只有 `run.py calibrate --judge X --repeat 3` 量出来之后才填得进去；不填=0，行为与旧版一致。
@@ -895,7 +903,10 @@ def jitter_provenance(seat: str = "") -> JitterProvenance:
 
 
 class AggregateScore(BaseModel):
-    """多条测试用例的聚合结果。avg 看整体，min 卡短板——任一用例崩了就不算过。
+    """多条测试用例的聚合结果。avg 看整体，min 卡短板——但"卡"不是零容忍：
+    均分达标时，单条最低分与保守下界允许落在阈值 − `PASS_SHORTFALL_TOLERANCE`
+    的容忍带内（评委 rubric 的 7-7.9 档："均分达标时单条用例的容忍下限"）；
+    低于容忍带，或均分/断言/用例数任一不达标，就不判 passed。
 
     `n_cases_expected` / `cases_complete`（修复 C1）：实际用例数少于声明条数时，
     单次采样噪声太大，分数不可信 —— 此时**无论多高都不判达标**，并在 issues 里说明原因。
@@ -1100,12 +1111,14 @@ class AggregateScore(BaseModel):
             n_cases_expected=expected,
             cases_complete=complete,
             n_passed=sum(1 for e in evals if e.passed),
-            # 短板判定：用例数完整 且 均分达标 且 保守下界达标 且 没有用例低于阈值 且 事实断言全过
+            # 短板判定：用例数完整 且 均分达标 且 保守下界与单条最低分都在容忍带内
+            # （≥ 阈值 − PASS_SHORTFALL_TOLERANCE，即 rubric 的 7-7.9 档）
+            # 且 事实断言全过。四个条件与类 docstring 的口径一字不差。
             passed=(
                 complete
                 and avg >= threshold
-                and ci_lower >= threshold - 1.0
-                and min(scores) >= threshold - 1.0
+                and ci_lower >= threshold - PASS_SHORTFALL_TOLERANCE
+                and min(scores) >= threshold - PASS_SHORTFALL_TOLERANCE
                 and not assertion_veto
             ),
             all_issues=issues,

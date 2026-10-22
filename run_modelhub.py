@@ -39,6 +39,17 @@ def main() -> None:
     ap.add_argument("--reload", action="store_true", help="开发模式热重载")
     args = ap.parse_args()
 
+    # fail-closed（2026-10-23）：对外监听时必须设 PMH_GATEWAY_TOKEN——
+    # 未设时 /v1/keys 可无凭据签发/删除/列出虚拟密钥，这不许靠"建议"兜底。
+    from pm.netguard import refuse_exposed_without_token
+
+    refusal = refuse_exposed_without_token(
+        args.host, token_env="PMH_GATEWAY_TOKEN", service="ModelHub 网关"
+    )
+    if refusal:
+        print(refusal, file=sys.stderr)
+        raise SystemExit(2)
+
     uvicorn.run("pm.modelhub.server:app", host=args.host, port=args.port, reload=args.reload, log_level="info")
 
 

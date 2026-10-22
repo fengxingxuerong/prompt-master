@@ -23,9 +23,7 @@ import logging
 import os
 import secrets
 import subprocess
-import sys
 import uuid
-from pathlib import Path
 from typing import Any, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -34,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from . import __version__ as PKG_VERSION
+from .assertions import rule_like_expected_detail
 from .netguard import CSP_NONCE_PLACEHOLDER, render_csp, require_token
 from .ratelimit import SlidingWindowLimiter, parse_rate_limit_env
 from .scheduler import TaskManager
@@ -61,20 +60,26 @@ _scheduler = TaskManager(store=store_from_env())
 import threading  # noqa: E402
 import time as _time  # noqa: E402
 
-_CALIB_ROOT = Path(__file__).resolve().parent.parent
-
 
 def _scheduled_calibrate_once(judge: str = "evaluator") -> dict[str, Any] | None:
-    """后台跑一次锚点校准；返回解析后的 JSON（含 drift），失败返回 None。"""
+    """后台跑一次锚点校准；返回解析后的 JSON（含 drift），失败返回 None。
+
+    入口经 `pm.cliforward.cli_entry()` 解析（2026-10-23）：检出态打 run.py、
+    装包态退到 `python -m pm.cli.console` —— 此前写死 `<包目录>/run.py`，
+    pip 安装态这个路径不存在，定期校准在装包部署里整条断掉。
+    """
+    from .cliforward import cli_entry
+
+    argv, cwd = cli_entry()
     proc = subprocess.run(
-        [sys.executable, str(_CALIB_ROOT / "run.py"), "calibrate", "--judge", judge, "--json"],
+        [*argv, "calibrate", "--judge", judge, "--json"],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         timeout=900,
         stdin=subprocess.DEVNULL,
-        cwd=str(_CALIB_ROOT),
+        cwd=cwd,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     try:
@@ -428,24 +433,24 @@ async def history_endpoint() -> JSONResponse:
     subprocess 调 `run.py history --json`：与 CLI/MCP 单一事实来源。
     stdin 必须显式接 DEVNULL——继承 server 的 stdio 会被 run.py 的
     ensure_utf8_stdio 触碰后永久阻塞（MCP 侧踩过同一坑）。
+
+    入口经 `pm.cliforward.cli_entry()` 解析（2026-10-23）：检出态打仓库根的
+    run.py，装包态退到 `python -m pm.cli.console` —— 此前写死 `<包目录>/run.py`，
+    pip 安装态该路径不存在，/api/history 在装包部署里 500。
     """
+    from .cliforward import cli_entry
+
+    argv, cwd = cli_entry()
     proc = await asyncio.to_thread(
         subprocess.run,
-        [
-            sys.executable,
-            str(Path(__file__).resolve().parent.parent / "run.py"),
-            "history",
-            "--last",
-            "50",
-            "--json",
-        ],
+        [*argv, "history", "--last", "50", "--json"],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         timeout=60,
         stdin=subprocess.DEVNULL,
-        cwd=str(Path(__file__).resolve().parent.parent),
+        cwd=cwd,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     try:
@@ -465,6 +470,15 @@ async def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     await enforce_rate_limit(request, cost=1)
     run_id = uuid.uuid4().hex[:12]
     seeds = [c.model_dump() for c in req.test_cases] if req.test_cases else None
+    if seeds:
+        # 与 CLI --cases-file 同一道预检（2026-10-23 补）：contains/exact 的 expected
+        # 写成需求规则时当场 422，而不是烧完一整轮计费调用后把用户的一票否决
+        # 静默降级成"仅提醒"（判据与话术收口在 pm.assertions.rule_like_expected_detail）。
+        detail = rule_like_expected_detail(
+            seeds, default_mode=req.assertion_mode, origin="test_cases"
+        )
+        if detail:
+            raise HTTPException(status_code=422, detail=detail)
     # 用例数以用户提供为准：断言按序号与 expected 对齐，声明数不一致会搅乱达标口径
     n_cases = len(seeds) if seeds else req.n_test_cases
     _scheduler.submit(
@@ -511,18 +525,27 @@ async def report(run_id: str) -> ReportResponse:
 async def race(req: RaceRequest, request: Request) -> RaceResponse:
     # 赛马的成本 = 参赛任务数：一次 10 任务提交按 10 次计费，不能让批量入口变成限流旁路
     await enforce_rate_limit(request, cost=len(req.tasks))
-    specs = [
-        {
-            "task": t.task,
-            "context": t.context,
-            "target_model": t.target_model,
-            "n_test_cases": len(t.test_cases) if t.test_cases else t.n_test_cases,
-            "max_iterations": t.max_iterations,
-            "test_cases": [c.model_dump() for c in t.test_cases] if t.test_cases else None,
-            "assertion_mode": t.assertion_mode,
-        }
-        for t in req.tasks
-    ]
+    specs = []
+    for i, t in enumerate(req.tasks):
+        seeds = [c.model_dump() for c in t.test_cases] if t.test_cases else None
+        # 与单任务入口同一道 expected 预检：批量路径不许成为绕过 422 的旁路
+        if seeds:
+            detail = rule_like_expected_detail(
+                seeds, default_mode=t.assertion_mode, origin=f"tasks[{i}].test_cases"
+            )
+            if detail:
+                raise HTTPException(status_code=422, detail=detail)
+        specs.append(
+            {
+                "task": t.task,
+                "context": t.context,
+                "target_model": t.target_model,
+                "n_test_cases": len(seeds) if seeds else t.n_test_cases,
+                "max_iterations": t.max_iterations,
+                "test_cases": seeds,
+                "assertion_mode": t.assertion_mode,
+            }
+        )
     race_id = _scheduler.submit_race(req.name, specs)
     return RaceResponse(race_id=race_id, message=f"赛马已启动，状态：GET /api/race/{race_id}")
 

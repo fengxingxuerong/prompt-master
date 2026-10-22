@@ -499,7 +499,11 @@ def test_revise_records_size_budget_breach(monkeypatch):
 
     assert patch["prompt"] == grown
     assert patch["prompt_versions"][-1]["iteration"] == 2
-    assert "超" in patch["prompt_versions"][-1]["note"]
+    note = patch["prompt_versions"][-1]["note"]
+    assert "超" in note
+    # 2026-10-23 修的回归：带净增量的注记此前永不闭合括号
+    assert note.count("（") == note.count("）"), f"注记括号不配平：{note}"
+    assert "净增量" in note, "非退化基准要报百分比"
     trace = patch["trace"][-1]
     assert trace["size_budget_exceeded"] is True
     assert trace["growth_pct"] > (SIZE_GROWTH_RATIO - 1) * 100

@@ -190,6 +190,61 @@ def test_race_requires_two_tasks(client):
     assert r.status_code == 422
 
 
+def test_optimize_rule_like_expected_422(client):
+    """REST 侧补上 CLI 已有的 expected 预检（2026-10-23）：contains 的 expected
+    写成需求规则时，烧钱之前就 422——否则运行时把它静默降级成"仅提醒"，
+    用户的一票否决变成装饰（CLI --cases-file 早有这道闸，两个入口同一把尺）。"""
+    r = client.post(
+        "/api/optimize",
+        json={
+            "task": "从销售文本抽取城市与金额",
+            "test_cases": [
+                {"input": "华东,120", "expected": "必须列出所有城市与金额"},
+            ],
+            "assertion_mode": "contains",
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "test_cases 第 1 条" in r.json()["detail"]
+    assert "永远命不中" in r.json()["detail"]
+
+
+def test_optimize_rule_mode_expected_is_allowed(client):
+    """同一份 expected 配 rule 模式必须放行——评委核验正是它该去的地方。"""
+    r = client.post(
+        "/api/optimize",
+        json={
+            "task": "从销售文本抽取城市与金额",
+            "test_cases": [
+                {"input": "华东,120", "expected": "必须列出所有城市与金额", "assert_mode": "rule"},
+            ],
+            "max_iterations": 1,
+        },
+    )
+    assert r.status_code == 200, r.text
+    st = _wait_status(client, r.json()["run_id"])
+    assert st["status"] in _DONE
+
+
+def test_race_rule_like_expected_422(client):
+    """批量入口不许成为绕过预检的旁路，报错要指名是第几个任务。"""
+    r = client.post(
+        "/api/race",
+        json={
+            "tasks": [
+                {"task": "分析销售数据趋势", "n_test_cases": 1, "max_iterations": 1},
+                {
+                    "task": "抽取城市与金额字段",
+                    "test_cases": [{"input": "x", "expected": "禁止输出任何结论"}],
+                    "max_iterations": 1,
+                },
+            ]
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "tasks[1].test_cases 第 1 条" in r.json()["detail"]
+
+
 def test_token_required_when_configured(client, monkeypatch):
     """设了 PM_API_TOKEN 就强制校验：服务默认能启动就能烧钱（H3）。"""
     monkeypatch.setenv("PM_API_TOKEN", "secret-token")

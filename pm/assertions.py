@@ -64,6 +64,50 @@ def looks_like_rule(exp: str) -> bool:
     return len(exp) > 80
 
 
+def rule_like_expected_detail(
+    cases: list[dict[str, Any]],
+    *,
+    default_mode: str = "",
+    origin: str = "",
+) -> str | None:
+    """预检：contains/exact 模式下 expected 写成需求规则时，返回要给用户的完整说明文案。
+
+    判据与运行时降级（`advisory`）同源——都用 `looks_like_rule`，否则会出现"预检放行、
+    运行时却降级"（或反过来），两个口径各自漂。CLI（--cases-file）与 REST
+    （/api/optimize 的 test_cases）共用这一份（2026-10-23 收口）：此前只有 CLI
+    当场拦，REST 收到同一份用例会静默把 expected 降级成"仅提醒"，一票否决
+    变成装饰，而用户要烧完 20+ 次计费调用才能在报告里看到那一行小字。
+
+    - `default_mode`：单条没写模式时的缺省。与运行时同一口径（execute.py）：
+      条内 mode → 条内 assert_mode → 请求级缺省 → contains。
+    - `origin`：报错前缀（CLI 传 `--cases-file`、REST 传 `test_cases`），
+      让用户知道该改哪一份文件/字段。
+    - 返回 None = 全部合格。
+    """
+    rule_like = [
+        i + 1
+        for i, c in enumerate(cases)
+        if str(c.get("mode") or c.get("assert_mode") or default_mode or "contains")
+        in {"contains", "exact"}
+        and looks_like_rule(str(c.get("expected") or ""))
+    ]
+    if not rule_like:
+        return None
+    origin = origin.strip()
+    where = (
+        f"{origin} 第 {', '.join(map(str, rule_like))} 条"
+        if origin
+        else (f"第 {', '.join(map(str, rule_like))} 条")
+    )
+    return (
+        f"{where}的 expected 读起来是需求规则而不是字面片段，"
+        "contains/exact 永远命不中。二选一："
+        '① 改成输出里真会出现的一段字（如 "未提供：订单号"）；'
+        '② 给这几条加 "mode": "rule"（或整体 --assert-mode rule），'
+        "交给评委逐条核验（默认只提醒不否决，需要硬约束再设 PM_RULE_VETO=1）。"
+    )
+
+
 # 自定义断言注册表：name -> fn(expected, output) -> bool
 _CUSTOM_ASSERTIONS: dict[str, Callable[[str, str], bool]] = {}
 _REGISTRY_LOCK = threading.Lock()

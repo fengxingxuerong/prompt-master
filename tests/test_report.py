@@ -96,7 +96,9 @@ def test_no_conflict_when_signals_agree():
 
 def test_judgement_uses_ci_lower_not_point_estimate():
     text, _ = render_report(_state())
-    assert "均分保守下界：**6.5**（判定看这个而不是看点估计 7.0）" in text
+    # 2026-10-23：措辞从「判定看这个」改成可核对的判定线（阈值 − 容忍带），
+    # 与 AggregateScore.passed 的实际判据一字对得上。
+    assert "均分保守下界：**6.5**（判定要求它 ≥ 7，即容忍带下限，而不是只看均分 7.0）" in text
     assert "未达标" in text
 
 

@@ -58,7 +58,10 @@ jobs:
           PM_EVALUATOR_B_BASE_URL: http://127.0.0.1:9/v1
           PM_ARBITER_BASE_URL: http://127.0.0.1:9/v1
           PM_API_KEY: sk-ci-has-no-real-key
-        run: bash scripts/ci_pytest.sh tests/ -q --cov=pm --cov-report=term-missing
+        # ⚠️ 不要再往这条加 -q：pyproject 的 addopts 已带一个 -q，再叠一个会变 -qq，
+        # 「N passed, M skipped」汇总行就从 CI 日志消失（2026-10-23 修：汇总行是
+        # 跳过数的唯一可见出口——归档依赖用例在干净检出里会合法跳过，必须可数）。
+        run: bash scripts/ci_pytest.sh tests/ --cov=pm --cov-report=term-missing
       - name: 提示词改动回归门禁 —— 只拦本次「新引入」的规则失败模式
         # 为什么门禁判据是「增量」而不是「绝对」：`pm/quality.py` 的规则是给
         # 「交付给目标模型的提示词」设计的，而 `pm/prompts.py` 里 17 个节点提示词
@@ -116,10 +119,11 @@ jobs:
         # 全局线守不住的地方就用分项线钉住不许再掉。地板取实测下方留 5 点余量。
         # ⚠️ 逐轮实测值只在 docs/operations.md 的表格里维护，别抄进这段注释：
         # 之前这里把两轮的数字并排写着（复测①的分项值与复测③的地板依据），谁也看不出是两个时点。
-        # 剩余缺口集中在上游调用体（server.py 的对话主路由与 pool.py 真 urllib 那段），补到那儿之前别抬这条线。
+        # 2026-10-23 从 82 抬到 93：此前实测 98.35%、地板却停在 82 —— 留了 17 点
+        # 余量（"留 5 点"的自述在 82 那条线上从来没成立过），网关整体退化 17 点 CI 仍绿。
         env:
           PM_API_KEY: sk-ci-has-no-real-key
-        run: python -m coverage report --include="*/modelhub/*" --fail-under=82
+        run: python -m coverage report --include="*/modelhub/*" --fail-under=93
       - name: Releases suite tests (全部三套) —— TestClient 进程内，零真实出网
         # 2026-09-25 盘点：这一步原来只跑 lobster + triage，`releases/taskboard/tests/`
         # 从没进过 CI —— 于是 taskboard 的鉴权与存储回归只有"有人记得"才跑。
@@ -167,10 +171,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Tests (pytest)
+        # 同 linux 侧：别再叠 -q（addopts 已带一个，叠了会吞掉「N passed, M skipped」汇总行）。
         env:
           PM_BASE_URL: http://127.0.0.1:9/v1
           PM_API_KEY: sk-ci-has-no-real-key
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/
       - name: Releases suite tests (全部三套)
         run: |
           python -m pytest releases/lobster/tests/ -q

@@ -257,10 +257,14 @@ def compare_node(state: State) -> dict[str, Any]:
         # 那份偏置直接进结论。两序一致才算数，不一致就是"胜负由座位决定"→ 记 tie 并计数。
         fwd = _judge_pair(c_out, "cur", b_out, idx)
         rev = _judge_pair(b_out, "base", c_out, idx)
-        if fwd["verdict"] is None and rev["verdict"] is None:
+        # 单向成对调用失败（另一序可能已成功）＝ 这例**没有测出胜负**，记 skip
+        # （与"两侧无输出"同一待遇，报告的"覆盖不足"行本来就写着"成对调用失败"）。
+        # 此前它被计入 position_flips——把 API 失败归因成"评委位置偏置"，
+        # 那条「位置偏置改写了结论」的告警是彻头彻尾的错归因（2026-10-23 修）。
+        if fwd["verdict"] is None or rev["verdict"] is None:
             n_skipped += 1
             continue
-        agree = fwd["verdict"] is not None and fwd["verdict"] == rev["verdict"]
+        agree = fwd["verdict"] == rev["verdict"]
         if not agree:
             n_position_flips += 1
             logger.warning(

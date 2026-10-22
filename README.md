@@ -75,7 +75,7 @@ python run.py calibrate --aggregate     # 零调用，纯账本重算
 
 1. **只想把一句话写漂亮** → 用 [prompt-optimizer](https://github.com/linshenkx/prompt-optimizer)，更轻、开箱即用。
 2. **要 100+ 家模型厂商或红队扫描** → 用 [promptfoo](https://github.com/promptfoo/promptfoo)。
-3. **需要统计学意义上的「确实变好了」** → 现在给不了：评委判别力尚无统计证据（见上一节）。
+3. **需要统计学意义上的「确实变好了」** → 现在给不了：评委判别力的名义显著性（AUC 下界 >0.5）建立在含 6 条编造人工分的 11 条锚点上，不构成可信证据（见上一节与 `docs/evaluation.md` §三十四的 2026-10-23 裁决）。
 4. **要 LangChain / LlamaIndex 生态集成** → 它只接 `openai` / `anthropic` 兼容端点。
 
 ## 能力一览
@@ -111,7 +111,7 @@ python run.py diff --base-ref origin/main prompts/我的提示词.md
 
 1. **仪表未收敛**（见「它给的分，能信多少」）——核心数字仍带 ±1~2 量级的自身抖动，
    而这个"量级"本身也逐轮摆动，不是固定精度。
-2. **覆盖率有门禁，但它是地板不是目标**：`pm/` 全量的线（地板 92）、`pm/modelhub/*` 分项的线（地板 82）；
+2. **覆盖率有门禁，但它是地板不是目标**：`pm/` 全量的线（地板 92）、`pm/modelhub/*` 分项的线（地板 93）；
    实测值与逐轮漂移见 [`docs/operations.md`](docs/operations.md)（本 README 不再抄历史快照 —— 它会漂，抄它没意义）。
 3. **多进程是显式前提，不是默认**：任务表默认进程内内存（`--workers > 1` 必须先设 `PM_TASK_DB`）、
    缓存默认每进程一份、限流是进程内滑窗。单进程才成立的东西别横向复制；跨进程台账的实测见 `docs/operations.md`。
@@ -127,7 +127,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1924 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1965 条，无 Key、禁止真实出网）
 extras/             可选附件（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 case_templates/     可直接喂 --cases-file 的领域用例集
 releases/           三服务套件与历史发布快照（不是本产品）

@@ -56,4 +56,44 @@ def require_token(x_api_key: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="缺少或错误的 X-API-Key")
 
 
-__all__ = ["CSP_NONCE_PLACEHOLDER", "render_csp", "require_token"]
+def is_loopback_bind(host: str) -> bool:
+    """host 参数是否只绑本机回环（含空串 = uvicorn 缺省 127.0.0.1）。
+
+    `::` 与 `0.0.0.0` 是"所有网卡"，不是回环——容易误当成"还是本机"。
+    """
+    return (host or "").strip().lower() in {"", "127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+def refuse_exposed_without_token(
+    host: str, *, token_env: str = "PM_API_TOKEN", service: str = "PromptMaster API"
+) -> str | None:
+    """fail-closed 门（2026-10-23）：非回环绑定且未设 token 时返回拒绝文案，否则 None。
+
+    旧姿态是"只打一条 warning 照常启动"：写接口没有任何访问控制，README 说
+    「公网暴露前必须处理」却没有机制兜底——Dockerfile 的示例命令甚至不带
+    PM_API_TOKEN 就映射端口（`-p 8080:8080` + 容器内 `--host 0.0.0.0`）。
+    ModelHub 网关同形：未设 `PMH_GATEWAY_TOKEN` 时 `/v1/keys` 可**无凭据**
+    签发/删除/列出虚拟密钥。三个启动器（run_server / run_modelhub / panel）
+    共用这一份判据，谁也不许各自演化出第四种说法。
+    """
+    if is_loopback_bind(host):
+        return None
+    if (os.getenv(token_env) or "").strip():
+        return None
+    return (
+        f"拒绝启动：--host {host} 会把 {service} 暴露给本机以外的调用者，"
+        f"而 {token_env} 未设置——写接口没有任何访问控制，任何能连到端口的人"
+        "都能消耗你的 API 额度（ModelHub 网关还能签发/删除密钥）。二选一：\n"
+        f"  ① 设 {token_env}=<随机长串> 后再对外监听；\n"
+        "  ② 只在本机使用：--host 127.0.0.1（默认值）。\n"
+        "（2026-10-23 起由「启动时 warning」改为「拒绝启动」，退出码 2 = 配置错误。）"
+    )
+
+
+__all__ = [
+    "CSP_NONCE_PLACEHOLDER",
+    "is_loopback_bind",
+    "refuse_exposed_without_token",
+    "render_csp",
+    "require_token",
+]

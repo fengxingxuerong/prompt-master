@@ -126,6 +126,22 @@ def test_resume_same_sample_still_hits_cache(live_cache: Path) -> None:
     assert ev2["weighted_score"] == ev1["weighted_score"]
 
 
+def test_cache_hit_preserves_the_real_sample_index(live_cache: Path) -> None:
+    """2026-10-23 修：缓存命中的评估，采样序号必须是真实序号。
+
+    旧顺序是"先 cache.put、后写 sample_index"——落盘的是序号还没写上的评估（恒 0），
+    命中后溯源字段全错：`_collapse_samples` 挑代表样本时保留它的取证字段，
+    `sample_index` 正是其一，档案会谎称代表样本来自第 0 次采样。
+    """
+    with backend.use(_hook([9.0])):  # 只给 1 发：第 2 次必须命中，否则 StopIteration
+        ev1, calls1, hit1 = J._evaluate_one(_run(1), errors=[], **_kw())
+        ev2, calls2, hit2 = J._evaluate_one(_run(1), errors=[], **_kw())
+    assert (calls1, hit1) == (1, False)
+    assert (calls2, hit2) == (0, True), "同序号重跑应命中缓存（上一条的语义）"
+    assert ev1["sample_index"] == 1, ev1
+    assert ev2["sample_index"] == 1, f"命中缓存也不能把采样序号抹成 0：{ev2}"
+
+
 # ---------------------------------------------------------------------------
 # 4. 换 prompt 仍不得串用（这次改动不许把 H1 那半边碰坏）
 # ---------------------------------------------------------------------------

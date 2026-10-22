@@ -185,6 +185,50 @@ def test_installable_package_layout_declared():
     )
 
 
+def test_case_templates_are_declared_as_data_files():
+    """case_templates 必须随包分发（2026-10-23 修安装态断裂）。
+
+    此前模板只存在于仓库根、不进 wheel：`pip install .` 后面板的模板白名单恒为空
+    ——"容器能跑（Dockerfile 单独 COPY）、wheel 不能"。判据双向：磁盘上每个模板
+    都落在 data-files 的 glob 里，glob 也至少解析出一个真实文件
+    （写错的 glob 会静默打出一份空 data-files，谁也不会发现）。
+    """
+    cfg = _pyproject().get("tool", {}).get("setuptools", {}).get("data-files", {})
+    globs = list(cfg.get("case_templates") or [])
+    assert globs, "缺 [tool.setuptools.data-files] case_templates：装包态模板白名单恒为空"
+    matched = {p.name for g in globs for p in ROOT.glob(g) if p.is_file()}
+    on_disk = {p.name for p in (ROOT / "case_templates").glob("*.json")}
+    assert on_disk, "case_templates 目录为空：模板功能名存实亡"
+    assert on_disk == matched, (
+        f"磁盘与 data-files glob 不一致：磁盘缺 {sorted(matched - on_disk)}，"
+        f"glob 漏了 {sorted(on_disk - matched)}"
+    )
+
+
+def test_build_lib_contains_nothing_missing_from_source():
+    """脏 build/ 是发布事故的真实形态（2026-10-22 发布评审实测）。
+
+    setuptools 不清理 build/lib：把 pm/llm.py 拆成 pm/llm/ 包之后，旧文件还躺在
+    build/lib/pm/llm.py，下一次 `pip wheel .` 会把它连同新包一起打进 wheel
+    （实测 100 个条目里 2 个是源码树已删除的陈旧模块）。干净检出（CI）没有
+    build/，本条跳过；检出目录里一旦有 build/lib，里面的每个 .py 都必须
+    在源码树有同名文件——否则发布前必须先清 build/。
+    """
+    build_lib = ROOT / "build" / "lib"
+    if not build_lib.is_dir():
+        return
+    stale = sorted(
+        str(p.relative_to(build_lib))
+        for p in build_lib.rglob("*.py")
+        if not (ROOT / p.relative_to(build_lib)).is_file()
+    )
+    assert not stale, (
+        f"build/lib 里有源码树已删除的陈旧文件（共 {len(stale)} 个）：{stale[:8]}\n"
+        "setuptools 不会清理 build/，发布构建前先删整个 build/ 目录（或从干净检出构建），"
+        "否则陈旧模块会被重新打进 wheel。"
+    )
+
+
 def test_precommit_hooks_cover_the_same_scope_as_ci():
     """`.pre-commit-config.yaml` 的检查范围必须与 CI 逐条相同。
 
@@ -429,6 +473,15 @@ def test_coverage_floors_agree_across_all_copies() -> None:
         f"README 的地板抄件与真闸不一致：README {sorted(readme_floors)} "
         f"vs pyproject fail_under={floor_all} / CI 分项线 {floor_mhub}"
         "（两条都要有：少一条会静默放过一整个文件的漂移）"
+    )
+
+    # 2026-10-23 补：英文 README 此前不在任何断言里（同类漂移已在它身上发生过一次
+    # ——老版 floor 82 停更时它跟着旧数），它同样是访客会照抄的那份。
+    readme_en = (ROOT / "README.en.md").read_text(encoding="utf-8")
+    en_floors = set(re.findall(r"floor (\d+)", readme_en))
+    assert en_floors == {str(floor_all), str(floor_mhub)}, (
+        f"README.en 的地板抄件与真闸不一致：{sorted(en_floors)} "
+        f"vs pyproject fail_under={floor_all} / CI 分项线 {floor_mhub}"
     )
 
 

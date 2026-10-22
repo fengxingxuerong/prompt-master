@@ -62,6 +62,10 @@ def revise_node(state: State) -> dict[str, Any]:
         # 曾被下面的通用 except 炸成整轮 failed——评估闭环已完成的版本没被交付。
         # 转 early_stopped 保留历史最佳，预算细节进 errors 供报告披露。
         logger.warning("修订器墙钟预算用尽，保留上一版并终止迭代：%s", e)
+        # 成本台账（2026-10-23 修）：预算烧完前已发出的真实请求（全部失败）也要入账，
+        # 否则报告头「LLM 调用次数」系统性偏低。失败请求在 llm_usage.failed_calls
+        # 另有一份**按角色**的明细，与这里这个轮级总账不重复。
+        spent = int(getattr(e, "details", {}).get("requests") or 0)
         return _apply(
             state,
             node,
@@ -70,9 +74,11 @@ def revise_node(state: State) -> dict[str, Any]:
                 "early_stop_reason": "修订器墙钟预算用尽（端点限流/重试叠层），保留历史最佳版本",
                 "errors": [f"revise: {e}"],
                 "should_revise": False,
+                "llm_calls": state.get("llm_calls", 0) + spent,
             },
             "revise_budget_exhausted",
             error=str(e),
+            requests=spent,
         )
     except Exception as e:
         logger.exception("revise 失败")
@@ -119,9 +125,11 @@ def revise_node(state: State) -> dict[str, Any]:
     versions = list(state.get("prompt_versions", []))
     note = f"第 {state.get('iteration', 0) + 1} 轮修订"
     if over_budget:
-        note += f"（长度 {prev_len}→{new_len} 字符，超 {max_len} 预算" + (
-            f"，净增量 {growth_pct:.0f}%" if growth_pct is not None else "）"
-        )
+        # 2026-10-23 修：旧写法在带净增量的分支永不闭合括号（"（…超 N 预算，净增量 X%"）。
+        note += f"（长度 {prev_len}→{new_len} 字符，超 {max_len} 预算"
+        if growth_pct is not None:
+            note += f"，净增量 {growth_pct:.0f}%"
+        note += "）"
     versions.append(
         PromptVersion(
             iteration=state.get("iteration", 0) + 1,
