@@ -85,7 +85,25 @@ def test_missing_task_rejected():
 # run_pipeline，绕过了 main() —— 于是"文档写着无 Key 能跑、实测 exit 2"长期无人发现。
 # PM_LOG_DIR 指向 tmp_path：演示模式照常落产物，但不往真实 logs/ 里堆 run_*.json。
 # ---------------------------------------------------------------------------
-_NO_KEY = {"PM_API_KEY": "", "PM_TARGET_API_KEY": ""}
+_NO_KEY = {
+    "PM_API_KEY": "",
+    "PM_TARGET_API_KEY": "",
+    "PM_API_KEYS": "",
+    **{
+        f"PM_{role}_API_KEY": ""
+        for role in (
+            "CLARIFIER",
+            "OPTIMIZER",
+            "MOCKGEN",
+            "EVALUATOR",
+            "EVALUATOR_B",
+            "ARBITER",
+            "REVISER",
+            "COMPARATOR",
+            "TARGET",
+        )
+    },
+}
 
 
 def _run_nokey(
@@ -101,6 +119,36 @@ def _run_nokey(
         errors="replace",
         env={**os.environ, **_NO_KEY, "PM_LOG_DIR": str(tmp_path), **(extra_env or {})},
     )
+
+
+def test_out_pointing_at_a_directory_is_rejected_before_any_run(tmp_path: Path):
+    """`--out` 是目录：必须在开跑前退 2，而不是跑完一轮再抛 PermissionError。
+
+    2026-10-22 实测：目录路径会先完整跑完一轮（真实调用），最后在 save_artifacts
+    抛裸栈、退出码 1；用户花钱买了报告却拿不到文件。
+    """
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    r = _run_nokey(["--task", "让 AI 分析销售数据", "--fast", "--out", str(reports)], tmp_path)
+    assert r.returncode == 2, (r.stdout[-300:], r.stderr[-300:])
+    assert "--out" in r.stderr and "目录" in r.stderr
+    assert not list(tmp_path.glob("run_*.json")), "参数错误不该先跑一轮再落产物"
+
+
+def test_out_with_a_trailing_separator_is_rejected(tmp_path: Path):
+    """`--out reports/` 的意图是目录；缺省的 save_artifacts 会把它写成名为 reports 的文件。"""
+    target = str(tmp_path / "reports") + os.sep
+    r = _run_nokey(["--task", "让 AI 分析销售数据", "--fast", "--out", target], tmp_path)
+    assert r.returncode == 2
+    assert "不是目录" in r.stderr
+
+
+def test_out_file_path_still_passes_validation(tmp_path: Path):
+    r = _run_nokey(
+        ["--task", "让 AI 分析销售数据", "--dry-run", "--out", str(tmp_path / "r.md")],
+        tmp_path,
+    )
+    assert r.returncode == 0, r.stderr
 
 
 def test_no_key_without_fake_backend_is_config_error(tmp_path: Path):

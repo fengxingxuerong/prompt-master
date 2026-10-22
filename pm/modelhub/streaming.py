@@ -36,7 +36,7 @@ def stream_upstream(
         data=json.dumps(body).encode("utf-8"),
         method="POST",
         headers={
-            "Authorization": "***" + api_key,
+            "Authorization": "Bearer " + api_key,
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
         },

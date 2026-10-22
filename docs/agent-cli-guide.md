@@ -15,9 +15,10 @@ python /绝对路径/prompt-master/run.py --json --task "..."   # 从检出目�
 prompt-master --json --task "..."                          # `pip install .` 之后
 ```
 
-⚠️ 装包态唯一的差异：`.env` 由 python-dotenv 按**当前工作目录**向上查找，
-不在仓库根时读不到那份 `.env` —— Agent 侧应当显式注入 `PM_API_KEY` 等环境变量，
-不要依赖宿主机上那份文件。
+`.env` 的发现顺序（2026-10-22 修）：先按**当前工作目录**向上查找；检出模式下
+再退回仓库根那份。装包态在别的目录跑也读得到该项目自己的 `.env`（修复前读的是
+site-packages 的祖先目录，用户项目里的配置会被静默忽略）。Agent 侧仍建议显式注入
+`PM_API_KEY` 等环境变量，不要依赖宿主机上那份文件。
 
 ### 退出码协议
 
@@ -70,6 +71,20 @@ python run.py --task "..." --prompt-file 我的提示词.md --json      # submit
   此时 Δ 读作「比你自己的版本好多少」，不再是「比把需求直接喂给模型好多少」。
 - 原稿的体检命中项写进报告「原稿体检」节并作为判据交给改进器，
   但**不进** `prompt_quality_issues`（那一列会按轮次注入评委，改进版不该为原稿的毛病挨扣分）。
+
+### 用户仓库里的提示词增量门禁（零调用 CI）
+
+```bash
+python run.py diff --base-ref origin/main prompts/我的提示词.md --json
+# → {"mode":"prompt_diff","ok":false,"base_ref":"origin/main",
+#    "rules":{"introduced":["suppressive_rule"],"fixed":[],"still":[]}, ...}
+# 退出码 0=没有新引入  1=相对基线新引入规则问题  2=ref/路径/新文件问题
+```
+
+- 左侧正文取自 `git show origin/main:<path>`，不是工作区里的另一份文件；修好不判失败。
+- 新文件在基线里不存在时退 2 并建议先 `check` —— 不能把"整个文件都是新的"判成"引入问题"。
+- CI 里要先 fetch 到基线提交（`actions/checkout` 用 `fetch-depth: 0`，或显式
+  `git fetch --depth=1 origin main`），否则 ref 解析不出来（退 2，不会静默放行）。
 
 ### 异步模式（全配置，10~30 分钟）：submit → wait
 
@@ -171,25 +186,20 @@ python run.py library --export <run_id> --out my_prompt.md   # 导出成品直�
 
 ### 三之二·附三：插件面板 / 桌面窗口（人类入口，Agent 不需要它）
 
-`python run.py desktop` 是同一批能力的**原生窗口**版（Tkinter，标准库）：不开浏览器、不起 HTTP 服务、不需要 token，五个标签与下面完全同源（都打 `run.py`）。Agent 仍然只走 CLI / MCP —— 这两个人类界面不新增任何判据，只是把已有的判定摆成能点开的形状。
+`python run.py desktop` 是给人类用户的**原生窗口**（Tkinter，标准库）：不开浏览器、不起 HTTP 服务、不需要 token。2026-10-20 起重做为“读项目，写提示词”：选项目文件夹 + 写目标（可贴已有提示词）→ 只读扫描项目 → 模型分析进度 → 输出可直接复制的新提示词。项目文件夹支持**粘贴路径**（自动去引号 / `file:///` / 文件→父目录，输入框下方实时给 ✓/✗ 读数）与**选择器**两种填法。旧版的考卷/差分/账本/报价闭环不再塞进窗口，它们仍在 CLI / REST / MCP 里。Agent 仍然只走 CLI / MCP。
 
-⚠️ **它是可选附件**（2026-10-19 从主包移出）：实现在仓库根的 `extras/desktop.py`，不随 `pip install .` 安装，回归在 `tests_extras/`（不在 CI 主套件，手动跑）。装包态调用会提示并返回 2。
+⚠️ **它是可选附件**（2026-10-19 从主包移出）：实现在仓库根的 `extras/`（`desktop.py` / `project_agent.py` / `project_context.py`），不随 `pip install .` 安装，回归在 `tests_extras/`（不在 CI 主套件，手动跑 `pytest tests_extras -q`）。装包态调用会提示并返回 2。
 
-桌面端接的接口（一个都不新造判据）：
+桌面端接的接口：
 
-| 标签 | 打的是 | 花钱 |
+| 动作 | 打的是 | 花钱 |
 |---|---|---|
-| ① 体检 | `run.py check --prompt` | 零调用 |
-| ② 考卷 | `run.py check --cases-file` | 零调用 |
-| ③ 差分 | `run.py diff A B`（临时文件中转） | 零调用 |
-| ④ 闭环 | `run.py --task [--prompt-file ①的正文] [--cases-file ②的模板或粘贴内容] [--assert-mode] [--samples] [--fast]`，提交前先 `--dry-run` 报价，确认后提交；`--preflight` 单独按钮 | 报价零调用，提交与预检真调用 |
-| ⑤ 账本 | `run.py history --json` / `calibrate --aggregate --json` / `library --recommend --task-text … --json` / `gate --json` | 全零调用 |
+| 只读取项目 | `extras/project_agent.py --project-dir … --scan-only --json` | 零模型调用 |
+| 生成提示词 | 同一后端的一次结构化分析（`optimizer` 角色）；输出再过一遍 `pm/quality` 的零调用规则体检 | 一次分析；格式/空正文失败时自动重试，按请求计费 |
 
-桌面端自己的接口纪律（都有用例钉着）：**结果落在哪个窗格在派发时定死**（回投时才读全局状态会串台）；worker 线程里**不摸 widget**、也不弹模态框（报价回主线程再弹）；线程里抛任何异常都要显示出来，不许静默停在"进行中…"；④那一轮持有真子进程句柄，**中止**与**关窗**都会 terminate 它（Windows 上父进程退出不管孩子，不掐就是继续烧钱）；一轮在跑时第二次提交被拒。计费路径 `run_cli_json_live` 在测试里由 autouse 总闸封死 —— 有过一次用例把真任务放了出去。
+安全与边界：扫描器（`extras/project_context.py`）只读，路径必须留在用户选中的根目录内；`.env*`、私钥/凭据文件、`.ssh/.aws` 与依赖/产物目录跳过，普通源码里的已知凭证形态在离开扫描层前脱敏；目录树、关键文件数量与总字符数都有硬上限。**选中的关键文件内容摘录会发给模型提供方**，窗口在输入区下方明确写出这一点。没有 Key 时生成按钮置灰并写明原因；只读取项目永远可用。
 
-⑤ 那四个读数回答的是「这套仪表现在可信吗」，不是「这次优化成功了吗」——界面上把 `estimable=False`、`papers_differ`、被排除的崩溃臂这些**否定性**标记原样显示出来，字段名对着当场 JSON 抄（第一版凭记忆写了 `r`/`decision_agree`，界面印出三个 `None`）。
-
-界面这一层（2026-10-15 按竞品补齐，全部零调用、不新增判据）：③ 的 unified 拆成**两列并排着色**（`---`/`+++` 那两行不进视图，它们带宿主临时目录真路径）；⑤ 有**过滤**（原文留在 `_ledger_raw`，所以过滤永远是可回退的视图）与 run_id **一键跳回③**；① 顶部列 `{{占位符}}` 及行号，**只列不判**（`pm/quality.py` 里没有变量规则，也不在这加）；底栏有导出全部为 Markdown、深/浅主题（换肤不重建界面）、中止；快捷键 Alt+1..5 / Ctrl+Enter / Ctrl+S / Ctrl+L / F1；表头常驻 `v<版本> · <仓库路径>`。这一轮四个缺陷全是**看渲染结果**才发现的（底栏整条被挤出可视区、临时路径进界面、助手函数定义了没接线、过滤把 Δ 的口径说明筛掉），过程与判据见 `docs/iteration/competitor-analysis-prompt.md` §第四轮。
+窗口纪律（都有用例钉着）：worker 线程**不摸 widget**，结果经队列回主线程；线程异常必须显示，不许停在“进行中…”；生成跑在子进程里，**取消**与**关窗**都会 terminate 它；一轮在跑时第二次提交被拒；优化结果独占一个可编辑文本块，可直接复制或另存。`--project-dir` / `--prompt-file` 可启动预填。所有窗口用例都不碰真实模型：`run_agent_request` 由固定 JSON 替换，子进程边界单独用临时脚本验证。
 
 `python run.py panel`（缺省只绑 `127.0.0.1:8765`，自动开浏览器；`--no-browser` 只起服务）。
 

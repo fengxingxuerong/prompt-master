@@ -24,17 +24,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from pm.bootstrap import ensure_utf8_stdio
+from pm import __version__
+from pm.bootstrap import prepare_console
 
-# Windows 下 stdout 默认走系统码页（GBK），中文日志重定向到文件会乱码（L12）。
-# 在任何打印之前统一 reconfigure 为 UTF-8，用户不再需要手动设 PYTHONIOENCODING。
-ensure_utf8_stdio()
+# 与 CLI 共用同一套启动引导：`.env` 从当前目录向上找、编码兜底在任何打印之前。
+# 此前这里只调 ensure_utf8_stdio()，于是"从项目目录起服务"读不到那个目录的 .env。
+prepare_console()
 
 
 def main() -> None:
     import uvicorn
 
     ap = argparse.ArgumentParser(description="PromptMaster API 服务")
+    ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("--host", default="127.0.0.1", help="监听地址；要放到局域网显式传 0.0.0.0")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--workers", type=int, default=1)

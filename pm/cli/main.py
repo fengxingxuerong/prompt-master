@@ -10,8 +10,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from pm import __version__
 from pm.casesaudit import DEFAULT_MODE
 from pm.state import initial_state
+from pm.textio import TextDecodeError, read_text_auto, warn_if_fallback
 
 from .agent_mode import agent_subcommand
 from .calibrate import _calibrate_command
@@ -66,9 +68,10 @@ _SUBCOMMAND_HELP = """
   panel       本地插件面板（浏览器小窗口）：体检 / 考卷有几票 / 两版差分三张卡零调用可用，
               ④优化闭环那张要 Key —— 没 Key 就置灰并写明原因
               —— 缺省只绑 127.0.0.1:8765（与常驻服务的 8080 分开），--no-browser 只起服务
-  desktop     原生桌面窗口（Tkinter，标准库）：五个标签（比面板多⑤账本与仪表），
-              不开浏览器、不起服务、不要 token
-              —— 判据仍是 subprocess 打 run.py；④提交前先用 --dry-run 报调用数并要求确认
+  desktop     原生桌面窗口（Tkinter，标准库）：给小白的一条路 —— 选项目文件夹 + 写目标
+              （可贴已有提示词）→ 只读扫描代码与 Git 进度 → 一次模型分析 → 可复制的提示词
+              —— 无 Key 也能“只读取项目”；不开浏览器、不起服务；不修改用户项目
+              —— 考卷/差分/账本等集成方面只在 CLI / REST / MCP
 
 本地无 Key 路径：
   {prog} --selftest                               图拓扑与控制流自检（秒级）
@@ -110,7 +113,12 @@ def _subcommand_help(prog: str) -> str:
 def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
     """子命令分发（保持原先"argparse 之前裸字符串匹配"的结构，只是收成一个函数）。"""
     if cmd in {"submit", "status", "report", "wait"}:
-        return agent_subcommand(cmd, argv)
+        try:
+            return agent_subcommand(cmd, argv)
+        except RuntimeError as e:
+            # 子命令共用退出码协议：4xx/连不上=2，5xx=3；输出仍是单个 JSON
+            print(json.dumps({"status": "failed", "error": str(e)}, ensure_ascii=False))
+            return EXIT_FAILED if "HTTP 5" in str(e) else EXIT_CONFIG
     if cmd == "history":
         return _history_command(argv)
     if cmd == "calibrate":
@@ -182,6 +190,7 @@ def main() -> int:
         )
 
     seed_cases = _load_seed_cases(p, args)
+    _validate_out_path(p, args.out)
 
     if args.dry_run:
         return _dry_run_exit(args, seed_cases)
@@ -274,6 +283,7 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         epilog=_subcommand_help(prog),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--task", help="原始需求描述")
     p.add_argument("--task-file", help="从文件读取需求描述")
     p.add_argument(
@@ -334,7 +344,11 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     )
     p.add_argument("--checkpoint", default=None, help="SQLite 检查点路径（可选，支持跨进程恢复）")
     p.add_argument("--thread-id", default=None, help="恢复指定线程的会话")
-    p.add_argument("--out", default=None, help="报告输出路径")
+    p.add_argument(
+        "--out",
+        default=None,
+        help="报告输出文件路径（不是目录；父目录不存在会自动创建，路径错误在开跑前退 2）",
+    )
     p.add_argument("--mermaid", action="store_true", help="打印图结构并退出")
     p.add_argument("--selftest", action="store_true", help="拓扑与控制流自检，不需要 API Key")
     p.add_argument(
@@ -397,7 +411,14 @@ def _require_task(p: argparse.ArgumentParser, args: argparse.Namespace) -> str:
         p.error("需要 --task / --task-file，或用 --selftest 进行自检")
     task: str = args.task
     if args.task_file:
-        task = Path(args.task_file).read_text(encoding="utf-8").strip()
+        try:
+            decoded = read_text_auto(args.task_file)
+        except OSError as e:
+            p.error(f"--task-file 读取失败：{e}")
+        except TextDecodeError as e:
+            p.error(f"--task-file 解码失败：{e}")
+        warn_if_fallback(decoded, "--task-file")
+        task = decoded.text.strip()
     if not task:
         p.error("需求描述为空")
     # 与 API 的 OptimizeRequest 同口径（4-8000）：CLI 是另一个烧钱入口，
@@ -405,6 +426,30 @@ def _require_task(p: argparse.ArgumentParser, args: argparse.Namespace) -> str:
     if len(task) < 4 or len(task) > 8000:
         p.error(f"需求描述长度需在 4-8000 字之间（当前 {len(task)} 字）")
     return task
+
+
+def _validate_out_path(p: argparse.ArgumentParser, raw: str | None) -> None:
+    """`--out` 必须是可写的**文件**路径；目录/只读目标要在开跑前报错。
+
+    2026-10-22 实测：`--out C:\\tmp`（目录）会先完整跑完一轮，最后在
+    `save_artifacts` 里抛 PermissionError 裸栈、退出码 1 —— 钱已经花了，
+    报告却没落盘。这种纯参数错误必须在调用任何模型之前退 2。
+    """
+    if not raw:
+        return
+    text = str(raw)
+    out = Path(text)
+    if text.endswith(("/", "\\")) and not out.exists():
+        p.error(f"--out 需要文件路径，不是目录：{out}\n请给完整文件名，例如 {out / 'report.md'}")
+    if out.exists() and out.is_dir():
+        p.error(f"--out 需要文件路径，不是目录：{out}\n请给完整文件名，例如 {out / 'report.md'}")
+    if out.exists() and not os.access(out, os.W_OK):
+        p.error(f"--out 指向的文件不可写：{out}")
+    parent = out.parent if str(out.parent) else Path(".")
+    if parent.exists() and not parent.is_dir():
+        p.error(f"--out 的父路径不是目录：{parent}")
+    if parent.exists() and not os.access(parent, os.W_OK):
+        p.error(f"--out 的父目录不可写：{parent}")
 
 
 def _load_seed_cases(p: argparse.ArgumentParser, args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -563,25 +608,73 @@ def _attach_estimated_cost(payload: dict[str, Any], est_min: int, est_max: int) 
 # ---------------------------------------------------------------------------
 
 
+# 真实运行需要 Key 的角色（与 pm.llm.config 的角色表同口径）。
+# 放进闸门是为了识别"只配了角色级 Key"这种合法配置，而不是把它误报成无 Key。
+_KEY_ROLES = (
+    "clarifier",
+    "optimizer",
+    "mockgen",
+    "evaluator",
+    "evaluator_b",
+    "arbiter",
+    "reviser",
+    "comparator",
+    "target",
+)
+
+
+def _missing_key_roles() -> list[str]:
+    """返回还缺 Key 的角色；空列表 = 全局/多 Key 池覆盖，或每个角色都有独立 Key。
+
+    2026-10-22 修：此前只看 `PM_API_KEY` / `PM_TARGET_API_KEY`，于是
+    `.env.example` 明确推荐的 `PM_API_KEYS` 多 Key 池会被判成"没有 Key"；
+    反过来只有 target 一个角色 Key 时又会被放行，直到其它角色构造时才失败。
+    """
+    if (os.getenv("PM_API_KEY") or "").strip():
+        return []
+    pool = [k for k in (os.getenv("PM_API_KEYS") or "").split(",") if k.strip()]
+    if pool:
+        return []
+    return [
+        role for role in _KEY_ROLES if not (os.getenv(f"PM_{role.upper()}_API_KEY") or "").strip()
+    ]
+
+
+def _print_no_key_hint(p: argparse.ArgumentParser, missing: list[str]) -> None:
+    if len(missing) == len(_KEY_ROLES):
+        print(
+            "错误：未检测到 PM_API_KEY（也没有 PM_API_KEYS 多 Key 池）。\n"
+            "请复制 .env.example 为 .env 并填写，或直接 export PM_API_KEY=...",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "错误：缺少这些角色的 API Key：" + "、".join(missing) + "\n"
+            "全局 PM_API_KEY / PM_API_KEYS 未配置，而角色级 Key 只覆盖了一部分；\n"
+            "请补全局 Key，或为每个角色设置 PM_<角色>_API_KEY。",
+            file=sys.stderr,
+        )
+    print(
+        "无 Key 时的两条本地路径：\n"
+        f"  {p.prog} --selftest"
+        "                            只验证图拓扑与控制流（秒级）\n"
+        f'  PM_FAKE_BACKEND=progress {p.prog} --task "..."     假后端跑完整流程'
+        "（只验证链路，不证明优化效果）",
+        file=sys.stderr,
+    )
+
+
 def _api_key_gate(p: argparse.ArgumentParser) -> bool:
     """True = 可以继续（有 Key，或假后端演示模式）；False = 已打印指引，退出码 2。"""
-    if os.getenv("PM_API_KEY") or os.getenv("PM_TARGET_API_KEY"):
+    missing = _missing_key_roles()
+    if not missing:
         return True
     # 假后端场景下整轮不出网，闸门不该拦 —— 这正是 run.py 文档承诺的无 Key 入门路径。
     # 口径与 pipeline 的钩子装配同源（active_scenario），非法场景名两边都不算演示。
     from pm.testing import active_scenario  # 延迟导入：--help 轻路径不拉起 schemas
 
     if not active_scenario():
-        print(
-            "错误：未检测到 PM_API_KEY。\n"
-            "请复制 .env.example 为 .env 并填写，或直接 export PM_API_KEY=...\n"
-            "无 Key 时的两条本地路径：\n"
-            f"  {p.prog} --selftest"
-            "                            只验证图拓扑与控制流（秒级）\n"
-            f'  PM_FAKE_BACKEND=progress {p.prog} --task "..."     假后端跑完整流程'
-            "（只验证链路，不证明优化效果）",
-            file=sys.stderr,
-        )
+        _print_no_key_hint(p, missing)
         return False
     print(
         "演示模式：PM_FAKE_BACKEND 假后端，本次不调用任何真实端点（只验证链路，不证明优化效果）",

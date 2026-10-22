@@ -159,6 +159,10 @@ module = [
     "pm.server",
     "pm.modelhub.server",
     "pm.panel",
+    # mypy 按路径检查 extras/ 时模块名是 project_agent，按包导入时是 extras.project_agent；
+    # 两个名字都登记，避免同一份 pydantic 模型在两种调用方式下得到两套结论。
+    "extras.project_agent",
+    "project_agent",
 ]
 disallow_subclassing_any = false
 

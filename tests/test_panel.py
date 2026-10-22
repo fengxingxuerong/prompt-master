@@ -562,6 +562,37 @@ def test_panel_serve_reports_a_missing_dependency_as_exit_2(monkeypatch, capsys)
     assert "uvicorn" in capsys.readouterr().err
 
 
+def test_panel_clean_shutdown_stays_exit_0(monkeypatch) -> None:
+    """uvicorn 正常收工（SystemExit(0)）不能被当成启动失败。"""
+    fake = types.ModuleType("uvicorn")
+
+    def _clean(app: object, **kw: object) -> None:
+        raise SystemExit(0)
+
+    fake.run = _clean  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "uvicorn", fake)
+    assert panelcmd.panel_command(["--port", "8799", "--no-browser"]) == 0
+
+
+def test_panel_port_conflict_becomes_actionable_exit_2(monkeypatch, capsys) -> None:
+    """端口被占用（最常见的"上次那个面板还开着"）要给换端口的建议 + 退出码 2。
+
+    修复前 uvicorn 的 SystemExit(1) 会原样穿出去：用户看到一行 bind 报错，
+    退出码是 1（运行失败），而这是配置层面的冲突。
+    """
+    fake = types.ModuleType("uvicorn")
+
+    def _boom(app: object, **kw: object) -> None:
+        raise SystemExit(1)
+
+    fake.run = _boom  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "uvicorn", fake)
+
+    assert panelcmd.panel_command(["--port", "8799", "--no-browser"]) == 2
+    err = capsys.readouterr().err
+    assert "8799" in err and "--port 8800" in err
+
+
 def test_panel_opens_the_browser_only_after_a_delay(monkeypatch) -> None:
     """uvicorn 还没监听就 open，第一下必然连不上 —— 所以开浏览器要延后。"""
     opened: list[str] = []

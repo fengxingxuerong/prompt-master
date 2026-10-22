@@ -44,6 +44,8 @@ class _Handler(BaseHTTPRequestHandler):
     - **认不出的剧本返回 404，绝不兜底**：兜底会让写错的用例拿到别的答案通过（就是上一版的事故）。
     """
 
+    last_authorization: str | None = None
+
     def log_message(self, *args: object) -> None:  # 静默，别把测试输出淹掉
         return
 
@@ -78,6 +80,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.flush()  # 真分块下发：不分块就测不出"逐行解析"
 
     def do_POST(self) -> None:
+        _Handler.last_authorization = self.headers.get("Authorization")
         self._drain_request_body()
         script = self.path.strip("/").split("/")[0]
         if script == "401":
@@ -174,6 +177,20 @@ def test_unknown_script_is_404_not_a_silent_fallback(origin: str) -> None:
     with pytest.raises(GatewayError) as e:
         stream_upstream(origin + "/typoed-script-name", "sk-x", {"model": "m"}, 5)
     assert e.value.http_status == 404
+
+
+def test_stream_upstream_sends_bearer_authorization(origin: str) -> None:
+    """上游鉴权头必须是 `Bearer <key>`。
+
+    2026-10-19 全功能接口验证抓到：这里曾写成 `"***" + api_key`。真实上游一律 401，
+    网关随后**静默降级**成非流式 + HTTP 200（带 X-Modelhub-Degraded），
+    于是"支持流式"看起来一直成立，原生 SSE 路径其实从未真正打通。
+    测试桩原先不校验鉴权头，所以这条一直没被抓住。
+    """
+    _Handler.last_authorization = None
+    _, gen = stream_upstream(origin + "/ok", "sk-x", {"model": "m"}, 10)
+    list(gen)
+    assert _Handler.last_authorization == "Bearer sk-x"
 
 
 def test_normal_sse_is_passed_through_frame_by_frame(origin: str) -> None:

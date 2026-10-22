@@ -366,17 +366,39 @@ def judge_disagreement_threshold() -> float:
 
 
 def noise_margin(noise: float | None = 0.0) -> float:
-    """迭代收益判定余量：至少 2× 采样噪声。
+    """**平台期**判定余量：至少 2× 采样噪声。
 
     旧版写死 0.2，而评委自身抖动就 >0.2，导致“没提升”与“测不出提升”无法区分。
 
     `noise=None` 表示**噪声不可估**（`PM_SAMPLES_PER_CASE=1`，没有极差可依据）：
     此时不能把 0.2 当成“真实回退”的依据，否则一次运气好的采样就能把修订提前卡死，
     所以退到 `UNESTIMATED_MARGIN`（默认 0.5）并关掉平台期规则。
+
+    ⚠️ 本函数只服务**平台期**。回退判定另有自己的常量（`REGRESSION_MARGIN`）——
+    2026-10-21 修的一处缺陷就是：`early_stop_reason` 两个判定共用本函数，
+    于是 `REGRESSION_MARGIN` 成了只定义不读取的死常量（docstring 写着用它、
+    代码从没读过）。两者语义不同，别再把它们合成一个余量：
+      · 回退 = "这一轮明显降了，继续修只会震荡" ⇒ 看落差值
+      · 平台期 = "两轮都没涨" ⇒ 看涨幅是否够不着噪声
     """
     if noise is None:
         return max(PLATEAU_MARGIN, UNESTIMATED_MARGIN)
     return max(PLATEAU_MARGIN, 2.0 * max(0.0, float(noise or 0.0)))
+
+
+def regression_margin(noise: float | None = 0.0) -> float:
+    """**回退**判定余量：`max(REGRESSION_MARGIN, 2×noise)`。
+
+    与 `noise_margin()` 分开的理由见上（2026-10-21）：此前两者共用 `noise_margin()`,
+    导致 `REGRESSION_MARGIN` 从未被读取 —— 把它的值调大不会改变任何行为，
+    而 docstring 一直写着"余量 = max(REGRESSION_MARGIN, 2×noise)"。
+
+    `noise=None`（噪声不可估）时同样退到 `UNESTIMATED_MARGIN`：拿 0.2 当"真实回退"
+    的依据会让一次运气好的采样把修订提前卡死。
+    """
+    if noise is None:
+        return max(REGRESSION_MARGIN, UNESTIMATED_MARGIN)
+    return max(REGRESSION_MARGIN, 2.0 * max(0.0, float(noise or 0.0)))
 
 
 def early_stop_reason(avg_scores: list[float], noise: float | None = 0.0) -> str | None:
@@ -391,7 +413,12 @@ def early_stop_reason(avg_scores: list[float], noise: float | None = 0.0) -> str
        直接交付历史最佳版本。
     2. 平台期：最近两轮都未能超过更早的历史最佳（含余量）—— 修订已无实质提升。
        **仅在噪声可估（k≥2）时才启用**：单次采样下“连续两轮没超过”完全可能是噪声。
-    余量 = max(REGRESSION_MARGIN, 2×noise)：噪声大时不能拿 0.2 当“真实回退”的依据。
+
+    两个判定的余量**不同源**（2026-10-21 修）：
+      · 回退：`max(REGRESSION_MARGIN, 2×noise)`
+      · 平台期：`max(PLATEAU_MARGIN, 2×noise)`
+    此前两者共用 `noise_margin()`，于是 `REGRESSION_MARGIN` 成了只定义不读取的死常量 ——
+    docstring 写着它、代码从没读过，把它的值调大不会改变任何行为。
     """
     if len(avg_scores) < 2:
         return None
@@ -399,13 +426,15 @@ def early_stop_reason(avg_scores: list[float], noise: float | None = 0.0) -> str
         avg_scores = [s for s in avg_scores if s is not None]
         if len(avg_scores) < 2:
             return None
-    # 余量拉开到噪声之上：否则“测不出提升”会被当成“没有提升”而提前停下
-    margin = noise_margin(noise)
+    # 两个判定各有各的余量（2026-10-21 修）：回退看落差、平台期看涨幅。
+    # 此前两者共用 noise_margin()，于是 REGRESSION_MARGIN 从未被读取。
     cur = avg_scores[-1]
     best_prev = max(avg_scores[:-1])
-    if best_prev - cur > margin:
-        return f"修订回退：当前 {cur} 低于历史最佳 {best_prev}（余量 {round(margin, 2)}）"
+    reg_margin = regression_margin(noise)
+    if best_prev - cur > reg_margin:
+        return f"修订回退：当前 {cur} 低于历史最佳 {best_prev}（余量 {round(reg_margin, 2)}）"
     if len(avg_scores) >= 3 and noise is not None:
+        margin = noise_margin(noise)
         best_before_last2 = max(avg_scores[:-2])
         if cur <= best_before_last2 + margin and avg_scores[-2] <= best_before_last2 + margin:
             return (

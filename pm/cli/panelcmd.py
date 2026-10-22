@@ -81,7 +81,21 @@ def _serve(args: argparse.Namespace) -> int:
         print(note, flush=True)
     if not args.no_browser:
         _schedule_open(url)
-    uvicorn.run("pm.server:app", host=args.host, port=args.port, log_level="warning")
+    try:
+        uvicorn.run("pm.server:app", host=args.host, port=args.port, log_level="warning")
+    except SystemExit as e:
+        # uvicorn 端口占用等启动失败走的是 sys.exit(1)：不接住的话用户只看到一行
+        # "error while attempting to bind" 的栈式日志，退出码还是 1（运行失败），
+        # 分不清是面板坏了还是端口占了。这里翻成一句能照做的话 + 配置错误码 2。
+        code = e.code if isinstance(e.code, int) else 1
+        if code == 0:
+            return 0
+        print(
+            f"面板没起来（uvicorn 退出码 {code}）。端口 {args.port} 可能已被占用："
+            f"换一个 --port {args.port + 1} 重试，或先关掉占用 {args.port} 的进程。",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 

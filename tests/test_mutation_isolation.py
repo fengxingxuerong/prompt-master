@@ -41,6 +41,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 
@@ -159,6 +161,47 @@ def test_the_backup_name_is_not_a_fixed_shared_path() -> None:
         + "; ".join(bad)
         + " —— 带上 pid 或改用 tmp_path"
     )
+
+
+def test_restore_failure_is_loud_instead_of_leaving_a_dirty_tree(monkeypatch, tmp_path) -> None:
+    """还原失败必须让测试红，不能静默留下污染文件（2026-10-22 实测缺陷）。
+
+    真实症状：全量套件全绿，工作树里却留着 `python run.py surprise_gate`，
+    下一次跑 `test_ci_gate_matrix` 红在完全无关的用例上。
+    """
+    import _mutation_lock as ml
+
+    victim = tmp_path / "victim.txt"
+    victim.write_text("original", encoding="utf-8")
+
+    def boom(target: Path, raw: bytes, attempts: int = 5) -> None:
+        raise OSError("file is locked")
+
+    monkeypatch.setattr(ml, "_restore_with_retries", boom)
+    with pytest.raises(RuntimeError, match="还原失败"), ml.mutate(victim):
+        victim.write_text("dirty", encoding="utf-8")
+    victim.write_text("original", encoding="utf-8")
+
+
+def test_restore_retries_transient_lock_failures(monkeypatch, tmp_path) -> None:
+    """Windows 上文件被临时占用时重试几次，别把一次抖动升级成红。"""
+    import _mutation_lock as ml
+
+    victim = tmp_path / "victim.txt"
+    victim.write_text("dirty", encoding="utf-8")
+    real_replace = ml.os.replace
+    calls = {"n": 0}
+
+    def flaky(src, dst):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise OSError("transient lock")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(ml.os, "replace", flaky)
+    ml._restore_with_retries(victim, b"original")
+    assert victim.read_bytes() == b"original"
+    assert calls["n"] == 3
 
 
 def test_the_reproduction_is_recorded_with_numbers() -> None:

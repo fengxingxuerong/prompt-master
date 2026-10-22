@@ -39,6 +39,7 @@ from __future__ import annotations
 import contextlib
 import os
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -78,21 +79,52 @@ def mutate(*targets: Path) -> Iterator[None]:
     originals: dict[Path, bytes] = {}
     lock = mutation_lock_path(targets[0])
     with _process_lock(lock, timeout=_LOCK_TIMEOUT):
+        pending: BaseException | None = None
         try:
             for t in targets:
                 originals[t] = t.read_bytes()
             yield LockedOriginals(originals)
+        except BaseException as e:
+            pending = e
+            raise
         finally:
+            failures: list[tuple[Path, OSError]] = []
             for t, raw in originals.items():
-                # 还原本身也不许抛：真失败要让原异常继续往上走，别被这里盖掉。
-                # 用唯一临时名 + os.replace，避免"写一半被杀"把原文件留成半截。
-                tmp = t.with_name(f"{t.name}.{os.getpid()}.{threading.get_ident()}.restore")
                 try:
-                    tmp.write_bytes(raw)
-                    os.replace(tmp, t)
-                except OSError:  # pragma: no cover - 还原失败属环境故障，尽力而为
-                    with contextlib.suppress(OSError):
-                        tmp.unlink()
+                    _restore_with_retries(t, raw)
+                except OSError as e:  # 保留原始异常时只记录，不让它盖掉真正的原因
+                    failures.append((t, e))
+            if failures and pending is None:
+                # 2026-10-22 实测缺陷：这里此前**静默**吞掉 OSError，于是变异用例
+                # 全绿、工作树里却留着 `python run.py surprise_gate` 这种假门禁；
+                # 下一次跑套件会红在 test_ci_gate_matrix，看起来像无关用例坏了。
+                # 没有别的异常在传播时，还原失败必须让本次测试红 —— 脏树不是"尽力而为"。
+                first_error = failures[0][1]
+                raise RuntimeError(
+                    "变异后还原失败，仓库被留在污染状态："
+                    + "、".join(str(p) for p, _ in failures)
+                    + f"（首个错误：{first_error}）。请检查文件锁/杀软后重跑；"
+                    "不要把这份工作树直接提交。"
+                ) from first_error
+
+
+def _restore_with_retries(target: Path, raw: bytes, attempts: int = 5) -> None:
+    """按字节还原；Windows 上文件被临时占用时重试几次（仍失败就抛给调用方）。"""
+    last: OSError | None = None
+    tmp = target.with_name(f"{target.name}.{os.getpid()}.{threading.get_ident()}.restore")
+    for i in range(attempts):
+        try:
+            tmp.write_bytes(raw)
+            os.replace(tmp, target)
+            return
+        except OSError as e:
+            last = e
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+            if i + 1 < attempts:
+                time.sleep(0.05 * (i + 1))
+    assert last is not None
+    raise last
 
 
 class LockedOriginals:

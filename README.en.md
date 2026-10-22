@@ -24,11 +24,13 @@ Real run (set `PM_API_KEY`, see `.env.example`):
 
 ```bash
 python run.py --preflight                # smoke-test every role before burning budget
-python run.py --task "analyze sales data" --target-model deepseek-v3
+python run.py --task "analyze sales data" --fast      # first run: ~8-10 calls / a few minutes
+python run.py --task "analyze sales data" --target-model deepseek-v3   # full loop: 45-102 calls
 python run.py --task "…" --prompt-file my_prompt.md   # improve your own draft; Δ = vs. your version
 ```
 
 Exit codes are a protocol for agents: `0` passed / `1` delivered but below bar / `2` bad config / `3` run failed.
+For the zero-call commands, `1` means "findings" (`check`) or "newly introduced defects" (`diff`/`gate`).
 With `--json`, stdout is exactly one JSON object; all progress goes to stderr.
 
 ## When *not* to use it
@@ -41,7 +43,8 @@ With `--json`, stdout is exactly one JSON object; all progress goes to stderr.
 ## What is actually different
 
 - **Zero-call checks.** `check` / `diff` / `gate` render verdicts without a single API call. Most competitors
-  require a paid round-trip before you learn anything.
+  require a paid round-trip before you learn anything. For your own repository, `diff --base-ref origin/main
+  prompts/x.md` compares the working tree against a git revision, so a PR can block only *newly introduced* defects.
 - **Judge calibration as a first-class feature.** `run.py calibrate` reports MAE, bias, rank correlation,
   pass/fail agreement (κ), and discrimination (AUC with confidence intervals) against human anchors.
   Promptfoo scores outputs; it does not tell you whether its scorer is any good.
@@ -54,22 +57,29 @@ With `--json`, stdout is exactly one JSON object; all progress goes to stderr.
 
 | Item | Value |
 |---|---|
-| Product code | 74 files / ~25.6k lines (`pm/`) |
-| Tests | 126 files / ~37.8k lines, **1,921 collected**, no API key, no live network |
-| Coverage | 97.15% on `pm/` (floor 92), 99.05% on `pm/modelhub/*` (floor 82) |
-| CI | 13 gates × Linux + Windows, ruff + `mypy --strict` + coverage ratchet |
-| Interfaces | CLI (13 subcommands) · REST · MCP (13 tools) · web console · Tkinter desktop |
+| Tests | **1,893 collected**, no API key, no live network |
+| Coverage | 96.99% on `pm/` (floor 92), 98.35% on `pm/modelhub/*` (floor 82); full run 2026-10-22, 1,893 tests |
+| CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
+| Interfaces | CLI (12 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |
 
 ## Honest limitation (read before trusting any score)
 
-The measuring stick is not aligned yet. Against human anchors: MAE **3.13**, bias **+3.09**
-(systematic leniency), κ **0.074**; discrimination AUC **0.623** with 95% CI 0.341–0.841 —
-**it covers 0.5**. In other words, at the current sample size there is *no statistical evidence*
-that a higher judge score means a better output. The checklist scoring protocol was tested and
-**rejected** (it collapsed 10 of 17 anchors onto 9.35 and stayed lenient), so it ships disabled.
+The measuring stick is not aligned yet, and the current ledger cannot prove that it is.
 
-Full experiment log, including the self-audit that found 6 of 11 "human" anchor scores were
-fabricated: [`docs/evaluation.md`](docs/evaluation.md) §三十四 (Chinese).
+- **Live ledger** (1 round / 11 anchors): MAE **0.882**, bias **+0.291**, κ **0.814**, AUC **0.875**
+  (95% CI 0.6–1.0). Those numbers look good, but **6 of the 11 anchors are repository examples
+  whose "human" scores were fabricated**, and the thinnest cell of the pass/fail 2×2 has only
+  4 anchors (<10) — so this paper cannot answer "pass/fail agreement" at all.
+- **Historical 4-round snapshot**: MAE **3.13**, bias **+3.09** (systematic leniency), κ **0.074**;
+  AUC **0.623** with 95% CI covering **0.5**. It cannot be recomputed from the live ledger
+  (the input rounds were archived), so it is direction-only.
+
+Neither layer is statistical evidence that a higher judge score means a better output.
+The checklist scoring protocol was tested and **rejected** (it collapsed 10 of 17 anchors onto
+9.35 and stayed lenient), so it ships disabled.
+
+Full experiment log, including the self-audit that found the fabricated anchors:
+[`docs/evaluation.md`](docs/evaluation.md) §三十四 (Chinese).
 
 ---
 

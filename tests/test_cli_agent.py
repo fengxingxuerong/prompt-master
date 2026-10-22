@@ -67,6 +67,29 @@ def test_http_json_ok_post_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     assert json.loads(captured["data"].decode("utf-8")) == {"a": 1}
 
 
+def test_http_json_token_header_follows_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PM_API_TOKEN 设了就带 X-API-Key；与 server / MCP 同一个环境变量。
+
+    缺了这一步时，常驻 server 一开 token，agent 子命令的 submit/status/report/wait
+    全部 401，而 MCP 侧早已支持 —— 同一份 .env 下两个入口一个能用一个不能用。
+    """
+    import urllib.request as ur
+
+    seen: dict[str, str | None] = {}
+
+    def fake_urlopen(req: Any, timeout: float | None = None) -> _FakeResp:
+        seen["token"] = req.get_header("X-api-key")
+        return _FakeResp(b"{}")
+
+    monkeypatch.setattr(ur, "urlopen", fake_urlopen)
+    monkeypatch.setenv("PM_API_TOKEN", "pm-verify-token")
+    agent_mode._http_json("GET", "http://x/api/health")
+    assert seen["token"] == "pm-verify-token"
+    monkeypatch.delenv("PM_API_TOKEN", raising=False)
+    agent_mode._http_json("GET", "http://x/api/health")
+    assert seen["token"] is None
+
+
 def test_http_json_http_error_includes_body(monkeypatch: pytest.MonkeyPatch) -> None:
     import urllib.error
     import urllib.request as ur
@@ -96,6 +119,28 @@ def test_http_json_url_error_suggests_run_server(monkeypatch: pytest.MonkeyPatch
 # ---------------------------------------------------------------------------
 # agent_mode：server 解析与子命令
 # ---------------------------------------------------------------------------
+def test_agent_http_error_returns_json_and_protocol_exit_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """HTTP 错误不许把 traceback 甩给 Agent：输出单个 JSON，4xx=2 / 5xx=3。"""
+    from pm.cli import main as cli_main
+
+    def boom_404(*args: Any, **kwargs: Any) -> int:
+        raise RuntimeError("HTTP 404 http://x/api/status/r1: run_id r1 不存在")
+
+    monkeypatch.setattr(cli_main, "agent_subcommand", boom_404)
+    assert cli_main._dispatch_subcommand("status", ["r1"]) == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "failed" and "404" in out["error"]
+
+    def boom_500(*args: Any, **kwargs: Any) -> int:
+        raise RuntimeError("HTTP 500 http://x/api/status/r1: server died")
+
+    monkeypatch.setattr(cli_main, "agent_subcommand", boom_500)
+    assert cli_main._dispatch_subcommand("status", ["r1"]) == 3
+    assert json.loads(capsys.readouterr().out)["status"] == "failed"
+
+
 def test_agent_server_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PM_SERVER_URL", raising=False)
     assert agent_mode._agent_server(argparse.Namespace(server=None)) == "http://127.0.0.1:8080"
@@ -204,6 +249,16 @@ def test_agent_status_and_report(
     assert agent_mode.agent_subcommand("report", ["r1", "--out", str(out)]) == 0
     assert out.read_text(encoding="utf-8") == "R 内容"
     assert json.loads(capsys.readouterr().out)["report_path"] == str(out)
+
+    nested = tmp_path / "nested" / "report.md"
+    assert agent_mode.agent_subcommand("report", ["r1", "--out", str(nested)]) == 0
+    assert nested.read_text(encoding="utf-8") == "R 内容", "父目录不存在应自动创建"
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit) as e:
+        agent_mode.agent_subcommand("report", ["r1", "--out", str(tmp_path)])
+    assert e.value.code == 2
+    assert "不是目录" in capsys.readouterr().err
 
 
 def test_agent_wait_reaches_terminal_and_fetches_report(

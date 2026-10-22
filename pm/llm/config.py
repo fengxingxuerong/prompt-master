@@ -11,13 +11,15 @@ import os
 import threading
 from typing import Any
 
-from dotenv import load_dotenv
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel
 
+from ..bootstrap import load_env_files
 from ._log import logger
 
-load_dotenv()
+# 与入口共用同一套发现顺序（cwd 向上 → 检出仓库根兜底）。直接用 load_dotenv()
+# 会从本文件目录向上找，装包态下永远读不到用户项目里的 .env（2026-10-22 修）。
+load_env_files()
 
 
 TEMPERATURES: dict[str, float] = {

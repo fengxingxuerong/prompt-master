@@ -179,15 +179,25 @@ def test_the_scan_actually_finds_keys() -> None:
 def test_dynamic_pm_keys_are_known() -> None:
     """f-string 拼出来的键扫不到（`PM_{seat}_JITTER` 之类），用白名单钉住。
 
-    这不是"就这几个"的乐观假设：下面这条断言在真出现**第 4 个**动态键时立刻红，
-    逼着作者把它改成字面量（可被上面那条扫到）或显式加进隔离。
+    这不是"就这几个"的乐观假设：下面这条断言在真出现**新的动态键**时立刻红，
+    逼着作者把它改成字面量（可被上面那条扫到）或显式加进这份白名单。
     """
     found = {
         _rel(p) for p in PM_ROOT.rglob("*.py") if _DYNAMIC.search(p.read_text(encoding="utf-8"))
     }
-    assert found == {"pm/schemas.py", "pm/cache.py", "pm/llm/config.py"}, (
+    assert found == {
+        "pm/schemas.py",
+        "pm/cache.py",
+        "pm/llm/config.py",
+        # 2026-10-22 Key 闸门按角色拼 `PM_<ROLE>_API_KEY` 探查缺 Key 的角色。
+        # 这类键**全部以 `_API_KEY` 结尾**，由 isolate_host_connection_env 的后缀规则
+        # 整类清掉（见 _covered_by_connection_fixture），所以不必逐键隔离。
+        "pm/cli/main.py",
+    }, (
         f"出现了新的动态 PM_ 键构造：{sorted(found)}\n"
         "请确认它是否需要隔离——动态键没法被 test_every_literal_pm_key 扫到。"
+        "若键尾落在 _API_KEY / _BASE_URL / _MODEL，说明已被连接类夹具的后缀规则覆盖，"
+        "把它加进这份白名单；否则请改成字面量。"
     )
     body = _conftest_body()
     assert "_JITTER" in body, "座位抖动键的隔离不许被删掉（§二十三）"

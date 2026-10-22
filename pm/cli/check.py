@@ -29,6 +29,7 @@ from pm.quality import (
     delimiter_problems,
     structure_items,
 )
+from pm.textio import TextDecodeError, read_text_auto, warn_if_fallback
 
 from .support import (
     _EXIT_PASSED,
@@ -98,11 +99,20 @@ def _read_target(p: argparse.ArgumentParser, args: argparse.Namespace) -> tuple[
     if args.prompt and args.prompt_file:
         p.error("--prompt 与 --prompt-file 互斥，二选一")
     if args.prompt_file:
+        target = Path(args.prompt_file)
+        if target.is_dir():
+            # Windows 上直接读目录报 Permission denied，用户会以为文件权限坏了
+            p.error(f"--prompt-file 要的是文件，不是目录：{target}")
         try:
-            text = Path(args.prompt_file).read_text(encoding="utf-8")
+            decoded = read_text_auto(target)
         except OSError as e:
             p.error(f"--prompt-file 读取失败：{e}")
             raise SystemExit(EXIT_CONFIG) from e  # argparse.error 不会返回，此行为 mypy 兜底
+        except TextDecodeError as e:
+            p.error(f"--prompt-file 解码失败：{e}")
+            raise SystemExit(EXIT_CONFIG) from e
+        warn_if_fallback(decoded, "--prompt-file")
+        text = decoded.text
         source = args.prompt_file
     else:
         text = str(args.prompt)

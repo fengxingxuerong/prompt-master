@@ -918,10 +918,14 @@ def test_cli_per_case_mode_overrides_global_and_validates(tmp_path):
             errors="replace",
             # 关键：把 key 清空 + 端点指死。否则 run.py 会 load_dotenv() 捡到仓库 .env
             # 里的真实 Key，这条用例就变成"真打 180 秒网络"——CLI 边界测试必须自己掐断这条退路。
+            # ⚠️ `PM_API_KEYS`（多 Key 池）也必须清：2026-10-22 Key 闸门改成认这个池之后，
+            #    只清 `PM_API_KEY` 会让 .env 那份池子从 load_dotenv 补进来，
+            #    闸门误判"有 Key"而放行到真跑，这条用例就不再到 Key 检查那一站了。
             env={
                 **os.environ,
                 "PYTHONIOENCODING": "utf-8",
                 "PM_API_KEY": "",
+                "PM_API_KEYS": "",
                 "PM_TARGET_API_KEY": "",
                 "PM_BASE_URL": "http://127.0.0.1:9/v1",
             },

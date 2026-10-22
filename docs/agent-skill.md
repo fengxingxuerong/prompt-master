@@ -38,8 +38,9 @@ prompt-master --json --task "..." --cases-file cases.json --max-iter 2
 #         2=参数/配置错误（不要原样重试） 3=运行失败（看 errors；重试安全）
 ```
 
-⚠️ 用 `prompt-master` 时**必须自己注入环境变量**（`PM_API_KEY` 等）：`.env` 是按当前
-工作目录向上查找的，不在仓库根就读不到宿主机那份。用 `python run.py` 从仓库根跑则能读到。
+`.env` 先从当前工作目录向上找，检出模式下再退回仓库根那份（2026-10-22 修：此前装包态
+按 site-packages 的位置找，用户项目里的 .env 会被静默忽略）。Agent 侧仍建议**自己注入
+环境变量**（`PM_API_KEY` 等），不要依赖宿主机的文件。
 
 ## 典型工作流
 

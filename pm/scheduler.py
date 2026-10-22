@@ -35,6 +35,7 @@ from .paths import (
 )
 from .state import initial_state
 from .store import MemoryStore, RaceRecord, RecordStore, TaskRecord, make_view
+from .textio import read_text_auto
 
 logger = logging.getLogger("pm.scheduler")
 
@@ -368,7 +369,14 @@ class TaskManager:
         try:
             task = kwargs.get("task", "")
             if not task and "task_file" in kwargs:
-                task = Path(kwargs["task_file"]).read_text(encoding="utf-8")
+                decoded = read_text_auto(kwargs["task_file"])
+                if decoded.used_fallback:
+                    logger.warning(
+                        "task_file 不是 UTF-8，已按 %s 解码：%s",
+                        decoded.encoding,
+                        decoded.path,
+                    )
+                task = decoded.text
             init = initial_state(
                 task=task,
                 context=kwargs.get("context", ""),

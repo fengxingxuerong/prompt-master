@@ -25,7 +25,8 @@ python run.py check --prompt-file 我的提示词.md   # 零调用，先免费�
 
 ```bash
 python run.py --preflight                # 逐角色冒烟，花大钱之前必做
-python run.py --task "让 AI 分析销售数据" --target-model deepseek-v3
+python run.py --task "让 AI 分析销售数据" --fast   # 第一次先用快速档：约 8-10 次调用 / 数分钟
+python run.py --task "让 AI 分析销售数据" --target-model deepseek-v3   # 完整闭环：45-102 次调用
 python run.py --task "…" --prompt-file 我的提示词.md   # 改已有那版，Δ = 比你自己好多少
 ```
 
@@ -44,7 +45,8 @@ python run.py --task "…" --prompt-file 我的提示词.md   # 改已有那版�
 ```bash
 # 装成命令：Agent 配置里不用写 `python /绝对路径/run.py`，换机器也不会断
 pip install . && prompt-master --help
-#   ⚠️ 装包态下 `.env` 是按**当前工作目录**向上找的；在别的目录跑请直接用环境变量传 PM_API_KEY
+#   `.env` 先按**当前工作目录**向上找；检出模式下再退回仓库根那份（2026-10-22 修：
+#   此前装包态读的是 site-packages 的祖先目录，用户项目里的 .env 会被静默忽略）
 
 # 不花钱，先用假后端把整条流水线跑一遍
 PM_FAKE_BACKEND=progress python run.py --task "让 AI 分析销售数据" --fast
@@ -57,11 +59,13 @@ python run.py wait <run_id>          # 轮询到终态，输出结果 JSON
 # 能点的小窗口（零调用的三张卡不需要 Key）
 python run.py panel                  # 浏览器小窗，只绑 127.0.0.1:8765
 python run.py desktop                # 原生 Tkinter 窗口（**可选附件**，实现不在主包里）：不开浏览器、不起服务
-#   左侧导航切五张卡（Alt+1..5 同效）、Ctrl+Enter 跑当前卡；底栏 复制 / 另存 / 中止（④在跑时可掐真子进程）
-#   体检 / 考卷有几票 / 两版差分 = 当场出判定；④没 Key 时两个花钱按钮置灰，卡里写明为什么灰
+#   给小白的一条路：选项目文件夹 + 写目标（可贴已有提示词）→ 只读扫描 → 模型分析进度
+#   项目文件夹可以直接粘贴路径（带引号的也行，粘到文件会自动改用所在文件夹），也可以点选择
+#   → 输出可直接复制的新提示词；“只读取项目”零调用、不用 Key；生成需要 PM_API_KEY
+#   自动跳过 .env/私钥/依赖目录；不修改用户项目；结果可复制或另存
 ```
 
-`python run.py --help` 会列出全部参数与**子命令**（`submit/status/report/wait/history/calibrate/library/check/diff/gate/panel/desktop`）。
+`python run.py --version` 报出版本（与 REST / 面板自报同源）；`python run.py --help` 会列出全部参数与**子命令**（`submit/status/report/wait/history/calibrate/library/check/diff/gate/panel/desktop`）。
 
 > 本仓还有第二块东西：`releases/` 里的套件三服务（ModelHub 网关 / 龙虾站 / 任务台账），
 > 与本产品无关，入口见 `docs/suite/README.md`。
@@ -73,7 +77,7 @@ python run.py desktop                # 原生 Tkinter 窗口（**可选附件**�
 | 优化闭环 | `run.py --task`（或 `POST /api/optimize`） | 澄清 → 生成 → 用例 → 执行 → 评估 → 修订，最多 N 轮；带基线对照与成对盲评 |
 | 原稿改进 | 加 `--prompt-file 我的提示词.md` | 不从零生成：对**你已有的那一版**做最小改动（保留术语与字段名），基线臂自动换成原稿，Δ 读作「比你自己的版本好多少」 |
 | 静态体检 | `run.py check --prompt-file x.md --json` / `--cases-file y.json` | **零调用、零出网**：用优化闭环里那套代码侧规则当场量一份提示词（约束超载 / 抑制型条款 / 元话语泄漏 / 定界符…）；给 `--cases-file` 时改量一份**用例集**——数清它有几票能否决（`rule` 走评委、空 expected 不执行、expected 就在 input 里的只挡得住丢内容），退出码 0=无命中 1=有命中 |
-| 版本差分 | `run.py diff A B` | **零调用**：两版提示词（或两个 run）之间改了什么 —— 规则得失 / 结构增删 / 逐行 diff；退出码 1=有新引入的规则问题 |
+| 版本差分 | `run.py diff A B` / `run.py diff --base-ref origin/main 我的提示词.md` | **零调用**：两版提示词（或两个 run）之间改了什么 —— 规则得失 / 结构增删 / 逐行 diff；`--base-ref` 直接拿 git 基线比当前文件，适合放进用户仓库的 CI；退出码 1=有新引入的规则问题 |
 | 改动门禁 | `run.py gate`（CI 两个 job 都跑） | **零调用**：自动从 git 取基线比 `pm/prompts.py`，**只拦本次新引入的规则失败模式**。判据是增量不是绝对——17 个模板有 16 个天然命中规则，绝对判据会永久假红 |
 | 事实断言 | `--cases-file cases.json --assert-mode rule` | 你给的 `expected` 有一票否决权；`rule` 模式交评委逐条核验，`custom:<名>` 可挂你自己的断言函数 |
 | 资产与记忆 | `run.py library` / `run.py history` | 达标提示词可按任务相似度检索、导出；history 给 Δ 与显著性 |
@@ -81,6 +85,16 @@ python run.py desktop                # 原生 Tkinter 窗口（**可选附件**�
 | 插件面板 / 桌面窗口 | `run.py desktop`（Tkinter，**可选附件** `extras/desktop.py`，不随主包安装）或 `run.py panel`（浏览器小窗口，只绑 127.0.0.1:8765） | 把零调用能力做成能点开就用的形状，⑤ 还接上**账本与仪表**（历史 Δ / 评委聚合读数 / 资产库检索 / 改动门禁，四个按钮全零调用）。④闭环接满参数面：原稿模式、用例集（可选②的模板或粘贴内容）、断言模式、采样、快速档，**提交前先跑 `--dry-run` 把预估区间写进确认框**；判据仍由窗口 subprocess 打同一条 CLI 产生。界面这一层按热门竞品补齐的是**到达速度**（全部零调用、不新增判据）：③ 两版**并排着色**、⑤ 历史**过滤** + run_id 一键跳回③、① 顶部列 `{{占位符}}`（**只列不判**）、导出全部读数为 Markdown、深/浅主题、Alt+1..5 与 Ctrl+Enter/Ctrl+S/Ctrl+L/F1，底栏常驻版本与仓库路径 |
 
 MCP 接入（13 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
+
+### 在**你自己的仓库**里给提示词上门禁
+
+```bash
+git fetch origin main --depth=1
+python run.py diff --base-ref origin/main prompts/我的提示词.md
+```
+
+退出码 `1` = 这个 PR 相对 main **新引入**了规则问题（修好不判失败）；`0` = 没有变坏。
+`check` 管单时点，`diff --base-ref` 管增量 —— 两者都零调用、可逐次提交跑。
 
 ## 三、先读这一节，再用它给的分数
 
@@ -118,9 +132,9 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1843 条，无 Key、禁止真实出网）
-extras/             **可选附件**（桌面窗口 `desktop.py`）：不随 `pip install .` 安装，不入主门禁
-tests_extras/       附件的回归（80 条）：不在 CI 主套件里，手动 `pytest tests_extras` 才跑
+tests/              pytest 用例（CI 门禁；1893 条，无 Key、禁止真实出网）
+extras/             **可选附件**（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
+tests_extras/       附件的回归（41 条）：不在 CI 主套件里，手动 `pytest tests_extras` 才跑
 tests_modelhub/     ⚠️ 验收**脚本**（要活网关），pytest 收集 0 条，不在门禁里 → 见该目录 README
 judge_calibration/  评委校准锚点集（candidates.json 48 条全确认：23 人工 + 25 按所有者判例
                     AI 代判；ab.json 19 条 A/B 考卷 = samples.json 11 条核心 + disputed 8 条）
@@ -134,8 +148,10 @@ scripts/            一次性探针与 A/B 对照脚本，非产品代码
 
 1. **仪表未收敛**（见 §三）——产品输出的核心数字仍带 ±1~2 量级的自身抖动，
    而这个"量级"本身也是逐轮摆动的读数，不是这把尺子的固定精度。
-2. **覆盖率有门禁了，但它是地板不是目标**（2026-10-11 独占复测，全量 1669 条 **rc=0**，
-   已按准入口径入表为复测⑦）：
+2. **覆盖率有门禁了，但它是地板不是目标**（2026-10-22 本轮复测：全量 **1893 条 rc=0**，
+   `pm/` **96.99%**、`pm/modelhub/*` **98.35%**；地板值未变，见下方配置抄件。
+   下面是 2026-10-11 的历史快照，保留它只为看漂移，不是当前值）：
+   2026-10-11 独占复测（全量 1669 条 **rc=0**，已按准入口径入表为复测⑦）：
    `pm/` 全量实测 **97.15%**（地板 92），拆开看 `pm/` 去掉网关 **96.82%**、
    `pm/modelhub/*` **99.05%**（地板 82）。本轮清了薄弱点清单 C 的两块账：
    `streaming.py` **89% → 100%**、`calibration/` 的 `main()` 尾段与 `__main__`

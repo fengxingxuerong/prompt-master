@@ -1695,3 +1695,57 @@ R4 `live_run_support_triage_20261014_r4.err:111`，聚合行在 02:24:33（`avg=
 - 守卫 6 条（`tests/test_pipeline_interrupt_safety.py`），先红后绿。
   变异验牙：`except BaseException` → `except Exception` ⇒ 2 条当场红，还原即绿。
 - ruff / format / mypy --strict 干净；`tests/` 子集 253 条（cli/pipeline/graph/e2e/artifact/interrupt）全绿。
+
+## Round 34（2026-10-22，PromptMaster 本产品）—— 用户旅程审计：配置发现、入口协议与英文文档的三处真缺陷
+
+**本轮判据**：不新增"优化效果"结论（那需要所有者亲判锚点），只修"用户照文档做却走不通"的路径。
+对照组仍是 2026-10-13 竞品报告：生态接入、配置到达速度、CI 增量门禁是三个显眼短板，后两个可在本地零调用补齐。
+
+### 用户旅程实测发现（先复现，后修）
+
+1. **`.env` 发现顺序与文档相反（真缺陷）**。`prepare_console()` 直接 `load_dotenv()`，
+   python-dotenv 默认从**调用方文件**所在目录向上找：装包后调用方是 site-packages 的
+   `pm/bootstrap.py`，用户在自己项目里放的 `.env` 永远读不到（"配了 Key 却说没 Key"）；
+   检出模式反过来，从 `/tmp` 跑仓库 `run.py` 会读到仓库那份 `.env`。
+   修：`pm/bootstrap.py::load_env_files()` —— **cwd 向上优先，检出根兜底，进程环境不覆盖**；
+   `pm/llm/config.py` 与 `run_server.py` 共用同一套（后者此前只做编码兜底，根本不加载 `.env`）。
+   守卫：`tests/test_env_discovery.py` 4 条，其中一条用"临时目录里的 probe.py + PYTHONPATH"
+   复刻装包态；修复前该用例读到空串。
+2. **没有 `--version`**。`run.py --version` 被当成未知参数退 2。修：主 CLI / `run_server.py`
+   各加 argparse version action，值取 `pm.__version__`；`tests/test_version_flag.py` 3 条
+   同时钉住 `run.py`、`python -m pm.cli.console`、`run_server.py` 三个入口。
+3. **面板端口占用只丢裸日志**。uvicorn 的 `SystemExit(1)` 原样穿出：先打印"面板地址"，
+   再一行 bind 报错，退出码 1（运行失败）。修：`panelcmd._serve` 接住 SystemExit，
+   给"换 `--port 8800` / 关掉占用进程"的人话并退 2；`SystemExit(0)` 仍按正常收工退 0。
+4. **用户仓库的提示词 CI 门禁缺一口气**。原有 `diff A B` 要求用户先 `git show > /tmp/base.md`。
+   修：`run.py diff --base-ref origin/main prompts/x.md`，左侧直接取 `git show`，
+   退出码仍是"有新引入才 1"；新文件无基线、坏 ref、参数写错一律退 2 并给人话。
+   守卫：`tests/test_diff_base_ref.py` 9 条（4 条 subprocess 打真实入口 + 5 条进程内分支）。
+5. **英文 README 长期漂移**：测试数少 5、子命令数写 13（活体 12）、CI 写成
+   "13 gates × Linux + Windows"、校准一节把历史快照当作当前读数。修：按实测重写，
+   并把英文 README / 面板底栏 / `docs/agent-skill.md` 纳入既有的"同数抄件"守卫
+   （`test_test_count_copies_match_the_live_collection`、
+   `test_documented_mcp_tool_count_matches_the_live_registry`，
+   新增 `test_documented_subcommand_count_matches_the_live_parser`）。
+6. **测试基建会把工作树静默写脏**（本轮全量跑出来的）：变异测试的还原失败被
+   `except OSError` 吞掉，`ci.yml` 里留下 `python run.py surprise_gate`；
+   下一轮 `test_ci_gate_matrix` 红在无关用例上。修：`tests/_mutation_lock.py` 还原改为
+   **重试 5 次 + 无原始异常时必抛**；`tests/test_mutation_isolation.py` 2 条守卫
+   （还原失败必响、瞬时锁自动重试）。
+
+### 验收读数
+
+- 全量：`pytest tests -q` **1873 collected / 1872 passed / 1 skipped / rc=0**（2026-10-22 本机，独占）。
+- 覆盖率：`pm/` **96.99%**（地板 92）、`pm/modelhub/*` **98.35%**（地板 82）；
+  本轮改到的 `bootstrap.py` / `panelcmd.py` 100%，`diffcmd.py` 94%。
+- 静态：CI 同口径 `ruff check` / `ruff format --check` / `mypy pm/ extras/ run.py run_server.py eval_prompts.py` 全绿。
+- 用户入口实跑：`--version` 三入口、`check`（含目录误传）、`diff --base-ref`（临时 git 仓库）、
+  `gate`、`panel`（端口冲突 8799 实跑）、MCP `tools/list`（13 工具）均按预期。
+
+### 未做 / 未验（明说）
+
+- **没做 GitHub Action**：竞品 promptfoo 的生态位靠 Action/matrix 铺开，但本仓主包未发布到
+  PyPI，Action 只能靠 `uses: <repo>@ref`；本轮不发布未在真 GitHub Runner 上跑过的接线。
+- 校准读数**没有变化**：owner 亲判锚点仍缺，Δ/达标类结论继续不采信；本轮未跑真端点。
+- Windows 真机上的 `.env` 优先级只在本机跑过（Linux CI 会跑同一套 subprocess 用例），
+  远端 CI 结果未等。

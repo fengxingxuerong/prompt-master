@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
+from pathlib import Path
 from typing import Any
 
 from pm.promptdiff import (
+    DiffSource,
     DiffSourceError,
     _clip,
     diff_prompts,
@@ -107,15 +110,89 @@ def render_text(delta: dict[str, Any], findings_explain: bool = True) -> str:
     return "\n".join(lines)
 
 
+def _git(cwd: Path, *args: str) -> tuple[int, str]:
+    """跑一条 git 命令；异常折成 DiffSourceError（来源解析失败，不是崩溃）。"""
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        raise DiffSourceError(f"调用 git 失败：{e}") from e
+    return proc.returncode, proc.stdout or ""
+
+
+def resolve_git_base(path_spec: str, ref: str) -> DiffSource:
+    """把工作区文件在某个 git 版本里的正文解析成差分左侧。
+
+    这是给用户仓库接入 CI 的入口：`run.py diff --base-ref origin/main prompts/x.md`
+    直接拿 PR 基线比当前检出，不需要先手工 `git show > /tmp/base.md`。
+
+    边界：文件必须已在基线里；新文件没有旧版本可比，退 2 并建议改用 `check`。
+    那种情况**不能**按"全部规则都是新引入"处理 —— 会把任何新文件都判红，
+    门禁从第一天起就没人愿意开。
+    """
+    ref = (ref or "").strip()
+    if not ref:
+        raise DiffSourceError("--base-ref 不能为空")
+    path = Path((path_spec or "").strip())
+    if not path.exists() or not path.is_file():
+        raise DiffSourceError(
+            f"--base-ref 需要一个**当前版本的文件路径**，但 {path_spec!r} 不是可读文件。"
+            "用法：run.py diff --base-ref origin/main prompts/我的提示词.md"
+        )
+    abs_path = path.resolve()
+    rc, out = _git(abs_path.parent, "rev-parse", "--show-toplevel")
+    if rc != 0 or not out.strip():
+        raise DiffSourceError(
+            f"{path} 不在 git 仓库里：--base-ref 需要 git 历史做基线。"
+            "先 git init/提交一版，或改用 run.py check 做单时点体检"
+        )
+    root = Path(out.strip())
+    try:
+        rel = abs_path.relative_to(root).as_posix()
+    except ValueError as e:
+        raise DiffSourceError(f"{path} 不在仓库根 {root} 之下，git 取不到它的历史版本") from e
+
+    rc, _ = _git(root, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    if rc != 0:
+        raise DiffSourceError(
+            f"基线 ref {ref!r} 解析不出来。CI 上先 fetch 到该提交（fetch-depth: 0），"
+            "本地请给一个存在的 ref，例如 origin/main"
+        )
+    rc, text = _git(root, "show", f"{ref}:{rel}")
+    if rc != 0:
+        raise DiffSourceError(
+            f"基线 {ref} 里没有 {rel}：新文件没有可对比的旧版本，无法做「这次新引入」判定。"
+            "先用 run.py check 体检这一版；想长期门禁，先提交一版再接入"
+        )
+    if not text.strip():
+        raise DiffSourceError(f"基线 {ref}:{rel} 是空文件，没有可对比的正文")
+    return DiffSource(label=f"{ref}:{rel}", text=text, kind="git")
+
+
 def diff_command(argv: list[str]) -> int:
     """`run.py diff <A> <B>` 入口。"""
     p = argparse.ArgumentParser(
         prog="run.py diff",
         description="两份提示词（或两个运行）之间的确定性差分：零调用、不联网、秒级",
-        epilog="来源写法：文件路径，或 logs/ 里的 run_id。",
+        epilog="来源写法：文件路径，或 logs/ 里的 run_id。"
+        "CI 场景用 --base-ref 直接比当前文件与 git 基线。",
     )
-    p.add_argument("a", help="左侧：文件路径或 run_id")
-    p.add_argument("b", help="右侧：文件路径或 run_id")
+    p.add_argument("a", nargs="?", help="左侧：文件路径或 run_id（配合 --base-ref 时可省略）")
+    p.add_argument("b", nargs="?", help="右侧：文件路径或 run_id（配合 --base-ref 时只给这一个）")
+    p.add_argument(
+        "--base-ref",
+        metavar="REF",
+        help="从 git 基线读左侧：给一个当前文件路径即可，"
+        "例如 `run.py diff --base-ref origin/main prompts/x.md`。"
+        "退出码 1 = 相对基线新引入了规则问题",
+    )
     p.add_argument("--json", action="store_true", help="输出 JSON（智能体/CI 消费）")
     p.add_argument(
         "--context",
@@ -134,8 +211,23 @@ def diff_command(argv: list[str]) -> int:
     setup_logging(args.verbose)
 
     try:
-        src_a = resolve_source(args.a)
-        src_b = resolve_source(args.b)
+        if args.base_ref:
+            positional = [x for x in (args.a, args.b) if x]
+            if len(positional) != 1:
+                p.error(
+                    "--base-ref 需要且只需要一个文件参数（当前版本）："
+                    "run.py diff --base-ref origin/main prompts/我的提示词.md"
+                )
+            src_b = resolve_source(positional[0])
+            src_a = resolve_git_base(positional[0], args.base_ref)
+        else:
+            if not args.a or not args.b:
+                p.error(
+                    "需要两个来源（文件路径或 run_id）；"
+                    "或给一个文件 + --base-ref <ref> 与 git 基线对比"
+                )
+            src_a = resolve_source(args.a)
+            src_b = resolve_source(args.b)
     except DiffSourceError as e:
         p.error(str(e))
         raise SystemExit(EXIT_CONFIG) from e  # argparse.error 不返回，此行给 mypy 兜底
@@ -151,14 +243,10 @@ def diff_command(argv: list[str]) -> int:
         delta["unified"] = ""
 
     if args.json:
-        print(
-            json.dumps(
-                {"mode": "prompt_diff", "ok": not delta["regressed"], **delta},
-                ensure_ascii=False,
-                indent=2,
-                default=str,
-            )
-        )
+        payload = {"mode": "prompt_diff", "ok": not delta["regressed"], **delta}
+        if args.base_ref:
+            payload["base_ref"] = args.base_ref
+        print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
     else:
         print(render_text(delta))
     return EXIT_UNDELIVERED if delta["regressed"] else _EXIT_PASSED

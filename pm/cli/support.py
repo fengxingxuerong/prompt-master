@@ -16,6 +16,7 @@ from pm.paths import (
 )
 from pm.report import judge_seat_absent
 from pm.state import SEED_PROMPT_MAX_CHARS
+from pm.textio import TextDecodeError, read_text_auto, warn_if_fallback
 
 # 原 run.py 同款：仓库根/logs（拆包后 __file__ 深了两层，改用 parents[2] 回到仓库根）
 _DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
@@ -58,9 +59,13 @@ def read_seed_prompt(p: argparse.ArgumentParser, args: argparse.Namespace) -> st
     raw = ""
     if raw_file:
         try:
-            raw = Path(raw_file).read_text(encoding="utf-8")
+            decoded = read_text_auto(raw_file)
         except OSError as e:
             p.error(f"--prompt-file 读取失败：{e}")
+        except TextDecodeError as e:
+            p.error(f"--prompt-file 解码失败：{e}")
+        warn_if_fallback(decoded, "--prompt-file")
+        raw = decoded.text
     else:
         raw = str(raw_prompt)
     seed = raw.strip()
@@ -106,8 +111,17 @@ def resolve_case_mode(
 def read_cases_file(p: argparse.ArgumentParser, path: str) -> list[Any]:
     """`--cases-file` 的读取与顶层形状校验（跑批与体检两条路径共用一份）。"""
     try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
+        decoded = read_text_auto(path)
+    except OSError as e:
+        p.error(f"--cases-file 读取失败：{e}")
+        raise SystemExit(EXIT_CONFIG) from e
+    except TextDecodeError as e:
+        p.error(f"--cases-file 解码失败：{e}")
+        raise SystemExit(EXIT_CONFIG) from e
+    warn_if_fallback(decoded, "--cases-file")
+    try:
+        raw = json.loads(decoded.text)
+    except json.JSONDecodeError as e:
         p.error(f"--cases-file 读取失败：{e}")
         raise SystemExit(EXIT_CONFIG) from e  # 不可达：p.error 会 SystemExit
     if not isinstance(raw, list) or not raw:

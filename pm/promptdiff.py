@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from .quality import check_prompt_quality, count_constraints, delimiter_problems, structure_items
+from .textio import TextDecodeError, read_text_auto, warn_if_fallback
 
 # 单条增删条目在报告里的展示上限：diff 是给人扫的，不是把两份提示词又贴一遍
 _ITEM_CLIP = 100
@@ -70,9 +71,13 @@ def resolve_source(spec: str, log_dir: Path | None = None) -> DiffSource:
     path = Path(raw)
     if path.exists() and path.is_file():
         try:
-            text = path.read_text(encoding="utf-8")
+            decoded = read_text_auto(path)
         except OSError as e:  # 存在但读不了（权限/占用）与不存在要分开说
             raise DiffSourceError(f"{raw} 读取失败：{e}") from e
+        except TextDecodeError as e:
+            raise DiffSourceError(f"{raw} 解码失败：{e}") from e
+        warn_if_fallback(decoded, "提示词文件")
+        text = decoded.text
         if not text.strip():
             raise DiffSourceError(f"{raw} 是空文件，没有可对比的正文")
         return DiffSource(label=raw, text=text, kind="file")

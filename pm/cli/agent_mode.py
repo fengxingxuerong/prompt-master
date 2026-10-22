@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Any, cast
 
 from .history import _TERMINAL_STATUS
-from .support import EXIT_FAILED, _result_exit_code, assert_mode_arg, read_seed_prompt
+from .support import (
+    EXIT_FAILED,
+    _result_exit_code,
+    assert_mode_arg,
+    read_cases_file,
+    read_seed_prompt,
+)
 
 
 def _http_json(
@@ -24,6 +30,10 @@ def _http_json(
     req = urllib.request.Request(url, data=data, method=method)
     if data is not None:
         req.add_header("Content-Type", "application/json")
+    token = os.getenv("PM_API_TOKEN", "").strip()
+    if token:
+        # 与 server / MCP 共用同一个环境变量，别让 agent 子命令被自家 token 门禁挡死
+        req.add_header("X-API-Key", token)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return cast("dict[str, Any]", json.loads(resp.read().decode("utf-8")))
@@ -81,60 +91,79 @@ def _build_agent_parser(cmd: str) -> argparse.ArgumentParser:
 
 
 def agent_subcommand(cmd: str, argv: list[str]) -> int:
+    """按子命令分派。每个子命令的实现各占一个函数（自 2026-10-22 拆），
+    这里只做"解析 + 路由"——原来四个分支挤在一个函数里，复杂度棘轮已经压在线上。"""
     ap = _build_agent_parser(cmd)
     ns = ap.parse_args(argv)
     base = _agent_server(ns)
-
     if cmd == "submit":
-        payload: dict[str, Any] = {
-            "task": ns.task,
-            "target_model": ns.target_model,
-            "n_test_cases": ns.cases,
-            "max_iterations": ns.max_iter,
-            "assertion_mode": ns.assert_mode if ns.cases_file else "contains",
-        }
-        # 原稿护栏与同步 CLI 同一个函数：两条入口对 --prompt/--prompt-file 的
-        # 互斥、长度上下限必须同数，分叉迟早变成"一边能跑一边白烧钱"
-        seed = read_seed_prompt(ap, ns)
-        if seed:
-            payload["seed_prompt"] = seed
-        if ns.cases_file:
-            raw = json.loads(Path(ns.cases_file).read_text(encoding="utf-8"))
-            payload["test_cases"] = [
-                {
-                    "input": str(c.get("input") or ""),
-                    "expected": str(c.get("expected") or ""),
-                    "assert_mode": str(c.get("mode") or ""),
-                    "scenario": str(c.get("scenario") or ""),
-                    "hijack_marker": str(c.get("hijack_marker") or ""),
-                }
-                for c in raw
-                if isinstance(c, dict) and str(c.get("input") or "").strip()
-            ]
-            payload["n_test_cases"] = len(payload["test_cases"])
-        resp = _http_json("POST", f"{base}/api/optimize", payload)
-        print(json.dumps(resp, ensure_ascii=False))
-        return 0
-
+        return _agent_submit(ap, ns, base)
     if cmd == "status":
-        print(
-            json.dumps(
-                _http_json("GET", f"{base}/api/status/{ns.run_id}"), ensure_ascii=False, default=str
-            )
-        )
-        return 0
-
+        return _agent_status(ns, base)
     if cmd == "report":
-        resp = _http_json("GET", f"{base}/api/report/{ns.run_id}")
-        report = str(resp.get("report", ""))
-        if getattr(ns, "out", None):
-            Path(ns.out).write_text(report, encoding="utf-8")
-            print(json.dumps({"run_id": ns.run_id, "report_path": ns.out}, ensure_ascii=False))
-        else:
-            print(json.dumps({"run_id": ns.run_id, "report": report}, ensure_ascii=False))
-        return 0
+        return _agent_report(ap, ns, base)
+    return _agent_wait(ns, base)
 
-    # wait：轮询到终态，输出与 --json 同构的结果 JSON（Agent 只需要学一种消费方式）
+
+def _agent_submit(ap: argparse.ArgumentParser, ns: argparse.Namespace, base: str) -> int:
+    payload: dict[str, Any] = {
+        "task": ns.task,
+        "target_model": ns.target_model,
+        "n_test_cases": ns.cases,
+        "max_iterations": ns.max_iter,
+        "assertion_mode": ns.assert_mode if ns.cases_file else "contains",
+    }
+    # 原稿护栏与同步 CLI 同一个函数：两条入口对 --prompt/--prompt-file 的
+    # 互斥、长度上下限必须同数，分叉迟早变成"一边能跑一边白烧钱"
+    seed = read_seed_prompt(ap, ns)
+    if seed:
+        payload["seed_prompt"] = seed
+    if ns.cases_file:
+        # 与同步 CLI 同一条加载路径：编码兜底、非空数组、JSON 错误都在同一处报
+        raw = read_cases_file(ap, ns.cases_file)
+        payload["test_cases"] = [
+            {
+                "input": str(c.get("input") or ""),
+                "expected": str(c.get("expected") or ""),
+                "assert_mode": str(c.get("mode") or ""),
+                "scenario": str(c.get("scenario") or ""),
+                "hijack_marker": str(c.get("hijack_marker") or ""),
+            }
+            for c in raw
+            if isinstance(c, dict) and str(c.get("input") or "").strip()
+        ]
+        payload["n_test_cases"] = len(payload["test_cases"])
+    resp = _http_json("POST", f"{base}/api/optimize", payload)
+    print(json.dumps(resp, ensure_ascii=False))
+    return 0
+
+
+def _agent_status(ns: argparse.Namespace, base: str) -> int:
+    print(
+        json.dumps(
+            _http_json("GET", f"{base}/api/status/{ns.run_id}"), ensure_ascii=False, default=str
+        )
+    )
+    return 0
+
+
+def _agent_report(ap: argparse.ArgumentParser, ns: argparse.Namespace, base: str) -> int:
+    resp = _http_json("GET", f"{base}/api/report/{ns.run_id}")
+    report = str(resp.get("report", ""))
+    if getattr(ns, "out", None):
+        out = Path(ns.out)
+        if out.is_dir():
+            ap.error(f"--out 需要文件路径，不是目录：{out}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report, encoding="utf-8")
+        print(json.dumps({"run_id": ns.run_id, "report_path": ns.out}, ensure_ascii=False))
+    else:
+        print(json.dumps({"run_id": ns.run_id, "report": report}, ensure_ascii=False))
+    return 0
+
+
+def _agent_wait(ns: argparse.Namespace, base: str) -> int:
+    """wait：轮询到终态，输出与 --json 同构的结果 JSON（Agent 只需要学一种消费方式）。"""
     deadline = time.monotonic() + max(30, ns.timeout)
     status_data: dict[str, Any] = {}
     while True:

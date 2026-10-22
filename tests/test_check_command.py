@@ -164,3 +164,27 @@ def test_help_lists_every_subcommand():
     help_text = _subcommand_help("run.py")
     for cmd in _SUBCOMMANDS:
         assert cmd in help_text, f"子命令 {cmd} 未出现在 --help 里"
+
+
+def test_prompt_file_pointing_at_a_directory_is_a_clear_error(tmp_path, capsys) -> None:
+    """`--prompt-file pm` 在 Windows 上报 Permission denied，看起来像权限坏了。"""
+    with pytest.raises(SystemExit) as e:
+        check_command(["--prompt-file", str(tmp_path)])
+    assert e.value.code == 2
+    assert "不是目录" in capsys.readouterr().err
+
+
+def test_documented_subcommand_count_matches_the_live_parser() -> None:
+    """英文 README 写着 "CLI (13 subcommands)"，而活体是 12 个（2026-10-22 实测）。
+
+    中文 README 的抄件有守（测试条数、覆盖地板、MCP 工具数），英文那份没有；
+    国际访客第一眼读到的就是它。这里钉住"声明的子命令数 == 分发器里的元组长度"。
+    """
+    import re
+
+    en = (ROOT / "README.en.md").read_text(encoding="utf-8")
+    m = re.search(r"CLI \((\d+) subcommands\)", en)
+    assert m, "README.en.md 里找不到 CLI (N subcommands) 声明 —— 改文案时别删掉这条锚点"
+    assert int(m.group(1)) == len(_SUBCOMMANDS), (
+        f"README.en.md 写 {m.group(1)} 个子命令，活体是 {len(_SUBCOMMANDS)} 个：{_SUBCOMMANDS}"
+    )

@@ -7,8 +7,9 @@
 `python /绝对路径/仓库/run.py --json` 是很脆的约定（换机器就断、也没法随 pip 升级）。
 之前 `pyproject.toml` 里根本没有 `[project.scripts]`，装完包连一个命令都没有。
 
-⚠️ 一条与 `run.py` 的真实差异：`.env` 是按**当前工作目录**向上查找的（python-dotenv 的默认），
-在别的目录下跑就读不到仓库那份 `.env` —— 那种场合请直接用环境变量传 `PM_API_KEY`。
+`.env` 与 `run.py` 共用同一套发现顺序（2026-10-22 修）：先按**当前工作目录**向上查找，
+检出模式下再退回仓库根那份。装包态在用户项目目录里跑会读那个项目的 `.env`；
+此前 python-dotenv 的默认按本文件所在目录（site-packages）找，用户配置会被静默忽略。
 """
 
 from __future__ import annotations

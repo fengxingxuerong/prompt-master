@@ -476,6 +476,11 @@ def test_test_count_copies_match_the_live_collection() -> None:
         "README.md": re.search(
             r"CI 门禁；(\d+)\+? 条", (ROOT / "README.md").read_text(encoding="utf-8")
         ),
+        # 英文 README 是国际访客第一眼读的那份。2026-10-22 实测它比活体少了 5 条，
+        # 且同页还写着早已不对的子命令数 —— 中文有抄件守卫、英文没有，漂了没人知道。
+        "README.en.md": re.search(
+            r"([\d,]+) collected", (ROOT / "README.en.md").read_text(encoding="utf-8")
+        ),
         "docs/operations.md": re.search(
             r"`pytest tests/ -q`（(\d+) 项",
             (ROOT / "docs" / "operations.md").read_text(encoding="utf-8"),
@@ -487,7 +492,7 @@ def test_test_count_copies_match_the_live_collection() -> None:
     stale = {
         k: (v.group(1) if v else "读不到")
         for k, v in copies.items()
-        if v is None or int(v.group(1)) != live
+        if v is None or int(v.group(1).replace(",", "")) != live
     }
     assert not stale, (
         f"活体收集是 {live} 条，但这些文件里的抄件不是：{stale}。"

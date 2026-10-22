@@ -717,6 +717,16 @@ def test_documented_mcp_tool_count_matches_the_live_registry() -> None:
         "README.md": re.search(
             r"MCP 接入（(\d+) 个工具", (root / "README.md").read_text(encoding="utf-8")
         ),
+        "README.en.md": re.search(
+            r"MCP \((\d+) tools\)", (root / "README.en.md").read_text(encoding="utf-8")
+        ),
+        "docs/agent-skill.md": re.search(
+            r"推荐，(\d+) 个工具", (root / "docs" / "agent-skill.md").read_text(encoding="utf-8")
+        ),
+        # 面板底栏也是"注册了几个"的抄件：工具数一变，界面就会当面说错。
+        "pm/web/_panel.py": re.search(
+            r"MCP (\d+) 工具", (root / "pm" / "web" / "_panel.py").read_text(encoding="utf-8")
+        ),
         "docs/agent-cli-guide.md": re.search(r"暴露 (\d+) 个 MCP 工具", guide_text),
     }
     stale = {
