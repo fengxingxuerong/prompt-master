@@ -1,5 +1,20 @@
 # Release notes
 
+## 2.3.0 — 2026-10-23（发布通道工具化 + 日志归档）
+
+**发布通道**：新增 `.github/workflows/release.yml`，tag 驱动、四 gate 分工
+（build-check / artifact / github-release / pypi）。推 `v*` tag 即：
+- GitHub Release 用自动注入的 `GITHUB_TOKEN` 生成，附产物与 `docs/release-notes.md` 对应版本段落，**无需另行配 secret**；
+- PyPI 上传需先在 GitHub Secrets 配 `PYPI_TOKEN`，未配则该 job 自动跳过（不影响 GitHub Release）。
+
+**日志归档**：新增 `scripts/logs_archive.py` —— 把超龄且未被 `docs/` 按 run id 点名的
+`logs/run_*.json` / `logs/report_*.md` **移动 + 留档**进 `archive/YYYY-MM/`（默认 dry-run，
+`--commit` 才动手；移动不改字节、抄写 `manifest.json` 可回查）。配套
+`tests/test_logs_archive.py` 钉死三条安全承诺（dry-run 零写入 / commit 不改字节 / 文档引用不归档）。
+
+**修复/维护**：测试计数抄件 1979 → 1983 四处同步；`docs/operations.md` 集中标注三项尚待 owner 亲决
+（PyPI token / Release 首跑 / 校准 34 条）。无破坏性变更，无判定语义改动。
+
 ## 2.2.0 — 2026-10-23（环境诊断 + 用户旅程二轮收口）
 
 **新增：`python run.py doctor`** —— 零调用的环境诊断，把「这套配置到底能不能用」提前到花一分钱之前：
