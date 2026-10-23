@@ -129,13 +129,17 @@ jobs:
     # token 出处在 scripts/release_pypi.py --upload 读 `PYPI_TOKEN`。Actions 侧把 owner 在
     # repo Settings → Secrets 配的 PYPI_TOKEN 传进去，两边同名，别名漂移就见红。
     #
+    # 为什么不用 job 级 `if: ${{ secrets.PYPI_TOKEN != '' }}` 守卫：GitHub 文档明确 **`if`
+    # 条件里不允许访问 `secrets` context**（会致该 job 无法求值，甚至牵连整个 workflow 秒红）。
+    # 正确做法：job 无条件进入，把 token 放进 `env`（此处引用 secrets 是合法的），再在真正要
+    # 上传的那一步用 `if: env.PYPI_TOKEN != ''` 守卫 —— `env` 在 step 级 if 里可用。
+    #
     # 为什么不用脚本的 --upload 而用 --check + 手动 twine：
     #   --upload 硬要求"工作树干净 + HEAD 上有这个 tag"。但这步继承了 build-check 的产物
     #   artifact，checkout 默认浅克隆拿不到 tag，会让脚本守卫误红。这里用 --check 验证可执行
     #   环境本身能校验，再直接把**同一份物理产物**上传 —— 字节与 Release/build-check 一致。
     needs: [build-check, artifact]
     runs-on: ubuntu-latest
-    if: ${{ secrets.PYPI_TOKEN != '' }}
     env:
       PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
     steps:
@@ -156,10 +160,20 @@ jobs:
           path: dist
       - name: 上传前自检（--check 复用 build-check 的校验逻辑）
         run: python scripts/release_pypi.py --check
+      - name: 未配置 PYPI_TOKEN 时写清跳过原因
+        # 反向守卫：没 token 就把原因落进日志与 job 摘要，让"没传上"不是无声的。
+        if: env.PYPI_TOKEN == ''
+        run: |
+          echo "::warning::PYPI_TOKEN 未配置，跳过 PyPI 上传（GitHub Release 已在前一步生成）。"
+          echo "### PyPI 跳过说明" >> "$GITHUB_STEP_SUMMARY"
+          echo "未配置 \`PYPI_TOKEN\`（repo → Settings → Secrets → Actions），本次未上传 PyPI。已在 GitHub 生成 Release。" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload to PyPI (twine, username=__token__)
+        # 只在 PYPI_TOKEN 已配置时上传；未配置 = 跳过并说明（job 已无条件进入）。
+        if: env.PYPI_TOKEN != ''
         run: |
           python -m twine upload --non-interactive --username __token__ --password "$PYPI_TOKEN" dist/*.whl dist/*.tar.gz
       - name: 打印结果链接
+        if: env.PYPI_TOKEN != ''
         run: |
           V="${{ needs.artifact.outputs.version }}"
           echo "已发布 https://pypi.org/project/prompt-master/$V/"
