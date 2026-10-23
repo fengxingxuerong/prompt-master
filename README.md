@@ -43,6 +43,17 @@ python run.py --task "让 AI 分析销售数据" --target-model deepseek-v3   # 
 python run.py --task "…" --prompt-file 我的提示词.md   # 改已有那版，Δ = 比你自己好多少
 ```
 
+**新手最少只填这 3 个字段**（复制 `.env.example` 为 `.env` 后，其余保留默认即可跑）：
+
+| 字段 | 填什么 | 去哪拿 |
+|---|---|---|
+| `PM_PROVIDER` | `openai`（默认，兼容 DeepSeek / 通义 / vLLM 等）或 `anthropic` | 按你用的服务商定 |
+| `PM_API_KEY` | 你的模型服务商 API Key（`sk-…`） | 各服务商控制台：OpenAI / DeepSeek / 通义 / OpenRouter… |
+| `PM_BASE_URL` | 服务商接口地址，如 `https://api.deepseek.com/v1`、`https://api.openai.com/v1` | 服务商对应文档的 Base URL |
+
+> 想"换模型/分角色/省钱档"再读 `.env.example` 的注释——它逐字段讲了"为什么"。
+> 怕填错就先 `python run.py doctor`,它会逐项核对并指出缺哪样。
+
 - 想**先看产出长什么样**：[`docs/sample-report.md`](docs/sample-report.md)（假后端产出的**形状示例**：分节结构真实、读数全是桩）。
 - 想**先确认配置对不对**：`python run.py doctor`（零调用：Python / .env / Key / 角色 / 日志 / 端口 / 常驻服务 / MCP 一次说清）。
 - 想**不花钱先跑一遍链路**：`PM_FAKE_BACKEND=progress python run.py --task "…" --fast`。
@@ -108,7 +119,8 @@ python run.py diff --base-ref origin/main prompts/我的提示词.md
 退出码 `1` = 这个 PR 相对 main **新引入**了规则问题（修好不判失败）；`0` = 没有变坏。
 `check` 管单时点，`diff --base-ref` 管增量 —— 两者都零调用、可逐次提交跑。
 
-## 已知边界（按会不会骗到你排序）
+<details>
+<summary><b>已知边界（按会不会骗到你排序）—— 阅读前先知道这些</b></summary>
 
 1. **仪表未收敛**（见「它给的分，能信多少」）——核心数字仍带 ±1~2 量级的自身抖动，
    而这个"量级"本身也逐轮摆动，不是固定精度。
@@ -119,6 +131,8 @@ python run.py diff --base-ref origin/main prompts/我的提示词.md
 4. **版本号只有一个事实源**：产品 `pm/__init__.py:__version__` 与网关 `GATEWAY_VERSION` 各自独立；
    git tag 那条 `v1.x` 是**套件**发布线（见 [Releases](https://github.com/fengxingxuerong/prompt-master/releases)），别拿它当产品版本。
 5. **安全豁免 W7/W8/W9 未正式收回**（`releases/suite/security-waiver.html`）；公网暴露前必须处理。
+
+</details>
 
 ## 仓库结构（节选）与去哪看更多
 

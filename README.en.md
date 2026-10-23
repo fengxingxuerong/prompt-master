@@ -44,6 +44,17 @@ python run.py --task "analyze sales data" --target-model deepseek-v3   # full lo
 python run.py --task "…" --prompt-file my_prompt.md   # improve your own draft; Δ = vs. your version
 ```
 
+**Beginners only need these 3 variables** (copy `.env.example` to `.env`, leave the rest at default):
+
+| Variable | Set it to | Get it from |
+|---|---|---|
+| `PM_PROVIDER` | `openai` (default; DeepSeek / Qwen / vLLM compatible) or `anthropic` | depends on your provider |
+| `PM_API_KEY` | your provider's API key (`sk-…`) | the provider's console: OpenAI / DeepSeek / Qwen / OpenRouter… |
+| `PM_BASE_URL` | the provider's API base, e.g. `https://api.deepseek.com/v1`, `https://api.openai.com/v1` | the provider's Base URL docs |
+
+> Read `.env.example` comments for model/role/per-cost tuning — each field explains *why*.
+> If unsure, run `python run.py doctor` first; it checks every field and tells you what's missing.
+
 - **See what the output looks like**: [`docs/sample-report.md`](docs/sample-report.md) — a *shape* sample
   produced by the fake backend (real section structure, stub numbers).
 - **Run the whole pipeline for free**: `PM_FAKE_BACKEND=progress python run.py --task "…" --fast`.
@@ -110,7 +121,8 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 | CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
 | Interfaces | CLI (13 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |
 
-## Known boundaries
+<details>
+<summary><b>Known boundaries (ordered by how much they can fool you) — read these first</b></summary>
 
 1. **The instrument has not converged** (see above): core numbers carry ±1–2 of their own jitter,
    and that magnitude itself moves round to round.
@@ -122,6 +134,8 @@ Full experiment log, including the self-audit that found the fabricated anchors:
    (independent); the git tag `v1.x` is the *suite* release line, not the product version.
 5. **Security exemptions W7/W8/W9 are still open** (`releases/suite/security-waiver.html`); handle these
    before exposing anything to the public internet.
+
+</details>
 
 ## Where to read more
 
