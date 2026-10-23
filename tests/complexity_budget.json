@@ -8,6 +8,7 @@
   "pm/cli/diffcmd.py::render_text": 16,
   "pm/cli/library.py::_library_command": 18,
   "pm/cli/library.py::_library_recommend": 12,
+  "pm/doctor.py::build_report": 13,
   "pm/llm/calls.py::structured_call": 24,
   "pm/llm/retry.py::_invoke_with_rate_limit_retry": 11,
   "pm/llm/schema.py::extract_json_object": 15,

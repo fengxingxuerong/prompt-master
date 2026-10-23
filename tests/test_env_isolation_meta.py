@@ -189,10 +189,11 @@ def test_dynamic_pm_keys_are_known() -> None:
         "pm/schemas.py",
         "pm/cache.py",
         "pm/llm/config.py",
-        # 2026-10-22 Key 闸门按角色拼 `PM_<ROLE>_API_KEY` 探查缺 Key 的角色。
+        # 2026-10-22 Key 闸门按角色拼 `PM_<ROLE>_API_KEY` 探查缺 Key 的角色；
+        # 2026-10-23 这段判定搬到 pm/keycheck.py（CLI 闸门与 doctor 共用一份）。
         # 这类键**全部以 `_API_KEY` 结尾**，由 isolate_host_connection_env 的后缀规则
         # 整类清掉（见 _covered_by_connection_fixture），所以不必逐键隔离。
-        "pm/cli/main.py",
+        "pm/keycheck.py",
     }, (
         f"出现了新的动态 PM_ 键构造：{sorted(found)}\n"
         "请确认它是否需要隔离——动态键没法被 test_every_literal_pm_key 扫到。"

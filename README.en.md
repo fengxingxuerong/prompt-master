@@ -90,6 +90,9 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 - **Zero-call checks.** `check` / `diff` / `gate` render verdicts without a single API call. Most competitors
   require a paid round-trip before you learn anything. For your own repository, `diff --base-ref origin/main
   prompts/x.md` compares the working tree against a git revision, so a PR can block only *newly introduced* defects.
+- **Zero-call configuration diagnosis.** `run.py doctor` checks Python, `.env` discovery, key coverage
+  (global / multi-key pool / role-level / placeholders), role configs, log dir, ports, the local server and
+  MCP in one pass — exit `0` healthy / `1` warnings / `2` errors.
 - **Judge calibration as a first-class feature.** `run.py calibrate` reports MAE, bias, rank correlation,
   pass/fail agreement (κ), and discrimination (AUC with confidence intervals) against human anchors.
   Promptfoo scores outputs; it does not tell you whether its scorer is any good.
@@ -102,10 +105,10 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 
 | Item | Value |
 |---|---|
-| Tests | **1,970 collected**, no API key, no live network |
+| Tests | **1,979 collected**, no API key, no live network |
 | Coverage | gated at floor 92 on `pm/` and floor 93 on `pm/modelhub/*`; measured values drift per round — the only maintained table lives in `docs/operations.md` (this README no longer copies snapshots) |
 | CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
-| Interfaces | CLI (12 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |
+| Interfaces | CLI (13 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |
 
 ## Known boundaries
 

@@ -12,6 +12,8 @@ from typing import Any
 
 from pm import __version__
 from pm.casesaudit import DEFAULT_MODE
+from pm.keycheck import KEY_ROLES as _KEY_ROLES
+from pm.keycheck import missing_key_roles as _missing_key_roles
 from pm.state import initial_state
 from pm.textio import TextDecodeError, read_text_auto, warn_if_fallback
 
@@ -19,6 +21,7 @@ from .agent_mode import agent_subcommand
 from .calibrate import _calibrate_command
 from .check import check_command
 from .diffcmd import diff_command
+from .doctorcmd import doctor_command
 from .gatecmd import gate_command
 from .history import _history_command
 from .library import _library_command
@@ -66,6 +69,8 @@ _SUBCOMMAND_HELP = """
               —— 退出码 1 = 有新引入的规则问题，可直接当 CI 回归门禁
   gate        提示词改动的 CI 回归门禁：自动从 git 取基线，只拦本次「新引入」的规则问题
               —— 退出码 1 = 有新引入（CI 该红）；2 = 门禁自己没跑起来；默认对象 pm/prompts.py
+  doctor      环境诊断（零 LLM 调用）：Python / .env / Key / 角色配置 / 日志目录 / 端口 /
+              常驻服务 / MCP 一次说清 —— 退出码 0 无问题 / 1 只有警告 / 2 有错误
   panel       本地插件面板（浏览器小窗口）：体检 / 考卷有几票 / 两版差分三张卡零调用可用，
               ④优化闭环那张要 Key —— 没 Key 就置灰并写明原因
               —— 缺省只绑 127.0.0.1:8765（与常驻服务的 8080 分开），--no-browser 只起服务
@@ -92,6 +97,7 @@ _SUBCOMMANDS = (
     "check",
     "diff",
     "gate",
+    "doctor",
     "panel",
     "desktop",
 )
@@ -111,15 +117,43 @@ def _subcommand_help(prog: str) -> str:
     )
 
 
+def _dispatch_agent(cmd: str, argv: list[str]) -> int:
+    """submit / status / report / wait：失败的 RuntimeError 按退出码协议翻成 JSON。"""
+    try:
+        return agent_subcommand(cmd, argv)
+    except RuntimeError as e:
+        # 子命令共用退出码协议：4xx/连不上=2，5xx=3；输出仍是单个 JSON
+        print(json.dumps({"status": "failed", "error": str(e)}, ensure_ascii=False))
+        return EXIT_FAILED if "HTTP 5" in str(e) else EXIT_CONFIG
+
+
+def _dispatch_lazy(cmd: str, argv: list[str]) -> int:
+    """面板/桌面要延迟 import（uvicorn / Tkinter mainloop）；其余（含未知）落到 library。
+
+    保持"调用时才 import"：`--help` 与所有零调用子命令都不该为这两个变重。
+    """
+    if cmd == "panel":
+        from .panelcmd import panel_command
+
+        return panel_command(argv)
+    if cmd == "desktop":
+        # 同样延迟：Tkinter 是标准库，但窗口一旦建起来就该由 mainloop 独占主线程
+        from pm.desktop import app_main
+
+        return app_main(argv)
+    return _library_command(argv)
+
+
 def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
-    """子命令分发（保持原先"argparse 之前裸字符串匹配"的结构，只是收成一个函数）。"""
+    """子命令分发（保持原先"argparse 之前裸字符串匹配"的结构，只是收成一个函数）。
+
+    拆成三个函数是复杂度棘轮逼出来的（2026-10-23 加 doctor 时 CC 顶到 11）：
+    分发器每加一个子命令就 +1 分支，而面板/桌面那两支还要延迟 import。
+    名字在**调用时**解析（不是提前塞进表里），所以 `test_dispatch_routes_every_subcommand`
+    的 monkeypatch 语义不变。
+    """
     if cmd in {"submit", "status", "report", "wait"}:
-        try:
-            return agent_subcommand(cmd, argv)
-        except RuntimeError as e:
-            # 子命令共用退出码协议：4xx/连不上=2，5xx=3；输出仍是单个 JSON
-            print(json.dumps({"status": "failed", "error": str(e)}, ensure_ascii=False))
-            return EXIT_FAILED if "HTTP 5" in str(e) else EXIT_CONFIG
+        return _dispatch_agent(cmd, argv)
     if cmd == "history":
         return _history_command(argv)
     if cmd == "calibrate":
@@ -130,17 +164,9 @@ def _dispatch_subcommand(cmd: str, argv: list[str]) -> int:
         return diff_command(argv)
     if cmd == "gate":
         return gate_command(argv)
-    if cmd == "panel":
-        # 延迟 import：panelcmd 拉 uvicorn，而 `--help` 与所有零调用子命令都不该为它变重
-        from .panelcmd import panel_command
-
-        return panel_command(argv)
-    if cmd == "desktop":
-        # 同样延迟：Tkinter 是标准库，但窗口一旦建起来就该由 mainloop 独占主线程
-        from pm.desktop import app_main
-
-        return app_main(argv)
-    return _library_command(argv)
+    if cmd == "doctor":
+        return doctor_command(argv)
+    return _dispatch_lazy(cmd, argv)
 
 
 def main() -> int:
@@ -626,36 +652,8 @@ def _attach_estimated_cost(payload: dict[str, Any], est_min: int, est_max: int) 
 # ---------------------------------------------------------------------------
 
 
-# 真实运行需要 Key 的角色（与 pm.llm.config 的角色表同口径）。
-# 放进闸门是为了识别"只配了角色级 Key"这种合法配置，而不是把它误报成无 Key。
-_KEY_ROLES = (
-    "clarifier",
-    "optimizer",
-    "mockgen",
-    "evaluator",
-    "evaluator_b",
-    "arbiter",
-    "reviser",
-    "comparator",
-    "target",
-)
-
-
-def _missing_key_roles() -> list[str]:
-    """返回还缺 Key 的角色；空列表 = 全局/多 Key 池覆盖，或每个角色都有独立 Key。
-
-    2026-10-22 修：此前只看 `PM_API_KEY` / `PM_TARGET_API_KEY`，于是
-    `.env.example` 明确推荐的 `PM_API_KEYS` 多 Key 池会被判成"没有 Key"；
-    反过来只有 target 一个角色 Key 时又会被放行，直到其它角色构造时才失败。
-    """
-    if (os.getenv("PM_API_KEY") or "").strip():
-        return []
-    pool = [k for k in (os.getenv("PM_API_KEYS") or "").split(",") if k.strip()]
-    if pool:
-        return []
-    return [
-        role for role in _KEY_ROLES if not (os.getenv(f"PM_{role.upper()}_API_KEY") or "").strip()
-    ]
+# Key 覆盖判定收在 pm/keycheck.py（CLI 闸门与 doctor 共用一份；`_KEY_ROLES` /
+# `_missing_key_roles` 这两个别名保留给既有测试与调用方）。
 
 
 def _print_no_key_hint(p: argparse.ArgumentParser, missing: list[str]) -> None:

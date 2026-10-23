@@ -72,6 +72,18 @@ python run.py --task "..." --prompt-file 我的提示词.md --json      # submit
 - 原稿的体检命中项写进报告「原稿体检」节并作为判据交给改进器，
   但**不进** `prompt_quality_issues`（那一列会按轮次注入评委，改进版不该为原稿的毛病挨扣分）。
 
+### 配置自检（零调用）
+
+```bash
+python run.py doctor            # 人读：Python / .env / Key / 角色 / 日志 / 端口 / 常驻服务 / MCP
+python run.py doctor --json     # 单个 JSON 对象，退出码 0=无问题 1=只有警告 2=有错误
+```
+
+- Key 检查认三种合法配置：全局 `PM_API_KEY`、`PM_API_KEYS` 多 Key 池、逐角色
+  `PM_<角色>_API_KEY`；占位符（`sk-xxxx` / `your-key`）按"没配"报错，不会放行到 401。
+- 只查本机：不调用 LLM；`PM_SERVER_URL` 不是本机地址时跳过健康检查，避免出网。
+- 不回显完整 Key（只给尾号），也不会创建日志目录。
+
 ### 用户仓库里的提示词增量门禁（零调用 CI）
 
 ```bash

@@ -835,6 +835,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
     import pm.cli.calibrate as cal
     import pm.cli.check as chk
     import pm.cli.diffcmd as dcmd
+    import pm.cli.doctorcmd as docmd
     import pm.cli.gatecmd as gcmd
     import pm.cli.history as hist
     import pm.cli.library as lib
@@ -857,6 +858,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(chk, "check_command", spy("check"))
     monkeypatch.setattr(dcmd, "diff_command", spy("diff"))
     monkeypatch.setattr(gcmd, "gate_command", spy("gate"))
+    monkeypatch.setattr(docmd, "doctor_command", spy("doctor"))
     monkeypatch.setattr(lib, "_library_command", spy("library"))
     monkeypatch.setattr(pcmd, "panel_command", spy("panel"))
     monkeypatch.setattr(desk, "app_main", spy("desktop"))
@@ -870,7 +872,17 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
         assert fresh._dispatch_subcommand("status", []) == 0
         assert fresh._dispatch_subcommand("report", []) == 0
         assert fresh._dispatch_subcommand("wait", []) == 0
-        for cmd in ("history", "calibrate", "check", "diff", "gate", "library", "panel", "desktop"):
+        for cmd in (
+            "history",
+            "calibrate",
+            "check",
+            "diff",
+            "gate",
+            "doctor",
+            "library",
+            "panel",
+            "desktop",
+        ):
             assert fresh._dispatch_subcommand(cmd, []) == 0
     finally:
         importlib.reload(cli_main)
@@ -881,6 +893,7 @@ def test_dispatch_routes_every_subcommand(monkeypatch: pytest.MonkeyPatch) -> No
         "check",
         "desktop",
         "diff",
+        "doctor",
         "gate",
         "history",
         "library",

@@ -1961,5 +1961,46 @@ R4 `live_run_support_triage_20261014_r4.err:111`，聚合行在 02:24:33（`avg=
   文档只承诺 UTF-8 / GB18030 两类。
 - GitHub Action 仍未加：发布链路本轮由 release 轮处理，Action 需要真 Runner 验证。
 
+## Round 39（2026-10-23，PromptMaster 本产品）—— `run.py doctor`：把「配置对不对」提前到花一分钱之前
 
+**本轮定位**：用户配错 Key / 端点 / 输出目录时，反馈要么等真跑、要么散在 `--preflight`（花钱）
+与报错栈里。doctor 把它变成一张**零调用**检查单。主体由并行会话起草（文件 13:08–14:19 落盘后停住），
+本轮接手做了三件收尾：复杂度棘轮、动态键白名单、计数与覆盖率抄件。
 
+### 检查项与判据
+
+| 项 | 判据 | 边界 |
+|---|---|---|
+| Python / 版本 / 工作目录 | `sys.version_info >= (3,11)` | — |
+| 配置文件 | `load_env_files()` 的返回路径 | 找不到只给 info，不算错 |
+| Key | 全局 / `PM_API_KEYS` 多 Key 池 / 逐角色，**占位符按缺失** | 占位符真跑只会 401，比空值更难查 |
+| 角色配置 | 逐角色 `build_config()` + anthropic 依赖探测 | 构造失败即 error（依赖没装） |
+| 日志目录 | 可写性 + `run_*.json` 体积 | 只检查不创建；>500MB 给清理提示 |
+| 端口 | 8080 / 8765 瞬时 bind | 只 bind 不 listen |
+| 常驻服务 | localhost `/api/health`，0.5s 超时 | `PM_SERVER_URL` 非本机直接跳过（不出网） |
+| MCP | `importlib.util.find_spec("mcp")` | 缺了只 warn |
+
+退出码：0 无问题 / 1 只有警告 / 2 有错误；`--json` 是单个对象，且**不回显完整 Key**（只给尾号）。
+
+### 接手时遇到的三处门禁红（都修了）
+
+1. **复杂度棘轮**：`build_report` CC 13、`_dispatch_subcommand` 涨到 11。
+   ⇒ 拆出 `_dispatch_agent` / `_dispatch_lazy`（名字在**调用时**解析，monkeypatch 语义不变）；
+   `build_report` 是 8 段线性检查、无嵌套，按棘轮规则**登记进台账并写明理由**（拆分只会打散
+   「一次跑完、按固定顺序追加」的语义）。
+2. **动态键白名单**：`PM_<ROLE>_API_KEY` 的构造从 `pm/cli/main.py` 搬到 `pm/keycheck.py`，
+   白名单跟着搬（后缀 `_API_KEY` 已被连接类夹具整类覆盖）。
+3. **计数抄件与覆盖率列**：1970 → 1979（五处）；新增复测⑩（`pm/` 96.40%、去掉 modelhub 96.10%、
+   modelhub 98.35%）。全量被新代码稀释（96.83% → 96.40%），两条地板照旧。
+
+### 验收读数
+
+- 全量 **1979 收集 / 1978 通过 / 1 跳过 / rc=0**——跳过项是 jsdom 未安装的 rejudge 表单 DOM 冒烟
+  （合法跳过，原因由本轮新增的终端汇总钩子印出）。
+- 覆盖率 `pm/` **96.40%**、`pm/modelhub/*` **98.35%**（地板 93）。
+- ruff / format / mypy strict（101 文件）/ eval_prompts 6/6 / selftest / gate 全绿。
+
+### 未做（明说）
+
+- doctor **不验端点连通性**（那要发请求）：`--preflight` 仍是"花小钱冒烟"的唯一入口。
+- 检查分支多与环境相关，未做"假环境"全覆盖；覆盖率因此被稀释，属已披露代价而非回归。

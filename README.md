@@ -44,6 +44,7 @@ python run.py --task "…" --prompt-file 我的提示词.md   # 改已有那版�
 ```
 
 - 想**先看产出长什么样**：[`docs/sample-report.md`](docs/sample-report.md)（假后端产出的**形状示例**：分节结构真实、读数全是桩）。
+- 想**先确认配置对不对**：`python run.py doctor`（零调用：Python / .env / Key / 角色 / 日志 / 端口 / 常驻服务 / MCP 一次说清）。
 - 想**不花钱先跑一遍链路**：`PM_FAKE_BACKEND=progress python run.py --task "…" --fast`。
 - 想**装成命令**（Agent 配置里不写绝对路径）：`pip install . && prompt-master --help`。
 - 退出码是给 Agent 做分支的协议：`0` 达标 / `1` 未达标但已交付 / `2` 参数或配置错 / `3` 运行失败；
@@ -94,7 +95,7 @@ python run.py calibrate --aggregate     # 零调用，纯账本重算
 MCP 接入（13 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
 
 `python run.py --version` 报出版本（与 REST / 面板自报同源）；`python run.py --help` 列出全部参数与**子命令**
-（`submit/status/report/wait/history/calibrate/library/check/diff/gate/panel/desktop`）。
+（`submit/status/report/wait/history/calibrate/library/check/diff/gate/doctor/panel/desktop`）。
 逐条参数面、Agent 调用协议、面板与桌面的接线细节见 [`docs/agent-cli-guide.md`](docs/agent-cli-guide.md)。
 
 ### 在**你自己的仓库**里给提示词上门禁
@@ -127,7 +128,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1970 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；1979 条，无 Key、禁止真实出网）
 extras/             可选附件（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 case_templates/     可直接喂 --cases-file 的领域用例集
 releases/           三服务套件与历史发布快照（不是本产品）
