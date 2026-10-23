@@ -70,6 +70,35 @@ def test_existing_environment_is_never_overridden(tmp_path, monkeypatch) -> None
     assert loaded == [str(cwd_dir / ".env")], "没有检出根 .env 时只该加载 cwd 那份"
 
 
+def test_gbk_dotenv_fallback_in_process(tmp_path, monkeypatch, capsys) -> None:
+    """进程内也走一遍 GBK `.env` 回退：subprocess 用例不计入覆盖率。"""
+    key = "PM_TEST_GBK_DOTENV_INPROC_20261023"
+    cwd_dir = tmp_path / "cwd"
+    cwd_dir.mkdir()
+    (cwd_dir / ".env").write_bytes(("# 中文注释\n" + f"{key}=inproc\n").encode("gbk"))
+    monkeypatch.chdir(cwd_dir)
+    monkeypatch.delenv(key, raising=False)
+    try:
+        loaded = load_env_files(repo_root=tmp_path / "no-checkout")
+        assert os.environ[key] == "inproc"
+        assert loaded and loaded[0].endswith(".env")
+        assert "gb18030" in capsys.readouterr().err
+    finally:
+        os.environ.pop(key, None)
+
+
+def test_undecodable_dotenv_is_skipped_with_a_warning(tmp_path, monkeypatch, capsys) -> None:
+    """二进制/坏编码的 .env：告警并跳过，不能让所有命令启动即崩。"""
+    cwd_dir = tmp_path / "broken"
+    cwd_dir.mkdir()
+    (cwd_dir / ".env").write_bytes(b"\x00\xff\xfe\x81")
+    monkeypatch.chdir(cwd_dir)
+    loaded = load_env_files(repo_root=tmp_path / "no-checkout")
+    err = capsys.readouterr().err
+    assert "无法解码" in err
+    assert loaded, "文件路径仍应记入加载清单（好让调用方知道它被看见过）"
+
+
 def test_installed_style_entry_reads_the_users_cwd_dotenv(tmp_path) -> None:
     """装包态等价场景：入口是用户目录里的脚本，用户的 .env 必须被读到。
 

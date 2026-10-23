@@ -1914,5 +1914,52 @@ R4 `live_run_support_triage_20261014_r4.err:111`，聚合行在 02:24:33（`avg=
 - **日志自动轮转未做**：已披露的运维项（`logs/` 70MB+），留待下一轮。
 - 未 push、未打 tag、未发 PyPI：发布渠道等 owner 决定。
 
+## Round 38（2026-10-23，PromptMaster 本产品）—— 用户旅程二轮：中文编码、Key 配置与输出路径的「最后一公里」
+
+**本轮判据**：继续只修"用户照 docs 做却走不通"的路径，不新增效果结论。重点放在中文 Windows
+用户真实会踩的三类输入：GBK 文本、多 Key / 角色级 Key、把目录误当输出文件。
+
+### 修了什么
+
+1. **GBK / UTF-16 / BOM 输入兜底**（`pm/textio.py`）。此前 `check` / `diff` / `--task-file` /
+   `--cases-file` / 起服务读 `task_file` 都直接按 UTF-8 读，GBK 文件抛 `UnicodeDecodeError` 裸栈、
+   退出码 1（与"未达标但已交付"撞车）。现在：BOM 优先 → UTF-8 → GB18030；回退时 stderr 说明一次，
+   stdout 的 JSON 契约不变；二进制文件给"另存为文本"的人话。
+2. **`.env` 也吃 GBK**：`_load_one_env` 捕获解码错误后按 GB18030 重读；坏编码文件告警并跳过，
+   不让"启动即崩"。`test_env_discovery.py` 用 subprocess + 进程内两条路各钉一次。
+3. **Key 闸门识别正式配置**：`PM_API_KEYS`（多 Key 池）不再被判"没有 Key"；只配部分角色级 Key 时
+   打印缺失角色清单；只有 `PM_TARGET_API_KEY` 不再白放行（其它角色构造时必失败）。守卫 7 条。
+4. **`--out` 开跑前校验**：目录 / 尾部分隔符 / 父路径是文件三类错误在调用任何模型之前退 2。
+   此前会完整跑完一轮再在 `save_artifacts` 抛 `PermissionError`（钱已花、报告没落盘）。
+   同口径补到 `report --out`（父目录自动创建）与 `library --export --out`。
+5. **路径类型错误说人话**：`--task-file` / `--prompt-file` / `--cases-file` 传目录时不再报
+   `Permission denied`，直接说"要的是文件，不是目录"。
+6. **快速档前置**：README 中英双语的"真实运行"块把 `--fast` 放到第一次运行的位置，
+   完整闭环标明 45~102 次调用。
+
+### 验收读数
+
+- 全量：**1970 收集 / 1969 通过 / 1 跳过 / rc=0**（2026-10-23 本机，独占，`--cov=pm` 同趟）。
+- 覆盖率：`pm/` **96.83%**（地板 92）、`pm/modelhub/*` **98.35%**（地板 93）；
+  `bootstrap.py` 100%、`textio.py` 97%、`library.py` / `panelcmd.py` 100%。
+- 静态：CI 同口径 ruff / format / mypy 全绿；复杂度过线（`_library_command` 通过抽出
+  `_export_out_path` 保持 18，未抬台账）。
+- 用户入口实跑：GBK 的 check / task-file / cases-file / diff、多 Key 闸门、`--out` 目录拒绝、
+  `report --out` 嵌套目录、面板端口冲突、`--version` 三入口。
+
+### 事故注记（本轮发生，如实记）
+
+探测 `--out` 目录行为时，有一轮命令**忘了加 `PM_FAKE_BACKEND`**，误打真实端点：
+3 次 `POST`（clarify / optimizer / mockgen 起始）后被杀，未产生 `run_*.json`。
+之后全部改用假后端复现，并清掉本轮临时产物。教训与既有纪律同向：
+**探测"会不会写/会不会花钱"的命令，必须先把后端钉成 fake 或把 Key 清空。**
+
+### 未做 / 未验
+
+- 未跑真实端点，校准/Δ 结论不变；owner 亲判锚点仍缺。
+- 编码回退对 Big5/Shift-JIS 等非 GB18030 家族不做自动识别（会落到 GB18030 或报错），
+  文档只承诺 UTF-8 / GB18030 两类。
+- GitHub Action 仍未加：发布链路本轮由 release 轮处理，Action 需要真 Runner 验证。
+
 
 

@@ -85,6 +85,8 @@ def read_seed_prompt(p: argparse.ArgumentParser, args: argparse.Namespace) -> st
         return ""
     raw = ""
     if raw_file:
+        if Path(raw_file).is_dir():
+            p.error(f"--prompt-file 要的是文件，不是目录：{raw_file}")
         try:
             decoded = read_text_auto(raw_file)
         except OSError as e:
@@ -137,6 +139,8 @@ def resolve_case_mode(
 
 def read_cases_file(p: argparse.ArgumentParser, path: str) -> list[Any]:
     """`--cases-file` 的读取与顶层形状校验（跑批与体检两条路径共用一份）。"""
+    if Path(path).is_dir():
+        p.error(f"--cases-file 要的是文件，不是目录：{path}")
     try:
         decoded = read_text_auto(path)
     except OSError as e:

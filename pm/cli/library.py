@@ -148,6 +148,15 @@ def _library_recommend(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _export_out_path(ns: argparse.Namespace) -> Path:
+    """导出目标路径；目录目标直接退 2（与 argparse 的 p.error 同一档）。"""
+    out = Path(ns.out) if ns.out else log_dir() / "exports" / f"{ns.export}.prompt.md"
+    if out.exists() and out.is_dir():
+        print(f"--out 要的是文件，不是目录：{out}", file=sys.stderr)
+        raise SystemExit(EXIT_CONFIG)
+    return out
+
+
 def _library_command(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="run.py library")
     ap.add_argument(
@@ -195,7 +204,7 @@ def _library_command(argv: list[str]) -> int:
         if not (target.get("prompt") or "").strip():
             print(f"运行 {ns.export} 没有可导出的提示词", file=sys.stderr)
             return EXIT_FAILED
-        out = Path(ns.out) if ns.out else log_dir() / "exports" / f"{ns.export}.prompt.md"
+        out = _export_out_path(ns)
         out.parent.mkdir(parents=True, exist_ok=True)
         header = (
             f"# Prompt 资产（run_id: {target['run_id']}）\n\n"

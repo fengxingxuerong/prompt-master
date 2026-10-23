@@ -174,6 +174,13 @@ def test_prompt_file_pointing_at_a_directory_is_a_clear_error(tmp_path, capsys) 
     assert "不是目录" in capsys.readouterr().err
 
 
+def test_cases_file_pointing_at_a_directory_is_a_clear_error(tmp_path, capsys) -> None:
+    with pytest.raises(SystemExit) as e:
+        check_command(["--cases-file", str(tmp_path)])
+    assert e.value.code == 2
+    assert "不是目录" in capsys.readouterr().err
+
+
 def test_documented_subcommand_count_matches_the_live_parser() -> None:
     """英文 README 写着 "CLI (13 subcommands)"，而活体是 12 个（2026-10-22 实测）。
 

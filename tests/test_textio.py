@@ -97,6 +97,16 @@ def test_check_reads_a_gbk_prompt(tmp_path) -> None:
     assert "提示词体检" in proc.stdout
 
 
+def test_gbk_check_keeps_json_stdout_pure(tmp_path) -> None:
+    """回退提示必须走 stderr：Agent 的 `--json` 契约是 stdout 恰好一个对象。"""
+    f = tmp_path / "提示词.md"
+    f.write_bytes(TEXT.encode("gbk"))
+    proc = _run("check", "--prompt-file", str(f), "--json")
+    payload = json.loads(proc.stdout)
+    assert payload["mode"] == "prompt_check"
+    assert "gb18030" in proc.stderr
+
+
 def test_task_file_gbk_and_missing_file_are_actionable(tmp_path) -> None:
     f = tmp_path / "需求.txt"
     f.write_bytes("让 AI 分析销售数据".encode("gbk"))
@@ -108,6 +118,10 @@ def test_task_file_gbk_and_missing_file_are_actionable(tmp_path) -> None:
     missing = _run("--task-file", str(tmp_path / "nope.txt"), "--dry-run")
     assert missing.returncode == 2, "缺失文件是参数错误，不该裸抛 FileNotFoundError"
     assert "读取失败" in missing.stderr and "Traceback" not in missing.stderr
+
+    as_dir = _run("--task-file", str(tmp_path), "--dry-run")
+    assert as_dir.returncode == 2
+    assert "不是目录" in as_dir.stderr and "Traceback" not in as_dir.stderr
 
 
 def test_cases_file_gbk_is_read(tmp_path) -> None:

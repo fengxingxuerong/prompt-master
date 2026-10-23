@@ -786,6 +786,17 @@ def test_library_export_success(
     assert json.loads(capsys.readouterr().out)["exported"] == str(out)
 
 
+def test_library_export_out_directory_is_config_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _patch_log_dir(monkeypatch, tmp_path)
+    _asset_run(tmp_path, "expdir", "分析销售数据", 8.0)
+    with pytest.raises(SystemExit) as e:
+        cli_library._library_command(["--export", "expdir", "--out", str(tmp_path)])
+    assert e.value.code == cli_support.EXIT_CONFIG
+    assert "不是目录" in capsys.readouterr().err
+
+
 def test_library_export_default_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_log_dir(monkeypatch, tmp_path)
     _asset_run(tmp_path, "exp2", "分析销售数据", 8.0)

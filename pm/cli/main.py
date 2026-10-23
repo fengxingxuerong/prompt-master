@@ -425,6 +425,8 @@ def _require_task(p: argparse.ArgumentParser, args: argparse.Namespace) -> str:
         p.error("需要 --task / --task-file，或用 --selftest 进行自检")
     task: str = args.task
     if args.task_file:
+        if Path(args.task_file).is_dir():
+            p.error(f"--task-file 要的是文件，不是目录：{args.task_file}")
         try:
             decoded = read_text_auto(args.task_file)
         except OSError as e:
