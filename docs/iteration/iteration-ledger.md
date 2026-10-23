@@ -2106,3 +2106,62 @@ logs_usage.py 刻意只读（tests 钉死零写入），doctor 只在 >500MB 提
 
 本轮零凭据、零真实出网；日志归档只在 dry-run 下验过，未对真实 logs/ 执行 `--commit`
 （2091 个可归档证据的移动是 owner 该显式批准的大动作，工具已就绪，何时执行归 owner）。
+
+
+## Round 42（2026-10-23，PromptMaster 本产品）—— v2.3.0 真实发布 + Release 首跑闭环
+
+**本轮定位**：Round 41 把发布通道（release.yml）+ 日志归档（logs_archive.py）做实，但**还差最后
+一步**：release.yml 从未在真实 Runner 上跑过。这一轮用户明确"打真实 tag 触发一次 Release 验证"。
+结果不只验证成功，还**抓到并修掉一个真实 bug**（`if` 里引用 `secrets` —— GitHub 禁止），
+并顺手造出了 v2.3.0 这个**真实可用**的发布点。
+
+### 一、真实 Release 首跑把"配置错误"抓了出来
+
+流程：bump 2.2.0 → 2.3.0（`pm/__init__.py`，唯一事实源）→ 打 `v2.3.0` tag → 推送。
+
+- **run #1 / #2（commit 6b5c442）**：release.yml 触发后 **0 jobs 秒失败**
+  （created_at == updated_at、jobs API 返回空）。这是"workflow 在调度前整体被拒"的典型形态，
+  不是某个 step 挂了 —— 本地 PyYAML 解析完全合法，排除了 YAML 语法问题（顺带确认 gitattributes
+  的 LF 规范化没破坏文件）。
+- **根因**：pypi job 用了 `if: ${{ secrets.PYPI_TOKEN != '' }}`。GitHub 文档明确 —— **`if` 条件里
+  不允许访问 `secrets` context**，该 job 无法求值，连带整个 workflow 秒红。这是 GitHub 广为人知的坑，
+  也是"本地零凭据看不出、必须真实 Runner 才暴露"的典型案例。
+- **修复（commit fa9ca85）**：pypi job 改为**无条件进入**（token 放进 `env`，那里引用 secrets 合法），
+  在真正上传的两步用 `if: env.PYPI_TOKEN != ''` 守卫（`env` 在 step 级 `if` 可用）；未配置时加一个
+  反向守卫 step，把跳过原因写进日志与 job 摘要 —— "没传上"不是无声的。
+
+### 二、真实 Runner 全绿（run #3，commit fa9ca85）
+
+强推 tag `v2.3.0` 到 fa9ca85 后重跑，**四个 job 全 success**：
+
+| gate | 结论 | 证据 |
+|---|---|---|
+| build-check | ✅ | 构建 + `release_pypi.py --check` 校验通过（0 凭据） |
+| artifact | ✅ | 产出 sdist+wheel，版本对账 OK |
+| github-release | ✅ | **Create GitHub Release + 确认生成** 两步都 success |
+| pypi | ✅ 优雅降级 | 无 `PYPI_TOKEN` → Upload 两步正确 `skipped`，跳过原因写入 job summary |
+
+**GitHub Release 真实落盘**（API 核验）：[v2.3.0 release](https://github.com/fengxingxuerong/prompt-master/releases/tag/v2.3.0)
+由 `github-actions[bot]`（自动注入 GITHUB_TOKEN）创建，附两个产物
+`prompt_master-2.3.0-py3-none-any.whl`（496KB，sha256=8052795e…）与
+`prompt_master-2.3.0.tar.gz`（974KB，sha256=503de2f6…），body 正确取自
+`docs/release-notes.md` 的 2.3.0 段落。字节与 build-check/artifact 同源。
+
+### 验收读数
+
+- 发布链路首次在真实 Runner 上端到端走通，且"没配 token 也整条绿"的降级路径被真实触发验证。
+- 本地 pre-commit 8 钩子全绿（release.yml 属 `.github/workflows/`，本就不在钩子 scope 内，无需改钩子）。
+- 测试计数保持 1983 收集 / 1982 通过 / 1 跳过（本轮只动 CI 配置与文档，未加产品用例）。
+
+### 未做（明说）
+
+- **PyPI 仍未上传**：PyPI 是唯一的凭据门槛，从 release.yml 到 twine 命令都已配好，只差 owner 在
+  GitHub Secrets 配 `PYPI_TOKEN`，下次推 `v*` tag 即自动上传 `https://pypi.org/project/prompt-master/`。
+  本轮在无 token 下已验证"跳过路径"正确，但"上传路径"的首跑仍等凭据。
+- **校准基线 34 条**：仍待 owner 亲判（已在 operations.md 标清，见 Round 41）。
+
+### 事故注记（值得记一笔的）
+
+真实 Runner 首跑**没有"测试环境正常、发布环境也正常"的错觉**——它立刻用 0-jobs 秒失败证明
+"本地验证不了 GitHub 配置语义"。`if` 不许用 `secrets` 这类坑只能在真实触发里浮出来。这强化了仓库
+"发布工作流要靠真实 tag 验证、不能靠静态检查下结论"的既有结论。
