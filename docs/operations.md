@@ -330,9 +330,18 @@ github-release / pypi 降级），GitHub Release 已生成。剩两项**仍只�
    > PyPI 是唯一的真凭据门槛；上传路径无需再造（脚本 `--check`、twine `--username __token__`、
    >   env 传递均已见 release.yml 实测跑通）。`TWINE_PASSWORD` 会作为 `PYPI_TOKEN` 的等价后备
    >   （脚本 `release_pypi.py --upload` 两侧都读）。
-2. **校准基线 34 条**：`docs/evaluation.md` 「**待办**」处列出 —— 34 条候选需人工填
-   `human_score` 并置 `confirmed: true`（判据原文见 `docs/evaluation.md`；在那之前
-   `--samples judge_calibration/samples.candidates.json` 以退出码 2 拒绝校准，属设计如此）。
+2. **校准锚点（人工亲判）**：评分方法学与历史读数见 `docs/evaluation.md`。当前**待 owner 动手的
+   有两批**（旧文案"34 条"是历史口径，已过期）：
+   - **主线 25 条**：`samples.candidates.json` 里 `score_form.owner_rejudge.csv` 标「【要你判】」
+     的那 25 行（原 AI 代判锚点，需 owner 判后回填）——
+     `python run.py calibrate --samples judge_calibration/samples.candidates.json --apply-scores judge_calibration/score_form.owner_rejudge.csv`
+     （其余 23 行标「已亲判·不用填」，留空即不变；表可重建：`python scripts/build_owner_rejudge_queue.py`）。
+   - **r4 新批 24 条**：`samples.candidates.r4.json` 的 24 条全部待判，填 `judge_calibration/score_form.r4.csv` 的
+     `human_score` 列后回填——
+     `python run.py calibrate --samples judge_calibration/samples.candidates.r4.json --apply-scores judge_calibration/score_form.r4.csv`。
+   - 判分只答一个问题：「换你看这份输出，值不值 8.0（可上线）」再给 1-10；「评委分参考」是让你先看
+     与直觉不一致的，不是抄它。回填前 `--samples …` 会以退出码 2 拒绝校准，属设计如此。
+   - 回填后看一致性是否翻过「不可估」：`python run.py calibrate --aggregate`。
 
 > 已完成（不再待 owner）：**GitHub Release 首跑** —— v2.3.0 已真实生成
 > （[releases/tag/v2.3.0](https://github.com/fengxingxuerong/prompt-master/releases/tag/v2.3.0)），

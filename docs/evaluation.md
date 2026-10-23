@@ -347,8 +347,10 @@ MAE **0.42**、bias **+0.25**、Pearson r **0.98**、Spearman ρ **0.929**、
 `MIN_PER_DECISION_SIDE = 1` / `MIN_BANDS_COVERED = 3` 不是经验阈值，是"统计量有没有定义"
 的结构下限：线某一侧无样本时一致率恒为 100%、κ 无定义，那种情况下报数比不报更容易骗人。
 
-**待办**：34 条候选需人工填 `human_score` 并置 `confirmed: true`。在那之前
-`--samples judge_calibration/samples.candidates.json` 会以退出码 2 拒绝校准（实测）。
+**待办**：校准锚点需人工亲判，分两批（旧文案"34 条"已过期，见 `docs/operations.md`「尚待 owner 亲决」）：
+主线 `samples.candidates.json` 里 25 条 AI 代判锚点待 owner 改判（`score_form.owner_rejudge.csv`，
+回填 `--apply-scores`）；`samples.candidates.r4.json` 的 24 条全部待判（`score_form.r4.csv`）。
+在那之前 `--samples judge_calibration/samples.candidates.json` 会以退出码 2 拒绝校准（实测）。
 
 ---
 
