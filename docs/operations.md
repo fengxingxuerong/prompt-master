@@ -317,9 +317,19 @@ python run.py calibrate       # ④ 评委可信度校准 + 漂移对比
 `v2.3.0` 已用 release.yml 在真实 Runner 上跑通四条 gate（build-check / artifact /
 github-release / pypi 降级），GitHub Release 已生成。剩两项**仍只差 owner 亲自动手**：
 
-1. **PyPI 上传**：`.github/workflows/release.yml` 已配好 pypi job，但需 owner 在
-   GitHub → Settings → Secrets 配 `PYPI_TOKEN`，之后推 `v*` tag 即自动上传
-   `https://pypi.org/project/prompt-master/`。
+1. **PyPI 上传**：`.github/workflows/release.yml` 已配好 pypi job，上传路径 100% 就绪
+   （已核对：pypi.org 上 `prompt-master` 名字当前**空闲**、pyproject 元数据完整、twine 命令正确）。
+   只需 owner 三步照做：
+   1. GitHub → **Settings → Secrets and variables → Actions** → New repository secret，
+      名字 `PYPI_TOKEN`、值你的 PyPI account-scoped token（PyPI → Account settings → API tokens）。
+   2. **推一个新的 `v*` tag**（如 `v2.3.1` 或下一版）——注意**不能重推已有的 v2.3.0**，
+      那个 tag 的 pypi job 已经跑过并因无 token 跳过；GitHub 不会因配置变更重跑旧 tag。
+   3. 等 Actions → Release workflow 跑完，在 pypi job 确认 `Upload to PyPI` 成功，
+      并访问 `https://pypi.org/project/prompt-master/<版本>/` 核对。
+
+   > PyPI 是唯一的真凭据门槛；上传路径无需再造（脚本 `--check`、twine `--username __token__`、
+   >   env 传递均已见 release.yml 实测跑通）。`TWINE_PASSWORD` 会作为 `PYPI_TOKEN` 的等价后备
+   >   （脚本 `release_pypi.py --upload` 两侧都读）。
 2. **校准基线 34 条**：`docs/evaluation.md` 「**待办**」处列出 —— 34 条候选需人工填
    `human_score` 并置 `confirmed: true`（判据原文见 `docs/evaluation.md`；在那之前
    `--samples judge_calibration/samples.candidates.json` 以退出码 2 拒绝校准，属设计如此）。
