@@ -2213,8 +2213,43 @@ comparator）全部可达 `https://token.sensenova.cn/v1`，延迟 1.7–4.0s �
   仍是已固化结论——合并读数 11 条配对里 **6/11 锚点是仓库示例（分数编造，不可引用）**，且 2×2 最薄格只有 4 条，
   **"这张考卷答不了达标一致性"**。要拿站得住的 MAE/κ，必须先有真锚点（owner 亲判），这条门槛属于 owner，
   不是我能自主消掉的。
-- **端到端"达标优化版本"没拿到**：target 模型空输出使 avg 3.37，严格说该换 target 模型 / 调参再验一轮才算闭环
-   — 这是下一步可做的真机项，但每次实跑都烧额度，等 owner 认可的方向再做更稳。
+- **端到端"达标优化版本"没拿到**：target 模型空输出使 avg 3.37 —— 已按 owner "再验一轮换 target" 的方向补做，
+  见下续（glm-5.2 对比）。
+
+---
+
+## Round 43 续（2026-10-24）—— 换 target 模型再验：空输出问题收敛到 sensenova 单一模型
+
+owner 选"换 target 模型/调参"再验一轮。同一任务、`--fast --yes`，仅把 target 从
+`sensenova-6.8-flash-lite` 换成 `glm-5.2`（`PM_TARGET_MODEL=glm-5.2` + `--target-model glm-5.2`；
+execute 的 target 角色模型由 `PM_TARGET_MODEL`/`PM_MODEL` 决定，`--target-model` 只影响写进提示词的标签）。
+
+### 对比读数（两次都是真机，同一任务）
+
+| 指标 | sensenova-6.8-flash-lite | **glm-5.2** |
+|---|---|---|
+| record | `run_788605b7ab0c` | `run_5a0a77390ecb` |
+| target 空输出（empty_output） | **2** | **0** |
+| untrusted_case_indices | [0, 2]（2/3 空输出被剔） | **[]** |
+| avg_score | 3.37 | **6.57** |
+| min_score | 1.0 | **5.55** |
+| status | early_stopped | early_stopped |
+
+### 结论
+
+- **空输出是 sensenova-6.8-flash-lite 单一模型的稳健性坑**：换 glm-5.2 后 0 空输出，avg 3.37→6.57。
+  此前 avg 3.37 是被空输出系统性砸低的（2/3 用例被判不可信按 1.0 计），不是优化链路的能力上限。
+- glm-5.2 的 6.57 是**真实评级分数**（min 5.55、passed=False）——"这版还不够 8.0 达标"，是真实排序不是假象。
+  这与 `.env` 里 glm-5.2 排序一致性最好（r=0.976）的既有口碑方向一致。
+- 两边都各现 1 次 `revise: 修订返回空内容，已保留上一版`（修订器 role，非 target），是既有已处理路径，
+  `tests/test_fixes.py:188` 已钉。
+
+### 留给 owner / 下一步
+
+- 若要把"达标优化版"跑出来，用 glm-5.2 做 target 是干净起点（无空输出干扰），可试：
+  `PM_TARGET_MODEL=glm-5.2 run.py --task … --yes`（默认完整档 / 或多轮 `--max-iter 3`）。
+- 是否把默认 target 从 sensenova-6.8-flash-lite 切换到 glm-5.2，属产品配置决策，留 owner 定（涉及
+  `PM_MODEL` 或 `PM_TARGET_MODEL` 改动，我不是擅自改 owner 的 .env）。
 
 ### 事故注记（值得记一笔的）
 
