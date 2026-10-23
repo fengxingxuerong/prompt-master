@@ -1,0 +1,166 @@
+# Release —— tag 驱动的发布通道
+#
+# 为什么是一个独立 workflow 而不是塞进 ci.yml：
+#   ci.yml 跑的是"每个 push/PR 都要绿"的守门逻辑（零调用、零出网、绝不上传任何东西）。
+#   发布是**有真实副作用**的操作（打 GitHub Release、可能往 PyPI 传不可撤回的版本），
+#   必须在 tag 上才触发、并且允许在缺凭据时安全地不执行 —— 混进守门流会让"日常红"和"发布红"
+#   搅在一起，谁也看不出一次失败到底挡没挡住发布。
+#
+# 四条 gate 的分工（对齐仓库"注释要讲清为什么"的惯例）：
+#   ① build-check：构建 sdist+wheel 并跑 scripts/release_pypi.py --check 校验，**零凭据**，
+#      任何有 tag 推送都该绿 —— 这是"产物能用"的判定。
+#   ② artifact：把 build-check 校过的那份产物打包成 artifact 供下游消费 —— **只 build 一次**。
+#   ③ github-release：用 GitHub 自动注入的 GITHUB_TOKEN 打 Release 并附产物 + release-notes 段落。
+#      **不需要 owner 另配 secret**，tag 一推就用 `gh` 干活，pypi 没配也不阻断它。
+#   ④ pypi：真正唯一的凭据门槛。只在 secret `PYPI_TOKEN` 配置后才跑；没配就跳过并把原因写进
+#      job summary——它已发布到 GitHub 了，只是还没到 PyPI，不该让整个 tag 红。
+#
+# 版本号唯一权威是 pm/__init__.py::__version__，与 tag 的对账由 build-check 里的
+# scripts/release_pypi.py --check 完成（它在深克隆里用 git describe 对账）。这里 artifact 里
+# 把版本号读出来只用于命名与 body，从不作为可信源。
+#
+# 触发条件：只有推送 `v*` tag 才触发（产品线 v2.x / 套件线 v1.x 都走）。日常 push / PR 走 ci.yml。
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-check:
+    # 零凭据能跑的产物门：先证明"这个 tag 打的包能装能校验"，再谈上传。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 与 ci.yml 同理：release 脚本要对账 tag 与 HEAD，浅克隆里没有 tag 对象
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build + release deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt build twine
+      - name: Build + verify (scripts/release_pypi.py --check)
+        # --check：构建 sdist+wheel 并校验（必须 1 wheel + 1 sdist、wheel 元数据版本与
+        # __version__ 对账、LICENSE 包含等）。不联网、不花真钱 —— 打 tag 这个动作本身就该在
+        # 这里证明"产物可以发"。失败 = 这个 tag 不该存在，红得越早越好。
+        run: python scripts/release_pypi.py --check
+
+  artifact:
+    # 把 build-check 已经证明合格的那份产物打包成 artifact。这里**不再校验**——
+    # 校验只能有一次，否则两份产物可能不同，release 和 pypi 附的就不是我验过的那些字节。
+    needs: build-check
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+      - name: Build sdist + wheel
+        run: python -m build
+      - name: 读版本号给下游（唯一权威 __version__；tag 对账由 build-check 完成）
+        id: ver
+        run: |
+          VER="$(python -c 'import re,pathlib;p=pathlib.Path("pm/__init__.py").read_text(encoding="utf-8");print(re.search(r"__version__\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]",p).group(1))')"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  github-release:
+    # 用 GITHUB_TOKEN（Actions 每次运行自动注入，先打上再解锁权限）打 Release。这是 tag 推送后
+    # 第一件真正能自动完成的事，不等 pypi。用原生 `gh release create`（actions/create-release /
+    # upload-release-asset 均已进入 deprecation）。
+    needs: [build-check, artifact]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 创建 Release + 附产物需要写 contents；只有这个 job 需要。
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: 从 release-notes.md 抽该版本段落作 Release body
+        # body 用仓库里已维护的 docs/release-notes.md，不搞第二份正文。awk 按 `## {ver} ` 头
+        # 到下一个 `## ` 头截取；ubuntu 默认 bash，无编码/转义之虞（release-notes 是 UTF-8 LF）。
+        id: notes
+        run: |
+          V="${{ needs.artifact.outputs.version }}"
+          { echo "# Release $V"; awk -v v="## $V " 'index($0,v)==1{on=1;next} /^## /{on=0} on' docs/release-notes.md; } > /tmp/body.md
+          # 若该版本段落为空（没写），至少保留一行标题，避免发一个无正文的 Release
+          if ! grep -q '.' /tmp/body.md; then echo "# Release $V" > /tmp/body.md; fi
+          echo "body_file=/tmp/body.md" >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release
+        # --notes 用文件；产物改名为 {version}.whl / {version}.tar.gz 附上，
+        # 保证 PyPI 与 GitHub 附的是同一份字节（都来自 dist/ artifact）。
+        run: |
+          V="${{ needs.artifact.outputs.version }}"
+          T="${{ needs.artifact.outputs.tag }}"
+          gh release create "$T" dist/*.whl dist/*.tar.gz \
+            --title "PromptMaster $V" \
+            --notes-file "${{ steps.notes.outputs.body_file }}" \
+            --repo "${{ github.repository }}"
+      - name: 确认 Release 生成
+        run: gh release view "${{ needs.artifact.outputs.tag }}" --repo "${{ github.repository }}"
+
+  pypi:
+    # 唯一的真凭据门槛。PYPI_TOKEN 未配置时跳过并写人话 —— GitHub Release 已先落盘，
+    # 还没到 PyPI 不该让整个 tag 红。
+    #
+    # token 出处在 scripts/release_pypi.py --upload 读 `PYPI_TOKEN`。Actions 侧把 owner 在
+    # repo Settings → Secrets 配的 PYPI_TOKEN 传进去，两边同名，别名漂移就见红。
+    #
+    # 为什么不用脚本的 --upload 而用 --check + 手动 twine：
+    #   --upload 硬要求"工作树干净 + HEAD 上有这个 tag"。但这步继承了 build-check 的产物
+    #   artifact，checkout 默认浅克隆拿不到 tag，会让脚本守卫误红。这里用 --check 验证可执行
+    #   环境本身能校验，再直接把**同一份物理产物**上传 —— 字节与 Release/build-check 一致。
+    needs: [build-check, artifact]
+    runs-on: ubuntu-latest
+    if: ${{ secrets.PYPI_TOKEN != '' }}
+    env:
+      PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps (含 twine)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt build twine
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: 上传前自检（--check 复用 build-check 的校验逻辑）
+        run: python scripts/release_pypi.py --check
+      - name: Upload to PyPI (twine, username=__token__)
+        run: |
+          python -m twine upload --non-interactive --username __token__ --password "$PYPI_TOKEN" dist/*.whl dist/*.tar.gz
+      - name: 打印结果链接
+        run: |
+          V="${{ needs.artifact.outputs.version }}"
+          echo "已发布 https://pypi.org/project/prompt-master/$V/"
+          echo "Tag: ${{ github.repository }} ${{ needs.artifact.outputs.tag }}"

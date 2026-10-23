@@ -2004,3 +2004,105 @@ R4 `live_run_support_triage_20261014_r4.err:111`，聚合行在 02:24:33（`avg=
 
 - doctor **不验端点连通性**（那要发请求）：`--preflight` 仍是"花小钱冒烟"的唯一入口。
 - 检查分支多与环境相关，未做"假环境"全覆盖；覆盖率因此被稀释，属已披露代价而非回归。
+
+
+## Round 40（2026-10-23，PromptMaster 本产品）—— 发布态真实端点 E2E：全链路跑通 + 运维侧首验（本轮为实测轮）
+
+**本轮性质**：前几轮明确"未做真端点复测"（Round 38 未做 / Round 21 TODO `PM_CALL_BUDGET` 真端点），
+用户本轮给出明确指令用 `.env` 里的真实 LLM Key 测试。这是**用户授权的真实花费**，与
+「探测性命令必须钉 fake 或清 Key」的纪律不冲突——那一纪律针对"不确定会干嘛"的探测。
+
+### 配置事实
+
+- 端点：`PM_BASE_URL=https://token.sensenova.cn/v1`（商汤统一网关），`PM_PROVIDER=openai`。
+- 角色模型：evaluator `deepseek-v4-flash`、evaluator_b `glm-5.2`、arbiter/comparator `deepseek-v4-flash`、
+  其余（clarifier/optimizer/mockgen/reviser/target）`sensenova-6.8-flash-lite`。
+- Key：全局 `PM_API_KEY` + `PM_API_KEYS` 三把 Key 池（语序上多个 `_AMD/_NVIDIA/_OPENROUTER/_STEP` 属 modelhub 网关池，非本品角色 Key）。
+
+### 一、`--preflight` 冒烟：全角色端点可达
+
+9 角色（clarifier/optimizer/mockgen/evaluator/reviser/target/evaluator_b/arbiter/comparator）逐次 64-token
+冒烟调用全 ✅，延迟 3.2s–9.0s；comparator 一次疑似限流退避 5s + Key 池轮换后成功。
+
+### 二、完整优化 run `0e4f24e04d2c`：达标交付
+
+- 任务：销售数据分析（`case_templates/sales_analysis.json` 带货真断言），`--samples 2 --max-iter 2 --no-pairwise`。
+- **65 次 LLM 调用**，2 版提示词，第 1 轮修订 v0 5.29 → v1 **8.72**。
+- 聚合：avg **8.72** / min 8.59 / 保守下界 8.29 / **passed=True**；基线臂 avg 6.33 → Δ **+2.39**。
+- 修好 3 条 / 弄坏 0 条（净值 +3）；规则核验 2 条 0 否决。
+- 真实退出码 **0**（顶层 `status=passed` + `_result_exit_code("passed")=0`；命令显示 1 是 PowerShell
+  把 Python stderr WARNING 当 NSL 的管道误报，非 run.py 真实退出码）。
+- 产物：`logs/e2e/e2e_sales.md`（交付报告）+ `logs/e2e/e2e_sales.SKILL.md`（最终优化版提示词）。
+
+### 运维侧首验（这正是真实端点测试的价值）
+
+1. **限流显著**：`deepseek-v4-flash` evaluator 在 case#2 反复 `429`（inference exceeds tpm/rpm limit），
+   Key 池轮换 + 退避 5/10/20s 顶不住几次，3 次撤回后放弃该采样。→ 云高峰并发多角色吃配额。
+2. **evaluator_b（`glm-5.2`）长上下文超时**：短冒烟 3.9s，但完整评估常撞 `OpenAITimeoutError`，
+   削到墙钟预算 600s 仍超（剩 298s 装不下一发完整超时则不重试），**每发白等约 300s** —— 本轮拖到 2h+ 的主因。
+3. **降级路径全按设计生效**：限流/超时下不崩；Key 轮换、优雅降级、仲裁纠正（evaluator_b 误判 4.0 被 arbiter 拉回 8.85）、
+   schema 形状修复、pydantic 重试、质量门重试（约束超载 10>8 与定界符不配平各一次）全部触发且成功。
+4. **披露诚实**：报告如实标注「3/4 例有评委缺席，那些分数不是双评委共识」，并把缺席原因列进运行期错误。
+
+### 未做（明说）
+
+- 实测轮**不新增产品代码**，无覆盖率/静态变化；校准锚点仍缺 owner 亲判。
+- evaluator_b 长上下文超时未优化（换更快的模型 / 调大 Key 池 / 错峰是可选动作，非本轮职责）。
+- 未 push / 未发 PyPI / 未发 GitHub Release：发布渠道等 owner 决定（PyPI 需 token、Release 需真实 Runner）。
+
+### 事故注记（无）
+
+本轮全程遵守纪律：这是用户授权的真花费，且用了 `PM_CALL_BUDGET` 无（未设，靠任务规模即有界）；
+没有擅自探测"会不会写/花钱"的命令。
+
+
+## Round 41（2026-10-23，PromptMaster 本产品）—— 发布通道工具化 + 日志归档落地
+
+**本轮定位**：Round 40 真端点测试回答"发布态能不能用"（能）。这一轮把"发布剩下那两截"和
+"日志持续膨胀"这两件**欠着但仓库内可做**的事补上，仍不碰凭据/owner 才能做的部分。
+
+### 一、`release.yml`：tag 驱动的发布工作流
+
+之前发布全靠手动（打 tag → 本地 build → 手动传）。现在有一个独立 workflow，只在 `v*` tag
+推送时触发，四条 gate 分工（对齐 ci.yml 的"注释讲清为什么"惯例）：
+
+- **build-check**：构建 sdist+wheel 并跑 `release_pypi.py --check` 校验，零凭据，任何 tag 都该绿。
+- **artifact**：把校验过的那份产物打成 artifact，供下游复用（只 build 一次，避免两份产物漂移）。
+- **github-release**：用 GitHub 自动注入的 `GITHUB_TOKEN` 打 Release 并附产物 +
+  `release-notes.md` 对应版本段落。**不需要 owner 另配 secret** —— 这是 tag 推送后能真自动的部分。
+- **pypi**：唯一真凭据门槛。`secrets.PYPI_TOKEN` 未配则跳过（写人话），不放行也不阻 GitHub Release。
+
+设计要点：GitHub Release 与 PyPI 解耦（一个成功不挡另一个）；pypi 用 artifact 同一份物理字节，
+保证 PyPI / Release / build-check 三者字节一致。
+
+### 二、`scripts/logs_archive.py`：日志归档（移动 + 留档，绝不删除）
+
+`operations.md` 早有"日志会膨胀，定期归档 run_*/report_*"这句话，但**一直没有工具**。
+logs_usage.py 刻意只读（tests 钉死零写入），doctor 只在 >500MB 提示。缺"真正归档"这一步。
+
+- 只移动**超龄（默认 >30 天）且未被 `docs/` 按 run id 点名**的 `run_*.json` / `report_*.md`
+  进 `logs/archive/YYYY-MM/`，内容逐字不变（换目录，不删字节），并写 `manifest.json` 留档可回查。
+- **默认 dry-run**，`--commit` 才移动（同 release 的 --check/--upload 先验精神）。
+- 不碰台账（事实源）、缓存（功能依赖）、死重（logs_usage 只读列出、owner 手动整删）。
+- 配套 `tests/test_logs_archive.py` 钉三条安全承诺：dry-run 零写入 / commit 不改字节 / 文档引用不归档。
+
+### 验收读数
+
+- 全量 **1983 收集 / 1982 通过 / 1 跳过 / rc=0**（跳过：jsdom 缺失的 rejudge 表单 DOM 冒烟，合法）。
+  新增用例：`tests/test_logs_archive.py` 4 例、`tests/test_logs_usage.py` 等既有全绿。
+- 抄件同步：README.md / README.en.md / operations.md / .pre-commit-config.yaml 的测试计数
+  1979 → 1983（test_packaging 的 `test_test_count_copies_match_the_live_collection` 钉住）。
+- 相关门禁守卫全绿：complexity ratchet / precommit gate set / ledger retention claims / GBK console。
+
+### 未做（明说，仍是凭据/owner 门槛）
+
+- **PyPI 上传**：需 owner 在 GitHub Secrets 配 `PYPI_TOKEN`（或本地干一票）。release.yml 已就绪但
+  没 token 前 pypi job 自动跳过。
+- **GitHub Release 真实触发**：release.yml 配好了，但要 owner 真打一次 tag 推上去才有第一次实体
+  运行验证（本地零凭据无法证明"runner 上真能跑"）。
+- **校准基线 34 条**：仍需 owner 亲判 `human_score` + `confirmed:true`（evaluation.md 判据）。
+
+### 事故注记（无）
+
+本轮零凭据、零真实出网；日志归档只在 dry-run 下验过，未对真实 logs/ 执行 `--commit`
+（2091 个可归档证据的移动是 owner 该显式批准的大动作，工具已就绪，何时执行归 owner）。
