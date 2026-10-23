@@ -2165,3 +2165,59 @@ logs_usage.py 刻意只读（tests 钉死零写入），doctor 只在 >500MB 提
 真实 Runner 首跑**没有"测试环境正常、发布环境也正常"的错觉**——它立刻用 0-jobs 秒失败证明
 "本地验证不了 GitHub 配置语义"。`if` 不许用 `secrets` 这类坑只能在真实触发里浮出来。这强化了仓库
 "发布工作流要靠真实 tag 验证、不能靠静态检查下结论"的既有结论。
+
+## Round 43（2026-10-24，PromptMaster 本产品）—— 全面真机 LLM 实测（owner 指定的"全方面测试用 LLM"）
+
+直接要求是"这个项目开始全方面的测试使用 llm 来"，owner 圈定三面：真实 LLM 全面实测、
+补强 LLM 辅助测试用例、聚焦校准 49 条。本轮把前两面做掉并给出校准的现状结论。
+
+### 一、真实端点接线（`run.py --preflight`，零写盘的真实冒烟）
+
+9 个角色（clarifier / optimizer / mockgen / evaluator / reviser / target / evaluator_b / arbiter /
+comparator）全部可达 `https://token.sensenova.cn/v1`，延迟 1.7–4.0s 区间，无错误签名、无失败。
+
+### 二、节点提示词真实行为评测（`eval_prompts.py --live`）——抓到一个确定性夹具缺陷
+
+- 真实端点上首跑 **5/6**，唯一失败是 `reviser/针对反馈定向修订`，且两次复现一致、原因相同：
+  **质量门未通过（含抑制型规则「停止处理」）**。
+- 零调用归因：该用例的 `previous_prompt` **自带**「输入含矛盾信息时指出矛盾并停止处理」，
+  命中 `check_prompt_quality` 的 `suppressive_rule` 闸（闸的路径：抑制型条款 8.75→7.88 + 与骨架要求冲突）。
+  `evaluation_feedback` 只点名数据编造/缺表格/结论超限，reviser 没有理由改动那条，输出必残留 → 必红。
+  **这是用例夹具与硬规则不同步，不是端点抖动。**
+- 修法（commit `301a42d`，仅 `prompt_eval/cases.json` 一处）：把该条款改成非抑制写法
+  「指出矛盾并标注存疑，其余数据仍继续输出」，保留"数据矛盾要指出"的用例本意。
+- 改后验证：夹具自身质量门 ok=True；离线结构契约 6/6；真实端点全量 **6/6**；
+  `test_prompt_eval / test_quality / test_promptgate` 共 139 项全绿。
+
+### 三、真实端到端闭环（`run.py --task "…销售数据…" --fast --yes`）——目标模型空输出稳健性问题
+
+- `--fast`（关基线/盲评、单采样、1 轮）：11 次 LLM 调用，`run_788605b7ab0c.json`。
+- 结果：`early_stopped`（iteration 0）、聚合 `avg=3.37 / min=1.0 / passed=False`、`untrusted_case_indices=[0,2]`。
+- 3 个 `empty_output`：**目标模型 `sensenova-6.8-flash-lite` 在 3 条用例里 2 条返回空内容**（未抛异常），
+  且 `PM_TARGET_MAX_TOKENS=24000`（不算低）仍复现 → 不是 token 上限，是**该模型在这次任务上的稳健性坑**。
+  它拖垮整个闭环的达成判定（avg 3.37），本轮无法证明"优化闭环能拿到 ≥8.0 的达标版"。
+- 附：`[evaluator]` 限流退避 / Key 池轮换（池大小 3）自动恢复机制在真实端点上确实生效；
+  `PM_FORCE_JSON_CHANNEL=1` 下各角色走文本通道再解析（json_fallback），晚但稳。
+- 离开的第一小时那个"跑挂"是**交互确认问题**：真实模式默认要先报价要 y/N，非交互 shell 会挂，
+  补 `--yes` 即可，不是 bug。
+
+### 验收读数
+
+- 真机接线全角色可达；`eval_prompts --live` 从一个确定性假红修到全绿 6/6（附 139 项回归全绿）。
+- 端到端闭环真实跑通并留痕：给出一条**有实证的、target 模型空输出**的稳健性发现——这正是假后端
+  永远测不出来的那类问题（`PM_FAKE_BACKEND` 从不产生空输出）。
+
+### 未做（明说）
+
+- **校准 49 条没能在本轮被"推进"**：`run.py calibrate --samples judge_calibration/samples.candidates.json --aggregate`
+  仍是已固化结论——合并读数 11 条配对里 **6/11 锚点是仓库示例（分数编造，不可引用）**，且 2×2 最薄格只有 4 条，
+  **"这张考卷答不了达标一致性"**。要拿站得住的 MAE/κ，必须先有真锚点（owner 亲判），这条门槛属于 owner，
+  不是我能自主消掉的。
+- **端到端"达标优化版本"没拿到**：target 模型空输出使 avg 3.37，严格说该换 target 模型 / 调参再验一轮才算闭环
+   — 这是下一步可做的真机项，但每次实跑都烧额度，等 owner 认可的方向再做更稳。
+
+### 事故注记（值得记一笔的）
+
+`eval_prompts --live` 的 reviser 红不是模型问题，是**用例输入自带被硬规则禁止的条款**——这提醒：
+"夹具要自洽，不能测试一个本身就踩着自己判据的输入"。零调用归因（对夹具自己跑 `check_prompt_quality`）
+比对着日志猜快得多，且不烧钱。
