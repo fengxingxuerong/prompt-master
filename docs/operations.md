@@ -312,6 +312,19 @@ python run.py calibrate       # ④ 评委可信度校准 + 漂移对比
   （台账原则不动、缓存靠清除/重跑、死重由 `scripts/logs_usage.py` 只读列出后 owner 手动整删）。
 - 配套守卫：`tests/test_logs_archive.py`（dry-run 零写入 / commit 不改字节 / 文档引用不归档）。
 
+### 尚待 owner 亲决（2026-10-23 状态，代码/工具均已就绪）
+
+以下三项**只差一个不在仓库内、必须由 owner 亲自动手的决定**，代码本身已配好，跑不起来不是缺陷：
+
+1. **PyPI 上传**：`.github/workflows/release.yml` 已配好 pypi job，但需 owner 在
+   GitHub → Settings → Secrets 配 `PYPI_TOKEN`，之后推 `v*` tag 即自动上传
+   `https://pypi.org/project/prompt-master/`。
+2. **GitHub Release 首跑**：release.yml 的 github-release job 用自动注入的 `GITHUB_TOKEN`，
+   推一个 `v*` tag 就会生成 Release；首次运行要在真实 Runner 上验证一遍（本地无法证明）。
+3. **校准基线 34 条**：`docs/evaluation.md` 「**待办**」处列出 —— 34 条候选需人工填
+   `human_score` 并置 `confirmed: true`（判据原文见 `docs/evaluation.md`；在那之前
+   `--samples judge_calibration/samples.candidates.json` 以退出码 2 拒绝校准，属设计如此）。
+
 ### 手动跑真实节点评测（GitHub Actions）
 
 `.github/workflows/eval-prompts-live.yml` 是**手动触发**的工作流（Actions → 「节点提示词真实评测（手动触发）」→ Run workflow）。
