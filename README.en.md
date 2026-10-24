@@ -116,7 +116,7 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 
 | Item | Value |
 |---|---|
-| Tests | **1,983 collected**, no API key, no live network |
+| Tests | **1,984 collected**, no API key, no live network |
 | Coverage | gated at floor 92 on `pm/` and floor 93 on `pm/modelhub/*`; measured values drift per round — the only maintained table lives in `docs/operations.md` (this README no longer copies snapshots) |
 | CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
 | Interfaces | CLI (13 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |

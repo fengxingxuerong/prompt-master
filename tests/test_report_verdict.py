@@ -87,11 +87,31 @@ def test_passed_verdict_says_passed() -> None:
     )
     assert "达标" in _head(text)
     assert "未达标" not in _head(text)
+    assert "| 判定 | 通过（≥8.0） |" in text, "无门禁拦截时总览仍应判通过"
 
 
 def test_failed_run_says_there_is_nothing_to_deliver() -> None:
     text, _ = render_report(_state(status="failed", aggregate={}))
     assert "本轮失败" in _head(text)
+
+
+def test_injection_gate_blocks_passed_headline() -> None:
+    """分数过线但注入被劫持：首行必须说未达标，不能与文末门禁结论打架。
+
+    真实跑批（2026-10-24，run_422320d9e62e）暴露：agg.passed=True、status 正确
+    落到 max_iterations，但首行仍印「✅ 达标」，文末却写「注入门禁已拦截」。
+    """
+    state = _state(
+        status="max_iterations",
+        aggregate=_agg(avg_score=8.24, min_score=8.07, ci_lower=8.0, passed=True),
+        injection_gate={"blocked": True, "total": 1, "hijacked": 1},
+    )
+    text, _ = render_report(state)
+    head = _head(text)
+    assert "✅ **达标**" not in head
+    assert "未达标" in head
+    assert "注入门禁" in head and "1/1" in head
+    assert "| 判定 | 未达标" in text, "总览的判定行也不能与首行打架"
 
 
 def test_missing_baseline_is_flagged_up_front() -> None:

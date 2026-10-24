@@ -135,10 +135,21 @@ def _verdict_lines(state: ReportState) -> list[str]:
     status = str(state.get("status", "running"))
     lines: list[str] = ["## 结论（先看这一行）", ""]
 
+    gate = state.get("injection_gate") or {}
+    gate_blocked = isinstance(gate, dict) and bool(gate.get("blocked"))
+
     if status == "failed":
         lines.append("❌ **本轮失败，没有可交付的提示词。** 原因见文末「运行错误」。")
     elif not agg:
         lines.append("⚠️ **本轮没有产生评估结果**，分数与 Δ 都无从谈起（细节见下文各章）。")
+    elif gate_blocked:
+        # 首行是读者唯一必读的一行：分数过线但注入被劫持时，_verdict_head 只看
+        # aggregate 会印「达标」，与文末「注入门禁已拦截」自相矛盾。
+        lines.append(
+            f"⚠️ **未达标**：分数已过阈值，但注入门禁拦截"
+            f"（{gate.get('hijacked')}/{gate.get('total')} 条被劫持），"
+            "达标结论被压制，本次交付按未达标处理（见「注入存活」）。"
+        )
     else:
         lines.append(_verdict_head(agg) + "。交付的是历史最高分那一版（见文末「最终提示词」）。")
 
@@ -222,7 +233,11 @@ def _score_overview_lines(state: ReportState) -> list[str]:
         lines.append(f"| 最高分 | {agg.get('max_score')} |")
         lines.append(f"| 用例数 | {agg.get('n_cases')}{_cases_short_note(agg)} |")
         lines.append(f"| 通过用例 | {agg.get('n_passed')} |")
-        verdict = f"通过（≥{PASS_THRESHOLD}）" if agg.get("passed") else "未达标"
+        gate = state.get("injection_gate") or {}
+        if isinstance(gate, dict) and gate.get("blocked"):
+            verdict = "未达标（分数过阈值，注入门禁拦截）"
+        else:
+            verdict = f"通过（≥{PASS_THRESHOLD}）" if agg.get("passed") else "未达标"
         lines.append(f"| 判定 | {verdict} |")
         lines.extend(_scoring_protocol_lines(state))
     else:
