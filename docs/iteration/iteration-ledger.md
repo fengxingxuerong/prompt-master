@@ -2458,3 +2458,31 @@ optimize: [optimizer] 墙钟预算未用尽即停（预算 600s，已用 302s，
 至此项目能力的**机制面/工具面**已完整验证（selftest、1983 测试、doctor、preflight、check、history、
 library、gate、diff、mermaid、MCP 14 工具、假后端整图 32 调用到 passed）；**效果面**保持续五/续六的
 诚实判定，留给 owner 定向。
+
+---
+
+## Round 43 续八（2026-10-24）—— 补验：改进分支、`--json` 协议、入参校验与退出码
+
+续七之后再补三个尚未验的面（全部零成本）：
+
+1. **改进分支（`--prompt-file`）——与"从零生成"是两条路**
+   `PM_FAKE_BACKEND=progress run.py --task … --prompt-file logs/_orig_prompt.md --fast --max-iter 2`
+   ⇒ **EXIT:0**、record `run_ff5f04e9ed97`：`status=passed`、`2/2` 轮、`calls=32`。
+   报告写明 **"模式：原稿改进（输入原稿 81 字符；基线 = 用户原稿，Δ 读作「比你自己的版本好多少」）"**，
+   版本表 `v0 | 6.33 | 改进自用户原稿`。⇒ **"改进用户已有原稿"这条支路确实独立成立**，且基线语义
+   （Δ = 相对你自己的原稿）正确。同理，`v0` 被标成"改进自用户原稿"而非"从零生成"。
+2. **`--json` 协议（Agent/CI 可消费）**
+   - `run.py --task … --dry-run --json` ⇒ 合法 JSON（mode/cases/samples/judges/max_iterations/
+     baseline_enabled/pairwise_enabled/estimated_llm_calls/notes），RC=0。
+   - `console history --last 2 --json` ⇒ 结构化 JSON，含 `method` 说明（Δ 均值±1.96×SE、分组键含
+     judge_gen、崩溃臂不入统计但在 excluded_untrusted 点名），RC=0。
+3. **入参校验 + 退出码协议**
+   - `--task "x"`（1 字，低于 4 字下限）⇒ 明确报错"需求描述长度需在 4-8000 字之间"，**RC=2**
+     —— 与文档退出码协议（2=参数或配置错误）一致。⇒ 校验在开跑前拦住，且退出码可用于 CI 判定。
+
+### 结论
+- 三个补验面全通过；**退出码协议（0/1/2/3）在真实执行路径上被逐一观察到**：
+  0=达标（假后端 passed）、1=未达标已交付（真机 4.50 与续四 8.24）、2=参数错误（1 字任务）、
+  以及 3=运行失败（续三 optimizer 超时那次）。
+- 能力验证至此覆盖面已足够：**合同面（契约/协议/退出码/JSON）+ 机制面（整图/测试）+ 工具面（9 个子命令）
+  + 端点面（preflight）全部走通**。本轮依旧零成本，未烧额度。
