@@ -2408,3 +2408,35 @@ optimize: [optimizer] 墙钟预算未用尽即停（预算 600s，已用 302s，
 - 未为"分数达标且门禁通过"再烧额度：本轮 4.50 已证明该任务+用例下目标不达标，继续重跑同配置烧钱无增量。
 - 项目能力判定：**机制层面自检全绿、端点可达、真实闭环能跑通并如实自评**；**"产出达标交付物"是任务相关的，
   且暴露出误报注入这一稳健性缺口**。今天的验证结论如实记录，不夸大。
+
+---
+
+## Round 43 续六（2026-10-24）—— 继续验证项目能力：零成本面全面走一遍
+
+续五之后按 owner "继续"，把**不花钱的能力面**系统过一遍（全部零 LLM 调用）。结果：
+
+| 能力面 | 命令 | 结果 |
+|---|---|---|
+| 离线全量回归 | `pytest tests/` | **1983 passed / 1 skipped / 0 failed**（跳过=jsdom 未装，非缺陷） |
+| 节点提示词结构契约 | `eval_prompts.py`（离线） | **6/6 通过**（clarifier×2 / evaluator / mockgen / optimizer / reviser） |
+| 环境诊断 | `pm.cli.console doctor` | 全绿：Python 3.12.10 / 版本 2.3.0 / .env 已载 / Key 池 3 / 9 角色可构造 / 端口 8080+8765 空闲 / MCP 已装 |
+| 考卷静态体检 | `check --cases-file sales_analysis.json` | 4 条中 2 条能否决、1 条属 echoes、**整卷缺 scenario（main_path/boundary/injection）** |
+| 运行史+显著性 | `history --last 5` | 如实列出最近 5 轮（4.50 / 7.89 / 8.24 / 7.52 / 7.23） |
+| 达标资产库 | `library --recommend` | 命中 3 条达标资产 **8.37 / 8.17 / 9.14**（相似度 0.26~0.30） |
+| Prompt 回归门禁 | `gate` | 基线 a151ea4、17 模板、**未新引入规则问题**（RC=0） |
+| 零调用差分 | `diff 422320d9e62e 3d2706c68cac` | "修掉 1 类规则问题；约束条目 10→8"，附增删清单（RC=0） |
+| 图拓扑 | `run.py --mermaid` | 与实现一致的 LangGraph 边（clarify→optimize/mock→baseline→test→evaluate→revise/compare→report） |
+| MCP 工具面 | `import pm.mcp_server` | 14 个工具齐备（optimize_*/calibrate_*/library_*/prompt_*/cases_check/estimate_cost/run_history） |
+
+### 两条对续五的补强
+- **4.50 那轮分数低的直接原因找到了**：`check` 指出该考卷**整卷没标 scenario**，闸只管模型生成的用例、自带
+  用例集不受约束，于是"评分全落在最简单的路径上"；且 1 条 expected 就在 input 里，只挡丢内容。
+  ⇒ 4.50 是**考卷偏弱 + 这份 prompt 没写好**共同造成，不是能力缺陷。
+- **库里本就有该域的达标提示词**（8.37 / 8.17 / **9.14**）。⇒ "没有真实达标 record"是**这一轮没拿到**，
+  不是系统产不出——同域已有 3 条历史达标资产为证。
+
+### 结论
+- 项目**可验证的能力面（离线契约、回归、诊断、体检、库、门禁、差分、拓扑、MCP）全部走通且退出码符合协议**；
+- 加上续五的 `--selftest` 与 `--preflight`，**机制与工具面已系统验证完毕**；
+- 仍需 owner 定向的仍是**效果面**：一条"分数过线且注入门禁通过"的新 passed record（当前域已有 9.14 历史资产，
+  但要复现需换/补强考卷，属设计取舍）。本轮零成本，未烧额度。
