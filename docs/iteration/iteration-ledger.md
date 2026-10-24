@@ -2486,3 +2486,35 @@ library、gate、diff、mermaid、MCP 14 工具、假后端整图 32 调用到 p
   以及 3=运行失败（续三 optimizer 超时那次）。
 - 能力验证至此覆盖面已足够：**合同面（契约/协议/退出码/JSON）+ 机制面（整图/测试）+ 工具面（9 个子命令）
   + 端点面（preflight）全部走通**。本轮依旧零成本，未烧额度。
+
+---
+
+## Round 43 续九（2026-10-24）—— 最后一个大面：常驻服务异步链（submit/status/wait/report）
+
+续八之后再验 CLI 文档强调的"长任务走 `submit` 别占终端"这条能力（零成本，`PM_FAKE_BACKEND=progress`，
+验完即停）：
+
+1. **起服务**：`run_server.py --port 8080` ⇒ Uvicorn 起、`/api/health` 返回
+   `{"status":"ok","service":"prompt-master"}`。日志有"未设置 PM_API_TOKEN，只监听 127.0.0.1"的提示。
+2. **异步提交**：`console submit --task … --max-iter 1` ⇒ **秒回** `{"run_id":"c86167ed34c0", …}`（RC=0），
+   不占终端。
+3. **查状态**：`console status c86167ed34c0` ⇒ 全量 JSON：`aggregate`（avg/min/max/n_passed/ci_lower/
+   jitter_provenance…）、`prompt_version_list`、`evaluations`（逐用例五维）、`baseline_aggregate`、
+   `pairwise`、`trace`（逐节点事件）。RC=0。
+4. **阻塞到终态**：`console wait c86167ed34c0` ⇒ 终态 JSON **并直接带回完整渲染报告**。RC=0。
+5. **取报告落盘**：`console report c86167ed34c0 --out logs/_async_report.md` ⇒ 返
+   `{"report_path": …}`，文件正确落盘。RC=0。
+6. **收尾**：验完**立即停服务**，`Test-NetConnection 127.0.0.1:8080` = False（端口已释放）。
+
+### 本轮顺带确认的"诚实护栏"
+- 假后端跑出的报告**首部自带横幅**："⚠️ 运行通道：**假后端（PM_FAKE_BACKEND）**——分数、Δ 与成本是链路
+  形状的演示输出，**不是真实评测读数**，勿当验收或对比依据引用"。⇒ 演示模式不会被误读成真实结论。
+- 同一份报告里还如实写了：基线对照（6.33→9.0，Δ+2.67）、**注入存活**（1 条注入用例、0 条被劫持，
+  基线侧 0/1）、版本表（v0 7.33 → v1 9.0）、逐条对照（修好 2 条 / 弄坏 0 条）、评委校准披露
+  （11 条人工锚点、聚合偏差 +0.29、95% CI −0.60~+1.09）。
+
+### 结论
+- **异步长任务链（起服务→提交→查状态→阻塞等待→取报告→停服务）完整走通**，四项查询返回结构一致、
+  退出码均 0。这是此前唯一没验过的大面。
+- 至此项目能力验证覆盖面：**合同面 + 机制面 + 工具面（9 子命令）+ 服务面（异步链）+ 端点面**全部走通；
+  **效果面**仍是续五/续六的诚实判定（任务相关，暂无新 passed record）。全程未烧额度（本轮全假后端）。
