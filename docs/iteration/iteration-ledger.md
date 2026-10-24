@@ -2440,3 +2440,21 @@ optimize: [optimizer] 墙钟预算未用尽即停（预算 600s，已用 302s，
 - 加上续五的 `--selftest` 与 `--preflight`，**机制与工具面已系统验证完毕**；
 - 仍需 owner 定向的仍是**效果面**：一条"分数过线且注入门禁通过"的新 passed record（当前域已有 9.14 历史资产，
   但要复现需换/补强考卷，属设计取舍）。本轮零成本，未烧额度。
+
+---
+
+## Round 43 续七（2026-10-24）—— 收官证据：假后端跑通整张图并达终态 passed
+
+续六末尾补一条零成本但**最有说服力的机制证据**：用 CLI 文档里那条"本地无 Key 路径"跑完整流程。
+
+- 命令：`PM_FAKE_BACKEND=progress run.py --task "让 AI 分析销售数据…" --fast --max-iter 2`（**零 LLM 调用**）
+- 结果：**EXIT:0**（=达标交付），record `run_49cb7d3936b8`：`status=passed`、`iteration=2/2`、
+  `llm_calls=32`、`avg=9.0 / min=9.0`；报告首行 `状态：passed`。
+- 意义：这证明**整张图两轮迭代全程走得通**——generate→mock→baseline→test→evaluate→revise→test→evaluate
+  →compare→report，且终态判定、交付、报告渲染在"达标"这支分支上也正确（对照续五的"未达标"分支）。
+- **必须说清的边界**：假后端给的是**合成分 9.0**，它**只证明机制跑得通、退出码与终态正确**，
+  **不证明优化效果**。真实效果只有真机跑（续三~续五）看得出，而真机结论是任务相关。
+
+至此项目能力的**机制面/工具面**已完整验证（selftest、1983 测试、doctor、preflight、check、history、
+library、gate、diff、mermaid、MCP 14 工具、假后端整图 32 调用到 passed）；**效果面**保持续五/续六的
+诚实判定，留给 owner 定向。
