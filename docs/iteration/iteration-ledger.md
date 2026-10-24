@@ -2289,3 +2289,36 @@ owner 选"用 glm-5.2 把达标优化版（≥8.0）跑出来"。后台发了四
   或换更快的评委 B，任一都能把墙钟压在窗口内。
 - 空输出问题的治理结论已成立（Round 43 续）：sensenova 是单一问题源，glm 是干净 target 起点。
 - 换目标模型/评委模型到 .env 属 owner 配置决策，我没有擅改。
+
+---
+
+## Round 43 续三（2026-10-24）—— 能跑完的轻跑也失败：卡点在 optimizer 的单发超时，不是环境杀
+
+续二之后、按 owner "真实测试为主线" 的方向，追"达标记录"的轻跑（`--fast PM_JUDGES=1 --max-iter 1`，
+min 9/max 23 calls，约 5~6 分钟）**这次跑完了**（report 已写 `logs/_e2e_glm_fore.md`，record `run_9db72608e9ca.json`）
+——**没有再被环境杀**。但它是 `status: failed`，**只用了 2 次 LLM 调用就在 optimizer 一步失败**：
+
+```
+optimize: [optimizer] 墙钟预算未用尽即停（预算 600s，已用 302s，剩 298s 装不下一发完整超时
+⇒ 不再重试；已发 1 次真实请求）。最后一次错误：Request timed out.
+```
+
+### 结论（本轮最扎实的一条）
+
+- **完整闭环真正的卡点终于锁定**：不是环境杀，是 **optimizer（推理型、长提示词 + evaluator 全程评估反馈）
+  的单发调用在 `token.sensenova.cn` 上可能超过有效超时**（本例用掉 302s 后 `Request timed out`）。
+  墙钟预算逻辑在「已用 > 一发完整超时」后拒绝再重试（剩 298s 装不下再等一发），于是整 **run 直接 failed**。
+- 这解释了为什么之前"后台长任务全被杀"其实也可能叠加了这一层——optimizer 一步就 timeout，加上双评委慢，
+  综合把完成时间顶爆窗口。**单点根因是 optimizer 调用太慢/超时，不是并发后台被看门狗掐**（至少不是唯一根因）。
+- 与 `.env` 注释自洽：核心就是「推理模型单次可达 2-4 分钟 + PM_TIMEOUT/墙钟预算不够一次完整等待」。
+  用 `--dry-run` 确认 `--fast --max-iter 1` 预估 9~23 calls，合理且应能在 10 分钟内完成——理论完毕，
+  实测卡在单发调用本身。
+
+### 未做（如实说）/ 下一步（全属 owner 配置层面）
+
+- 这份 record 仍**不是达标 record**（failed 在 optimizer，无 aggregate、无交付）。
+- 要真跑出完整达标 record，前置是调 owner 的 `.env`（**不在我擅自改的范围内**）：
+  1. 调大该角色 `PM_OPTIMIZER_MAX_TOKENS` / 墙钟预算 / `PM_TIMEOUT`，让它装得下"一发完整等待+重试"；
+  2. 或把 optimizer 换到更快的型号/端点（此刻 optimizer 用的是 `PM_MODEL=sensenova-6.8-flash-lite`）。
+- 真机测试的价值已兑现：空输出（sensenova target）→ 修掉、换 glm 达标级读数（9.05）、并首次把完整闭环卡点
+  精确定位到 optimizer 单发超时。这些都是假后端永远不会给的信息。
