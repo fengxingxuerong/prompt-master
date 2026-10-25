@@ -55,7 +55,18 @@ const CATS={billing:"账单",technical:"技术",logistics:"物流",complaint:"�
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
-fetch("/api/sessions").then(r=>r.json()).then(d=>{
+function _why(r) {
+  // 401 必须说出来（2026-10-31 修）：设了 TRIAGE_TOKEN 之后本页不会自动带 X-API-Key，
+  // 旧版把 401 的 `{"detail":…}` 当会话数据 ⇒ 列表页显示"暂无会话"、详情页整块空白，
+  // 看着像"真的没有历史"，而实际是没权限。用空集冒充没数据是最坏的一种谎。
+  return r.status === 401
+    ? "需要 X-API-Key 令牌（本页不会自动携带；请用能带令牌的客户端读接口）"
+    : "HTTP " + r.status;
+}
+fetch("/api/sessions").then(r=>{
+  if(!r.ok) throw new Error(_why(r));
+  return r.json();
+}).then(d=>{
   const el=document.getElementById("list");
   if(!d.count){el.textContent="暂无会话";return}
   el.className="";
@@ -66,9 +77,15 @@ fetch("/api/sessions").then(r=>r.json()).then(d=>{
     div.onclick=()=>{document.querySelectorAll(".sess").forEach(x=>x.classList.remove("active"));div.classList.add("active");loadDetail(s.session_id)};
     el.appendChild(div);
   });
+}).catch(e=>{
+  const el=document.getElementById("list");
+  el.textContent="读取失败："+e.message;
 });
 function loadDetail(sid){
-  fetch("/api/sessions/"+encodeURIComponent(sid)).then(r=>r.json()).then(s=>{
+  fetch("/api/sessions/"+encodeURIComponent(sid)).then(r=>{
+    if(!r.ok) throw new Error(_why(r));
+    return r.json();
+  }).then(s=>{
     const el=document.getElementById("detail");
     el.className="";
     const c=s.consensus||{};

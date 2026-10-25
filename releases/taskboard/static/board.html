@@ -109,10 +109,28 @@ function esc(s) {
 }
 
 async function loadBoard() {
-  const [b, t] = await Promise.all([
-    fetch("/api/board").then(r => r.json()),
-    fetch("/api/tasks").then(r => r.json())
-  ]);
+  // 401/非 200 必须说出来（2026-10-31 修）：设了 TASKBOARD_TOKEN 之后本页不会自动带
+  // X-API-Key，旧版把 401 的 `{"detail":…}` 当看板数据 ⇒ `Object.entries(undefined)`
+  // 直接抛错、整页空白且**没有任何提示**；把空集当"没有任务"同样是撒谎。
+  async function getJson(url) {
+    const r = await fetch(url);
+    if (!r.ok) {
+      throw new Error(r.status === 401
+        ? "需要 X-API-Key 令牌（本页不会自动携带；请用能带令牌的客户端读接口）"
+        : "HTTP " + r.status);
+    }
+    return r.json();
+  }
+  let b, t;
+  try {
+    [b, t] = await Promise.all([getJson("/api/board"), getJson("/api/tasks")]);
+  } catch (e) {
+    $("#today").textContent = "读取失败：" + e.message;
+    $("#loadGrid").innerHTML = "";
+    $("#dueBody").innerHTML = "";
+    toast("读取失败：" + e.message, true);
+    return;
+  }
   $("#today").textContent = "今天 " + b.today + " · 未完成任务 " + b.due_sorted.length;
   // 负载
   $("#loadGrid").innerHTML = Object.entries(b.by_assignee).map(([who, v]) => {

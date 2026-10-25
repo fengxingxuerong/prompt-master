@@ -113,6 +113,17 @@ function toast(msg) { const t = document.getElementById("toast"); t.textContent 
 async function load() {
   const st = document.getElementById("statusFilter").value;
   const r = await fetch("/api/orders" + (st ? "?status=" + st : ""));
+  // 401 必须说出来（2026-10-31 修）：设了 LOBSTER_TOKEN 之后本页不会自动带
+  // X-API-Key（页面也拿不到它），旧版把 401 的 JSON 当正常数据画 ⇒ 台账显示
+  // "undefined 笔 / 暂无订单"，看着像"真的没单"。用空集冒充没数据是最坏的一种谎。
+  if (!r.ok) {
+    const why = r.status === 401
+      ? "需要 X-API-Key 令牌（本页不会自动携带；请用能带令牌的客户端读接口）"
+      : "HTTP " + r.status;
+    document.getElementById("count").textContent = "读取失败";
+    document.getElementById("tbody").innerHTML = '<tr><td colspan="7" style="color:#b42318;padding:18px">' + esc(why) + "</td></tr>";
+    return;
+  }
   const d = await r.json();
   LABELS = d.status_labels || {};
   document.getElementById("count").textContent = d.count + " 笔";

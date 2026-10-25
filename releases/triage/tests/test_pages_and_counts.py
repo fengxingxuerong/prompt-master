@@ -114,3 +114,11 @@ def test_history_page_escapes_untrusted_text() -> None:
     ):
         assert dangerous not in js, f"发现未转义的插值 `{dangerous}`：存储型 XSS 入口"
     assert "esc(s.subject" in js and "esc(JSON.stringify(vd" in js, "转义没有真的接上去"
+
+def test_pages_do_not_paint_401_as_no_data() -> None:
+    """设了 token 后两个页面都必须说"需要令牌"，不许画成"暂无数据/暂无订单"。"""
+    for page in ("cost-board.html", "history.html"):
+        js = _js(page)
+        if "api/gateway-metrics" in js:  # cost-board 的实时曲线自带 catch
+            assert "401" in js and "X-API-Key" in js, f"{page} 的 401 没给可读原因"
+        assert "!r.ok" in js or "if(!r.ok)" in js or "r.ok" in js, f"{page} 取数没检查响应码"

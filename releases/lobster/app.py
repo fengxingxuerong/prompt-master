@@ -15,6 +15,7 @@ FastAPI + JSON 落盘台账（data/orders.json，带文件锁与原子写）。
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -106,24 +107,56 @@ def _load() -> dict:
     conn = _db_connect()
     try:
         _init_db(conn)
-        orders = [json.loads(r["data"]) for r in conn.execute("SELECT data FROM orders ORDER BY rowid")]
-        return {"version": 1, "orders": orders}
+        return _load_in(conn)
     finally:
         conn.close()
 
 
-def _save(data: dict) -> None:
-    """单事务全量替换：要么整体生效要么整体回滚，不再有半截 JSON。"""
+def _load_in(conn: sqlite3.Connection) -> dict:
+    """在**给定连接**上读全量文档（供事务内使用，不能再自己开连接）。"""
+    orders = [json.loads(r["data"]) for r in conn.execute("SELECT data FROM orders ORDER BY rowid")]
+    return {"version": 1, "orders": orders}
+
+
+@contextlib.contextmanager
+def _txn():
+    """`BEGIN IMMEDIATE` 的读改写事务：先拿写锁，再读。
+
+    为什么必须这样（2026-10-31 修，实测事故）：旧版写路径是
+    `with _LOCK: data=_load(); 改; _save(data)` —— `_LOCK` 只是**进程内**锁，而
+    `_save` 是 `DELETE FROM orders` + 全量 re-INSERT。两个实例（≈ 两个进程）各自
+    load→append→save 时，后写的那一份把前一份整份覆盖：实测写前 2 条、并行新增
+    LOB-P1/P2 后只剩 3 条，**LOB-P1 消失**，而两个请求都回 200。
+
+    `BEGIN IMMEDIATE` 而不是默认的 deferred：deferred 只在**写**时取锁，
+    "读整表 → 改一条 → 写回"中间那次读不受保护，另一个写者恰好在那时提交，
+    我这笔写就会把它盖掉（lost update）。triage 早就是这么做的，这里有现成范式。
+    """
     conn = _db_connect()
     try:
-        with conn:
-            conn.execute("DELETE FROM orders")
-            conn.executemany(
-                "INSERT INTO orders (order_id, data) VALUES (?, ?)",
-                [(o["order_id"], json.dumps(o, ensure_ascii=False)) for o in data["orders"]],
-            )
+        _init_db(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
     finally:
         conn.close()
+
+
+def _upsert(conn: sqlite3.Connection, rec: dict) -> None:
+    """只写这一条（不 DELETE 全表）：全量替换在多写者下就是丢数据。"""
+    conn.execute(
+        "INSERT OR REPLACE INTO orders (order_id, data) VALUES (?, ?)",
+        (rec["order_id"], json.dumps(rec, ensure_ascii=False)),
+    )
+
+
+def _get_one(conn: sqlite3.Connection, order_id: str) -> dict | None:
+    row = conn.execute("SELECT data FROM orders WHERE order_id=?", (order_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
 
 
 class OrderIn(BaseModel):
@@ -188,10 +221,9 @@ def create_order(o: OrderIn):
         "status": "pending",
         "history": [{"ts": now, "action": "创建订单", "status": "pending", "note": "demo 模拟数据"}],
     }
-    with _LOCK:
-        data = _load()
-        data["orders"].append(rec)
-        _save(data)
+    with _txn() as conn:
+        # 只 INSERT 这一条：全量替换在多写者下会把别人的新增覆盖掉（见 `_txn` 的说明）
+        _upsert(conn, rec)
     return {"ok": True, "order_id": oid, "status": "pending", "amount_cny": rec["amount_cny"]}
 
 
@@ -235,14 +267,17 @@ def update_status(oid: str, request: Request, s: StatusIn | None = None):
     if s.status not in STATUSES:
         raise HTTPException(status_code=422, detail=f"无效状态 {s.status!r}，可选：{sorted(STATUSES)}") from None
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    with _LOCK:
-        data = _load()
-        rec = next((r for r in data["orders"] if r["order_id"] == oid), None)
+    with _txn() as conn:
+        # 事务内读那一条再写回：`BEGIN IMMEDIATE` 保证这段里有写锁，
+        # 别的写者不会在我"读完改完还没写"的窗口里插进来（lost update）
+        rec = _get_one(conn, oid)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"订单不存在：{oid}")
+        rec.setdefault("history", []).append(
+            {"ts": now, "action": "状态流转", "status": s.status, "note": s.note}
+        )
         rec["status"] = s.status
-        rec["history"].append({"ts": now, "action": "状态流转", "status": s.status, "note": s.note})
-        _save(data)
+        _upsert(conn, rec)
     return {"ok": True, "order_id": oid, "status": s.status, "label": STATUS_LABEL[s.status]}
 
 

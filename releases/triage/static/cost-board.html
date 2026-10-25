@@ -45,7 +45,15 @@ footer{border-top:1px solid var(--line);padding-top:12px;color:var(--mut);font-s
 document.getElementById("gen").textContent = "生成于 " + new Date().toLocaleString("zh-CN");
 function fmt(n){return (n||0).toLocaleString("zh-CN")}
 function secs(ms){return (ms/1000).toFixed(1)+"s"}
-fetch("/api/usage-board").then(r=>r.json()).then(d=>{
+// 401/非 200 必须说出来（2026-10-31 修）：设了 TRIAGE_TOKEN 之后本页不会自动带
+// X-API-Key，旧版把 401 的 `{"detail":…}` 当正常 JSON 画 ⇒ `days` 为空 ⇒
+// 页面印"暂无数据：usage_daily.json 为空（服务刚重建或无调用）"——**归因完全是编的**。
+fetch("/api/usage-board").then(r=>{
+  if(!r.ok) throw new Error(r.status===401
+    ? "需要 X-API-Key 令牌（本页不会自动携带；请用能带令牌的客户端读接口）"
+    : "HTTP "+r.status);
+  return r.json();
+}).then(d=>{
   const days=d.days||[];const total=d.total||{};
   const maxCalls=Math.max(1,...days.map(x=>x.calls));
   const models=Object.entries(total.by_model||{}).sort((a,b)=>b[1].calls-a[1].calls);

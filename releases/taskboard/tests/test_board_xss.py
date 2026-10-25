@@ -42,3 +42,10 @@ def test_due_table_has_no_bare_task_interpolation() -> None:
     segment = js[start : start + 1600]
     bare = re.findall(r"\$\{r\.(?!\s*\))[a-z_]+\}", segment)
     assert not bare, f"截止日表格里还有裸插值：{bare[:5]}"
+
+def test_401_is_not_painted_as_an_empty_board() -> None:
+    """设了 token 后拿不到数：必须说"需要令牌"，不许整页空白或当"没有任务"。"""
+    js = _js()
+    assert "r.ok" in js, "取数没有检查响应码"
+    assert "401" in js and "X-API-Key" in js, "401 没有给出可读原因"
+    assert "读取失败" in js, "失败时没有把原因画到页面上"

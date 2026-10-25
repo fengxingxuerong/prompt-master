@@ -18,6 +18,7 @@ FastAPI + JSON 落盘台账（原子写 + 文件锁 + 全量 history 留痕 + un
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -118,27 +119,71 @@ def _load() -> dict:
     conn = _db_connect()
     try:
         _init_db(conn)
-        tasks = [json.loads(r["data"]) for r in conn.execute("SELECT data FROM tasks ORDER BY rowid")]
-        seq_row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
-        return {"version": 1, "seq": int(seq_row["value"]) if seq_row else 0, "tasks": tasks}
+        return _load_in(conn)
     finally:
         conn.close()
 
 
-def _save(data: dict) -> None:
-    """单事务全量替换：要么整体生效要么整体回滚，不再有半截 JSON。"""
+def _load_in(conn: sqlite3.Connection) -> dict:
+    """在**给定连接**上读全量文档（供事务内使用，不能再自己开连接）。"""
+    tasks = [json.loads(r["data"]) for r in conn.execute("SELECT data FROM tasks ORDER BY rowid")]
+    seq_row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
+    return {"version": 1, "seq": int(seq_row["value"]) if seq_row else 0, "tasks": tasks}
+
+
+@contextlib.contextmanager
+def _txn():
+    """`BEGIN IMMEDIATE` 的读改写事务：先拿写锁，再读。
+
+    为什么必须这样（2026-10-31 修，与 lobster 同形）：旧写路径是
+    `with _LOCK: data=_load(); 改; _save(data)`，而 `_LOCK` 只是**进程内**锁、
+    `_save` 是 `DELETE FROM tasks` + 全量 re-INSERT ⇒ 两个实例（≈ 两个进程）各自
+    load→append→save 时后写的那份把前一份整份覆盖；`seq` 也在同一把进程内锁里自增，
+    两个进程会算出**同一个** `TASK-…-001`，再被 `INSERT OR REPLACE` 静默合并。
+
+    `BEGIN IMMEDIATE` 而不是默认 deferred：deferred 只在**写**时取锁，
+    "读整表 → 改一条 → 写回"中间那次读不受保护。triage 早就这么做，这里照抄范式。
+    """
     conn = _db_connect()
     try:
-        with conn:
-            conn.execute("DELETE FROM tasks")
-            conn.executemany(
-                "INSERT INTO tasks (task_id, data) VALUES (?, ?)",
-                [(t["task_id"], json.dumps(t, ensure_ascii=False)) for t in data["tasks"]],
-            )
-            conn.execute("INSERT OR REPLACE INTO meta VALUES ('seq', ?)",
-                         (str(int(data.get("seq", 0))),))
+        _init_db(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
     finally:
         conn.close()
+
+
+def _next_seq(conn: sqlite3.Connection) -> int:
+    """在事务内自增并取号：`seq` 是任务号的唯一来源，必须与写入同一个事务。"""
+    row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
+    nxt = (int(row["value"]) if row else 0) + 1
+    conn.execute("INSERT OR REPLACE INTO meta VALUES ('seq', ?)", (str(nxt),))
+    return nxt
+
+
+def _upsert_task(conn: sqlite3.Connection, rec: dict) -> None:
+    """只写这一条（不 DELETE 全表）：全量替换在多写者下就是丢数据。"""
+    conn.execute(
+        "INSERT OR REPLACE INTO tasks (task_id, data) VALUES (?, ?)",
+        (rec["task_id"], json.dumps(rec, ensure_ascii=False)),
+    )
+
+
+def _get_task_in(conn: sqlite3.Connection, task_id: str) -> dict | None:
+    row = conn.execute("SELECT data FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def _require_task(conn: sqlite3.Connection, task_id: str) -> dict:
+    rec = _get_task_in(conn, task_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"任务不存在：{task_id}")
+    return rec
 
 
 class TaskIn(BaseModel):
@@ -227,10 +272,10 @@ def create_task(t: TaskIn):
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", due):
         raise HTTPException(status_code=422, detail="截止日期格式应为 YYYY-MM-DD")
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    with _LOCK:
-        data = _load()
-        data["seq"] = int(data.get("seq", 0)) + 1
-        oid = f"TASK-{time.strftime('%Y%m%d')}-{data['seq']:03d}"
+    with _txn() as conn:
+        # 号与写入同一个事务：两个进程各自 +1 会算出同一个 TASK-…-001（见 `_txn`）
+        seq = _next_seq(conn)
+        oid = f"TASK-{time.strftime('%Y%m%d')}-{seq:03d}"
         rec = {
             "task_id": oid,
             "created_at": now,
@@ -249,8 +294,7 @@ def create_task(t: TaskIn):
                 "before": None,
             }],
         }
-        data["tasks"].append(rec)
-        _save(data)
+        _upsert_task(conn, rec)
     return {"ok": True, "task_id": oid, "assignee": t.assignee, "due": due, "status": "pending"}
 
 
@@ -328,6 +372,10 @@ def patch_task(oid: str, p: TaskPatch):
         raise HTTPException(status_code=422, detail=f"无效负责人 {p.assignee!r}，花名册：{sorted(VALID_ASSIGNEES)}")
     if p.priority is not None and p.priority not in PRIORITIES:
         raise HTTPException(status_code=422, detail=f"无效优先级 {p.priority!r}")
+    # 截止日也必须校验（2026-10-31 修）：创建端有 `^\d{4}-\d{2}-\d{2}$`，PATCH 端却没有，
+    # 于是 `{"due": "下周五"}` 能写进台账、而看板用字符串比 `due < today` 判逾期 ⇒ 逾期恒 0。
+    if p.due is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", p.due.strip()):
+        raise HTTPException(status_code=422, detail="截止日期格式应为 YYYY-MM-DD")
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     changes = []
     if p.status is not None:
@@ -344,12 +392,9 @@ def patch_task(oid: str, p: TaskPatch):
         changes.append("描述更新")
     if not changes:
         raise HTTPException(status_code=422, detail="未提供任何变更字段")
-    with _LOCK:
-        data = _load()
-        rec = next((r for r in data["tasks"] if r["task_id"] == oid), None)
-        if rec is None:
-            raise HTTPException(status_code=404, detail=f"任务不存在：{oid}")
-        rec["history"].append({
+    with _txn() as conn:
+        rec = _require_task(conn, oid)
+        rec.setdefault("history", []).append({
             "ts": now, "action": "；".join(changes), "actor": p.actor,
             "detail": p.note, "before": _snap(rec),
         })
@@ -365,34 +410,41 @@ def patch_task(oid: str, p: TaskPatch):
             rec["title"] = p.title
         if p.desc is not None:
             rec["desc"] = p.desc
-        _save(data)
+        _upsert_task(conn, rec)
     return {"ok": True, "task_id": oid, "changes": "；".join(changes), "status": rec["status"], "assignee": rec["assignee"]}
 
 
 @app.post("/api/tasks/{oid}/undo")
 def undo_task(oid: str, actor: str = "Agent-AutoClaw"):
-    """撤销最近一次变更：恢复到该次变更前快照，并追加撤销记录（台账保留撤销痕迹）。"""
+    """撤销最近一次变更：恢复到该次变更前快照，并追加撤销记录（台账保留撤销痕迹）。
+
+    ⚠️ 2026-10-31 修两处：
+    1. **连按两次撤销会重复回滚同一步**：旧版只跳过 `action == "撤销"` 的记录，
+       而它要回滚的那条目标仍然 `before is not None` ⇒ 第二次又命中同一条，
+       接口照样 `ok:true`、`restored_to` 也是同一个。现在回滚时给目标打
+       `undone: True`，循环跳过它。
+    2. 读改写改到事务里（见 `_txn`）。
+    """
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    with _LOCK:
-        data = _load()
-        rec = next((r for r in data["tasks"] if r["task_id"] == oid), None)
-        if rec is None:
-            raise HTTPException(status_code=404, detail=f"任务不存在：{oid}")
+    with _txn() as conn:
+        rec = _require_task(conn, oid)
+        history = rec.setdefault("history", [])
         target = None
-        for h in reversed(rec["history"]):
-            if h.get("before") is not None and h["action"] != "撤销":
+        for h in reversed(history):
+            if h.get("before") is not None and h.get("action") != "撤销" and not h.get("undone"):
                 target = h
                 break
         if target is None:
             raise HTTPException(status_code=422, detail="没有可撤销的变更（所有历史均无快照）")
         before = dict(target["before"])
-        rec["history"].append({
+        target["undone"] = True
+        history.append({
             "ts": now, "action": "撤销", "actor": actor,
             "detail": f"回滚「{target['action']}」（{target['ts']}）；恢复 assignee={before.get('assignee')} status={before.get('status')}",
             "before": _snap(rec),
         })
         rec.update(before)
-        _save(data)
+        _upsert_task(conn, rec)
     return {"ok": True, "task_id": oid, "restored_to": target["ts"],
             "status": rec["status"], "assignee": rec["assignee"]}
 
