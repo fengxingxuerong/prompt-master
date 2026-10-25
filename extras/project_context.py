@@ -790,7 +790,15 @@ def _git_run(root: Path, args: list[str]) -> str:
             errors="replace",
             timeout=8,
             stdin=subprocess.DEVNULL,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            env={
+                **os.environ,
+                "GIT_TERMINAL_PROMPT": "0",
+                # 「只读扫描」要是字面意义上的只读（2026-10-31 修）：`git status --short`
+                # 默认会顺手刷新并**重写 .git/index**（实测扫描前后 sha256 变了，
+                # 工作区文件没动）。对一个"绝不修改用户项目"的功能来说，
+                # 动了版本库的索引就是动了用户的项目，哪怕内容等价。
+                "GIT_OPTIONAL_LOCKS": "0",
+            },
         )
     except (OSError, subprocess.SubprocessError):
         return ""

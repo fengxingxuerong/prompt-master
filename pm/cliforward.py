@@ -28,7 +28,12 @@ RUN_PY = ROOT / "run.py"
 TEMPLATE_DIR = ROOT / "case_templates"
 
 # 退出码协议：0 达标 / 1 未达标但已交付 / 2 参数或配置 / 3 运行失败。
-# 把这四个都当"正常返回"，因为体检命中规则时就是 1 —— 那是一次成功的调用，不是崩溃。
+# 这**四个**都可能是"调用成功"（体检命中规则时就是 1），所以下面对"退出码"本身
+# 不做拒绝 —— 真正的判据是**stdout 是不是一个 JSON 对象**：
+# 2/3 时 stdout 通常是空串（错误走 stderr），此时 `json.loads` 失败会翻成 ForwardError
+# 并把 stderr 尾带出来，比"按退出码白名单直接拒"更能说清原因。
+# 2026-10-31 补记：早前注释写的是"把这四个都当正常返回"，容易读成"2/3 的帧也当成功"——
+# 实际口径是"不靠退出码判成败，靠 stdout 形状判"，这里把话写准。
 OK_EXIT_CODES = (0, 1, 2, 3)
 
 
@@ -82,7 +87,13 @@ def _spawn_cli(args: list[str], timeout: float | None) -> subprocess.CompletedPr
 
 
 def run_cli_json(args: list[str], timeout: float | None = 60.0) -> Any:
-    """subprocess 打 `run.py … --json`，返回解析后的 JSON。"""
+    """subprocess 打 `run.py … --json`，返回解析后的 JSON。
+
+    失败分两种，都要能让调用方看懂：
+    - 退出码不在协议里（被信号杀掉、解释器崩了）⇒ 带上 stderr 尾；
+    - 退出码合规但 stdout 不是 JSON（典型是 2/3：错误走 stderr、stdout 为空）
+      ⇒ 明确说是"没有给出合法 JSON"，并同样带 stderr 尾。
+    """
     proc = _spawn_cli(args, timeout)
     if proc.returncode not in OK_EXIT_CODES:
         raise ForwardError(f"run.py 退出码异常 {proc.returncode}：{proc.stderr[-300:]}")
@@ -90,7 +101,8 @@ def run_cli_json(args: list[str], timeout: float | None = 60.0) -> Any:
         return json.loads(proc.stdout)
     except json.JSONDecodeError as e:
         raise ForwardError(
-            f"run.py 没有给出合法 JSON（{e}）；stderr 尾部：{(proc.stderr or '')[-300:]}"
+            f"run.py 没有给出合法 JSON（退出码 {proc.returncode}，{e}）；"
+            f"stderr 尾部：{(proc.stderr or '')[-300:]}"
         ) from e
 
 

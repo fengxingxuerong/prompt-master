@@ -169,7 +169,7 @@ linux CI 的 locale 是 UTF-8，永远不会暴露它。
 
 | 门禁 | 结果 |
 |---|---|
-| `pytest tests/ -q` | **2128 passed / 1 skipped / 0 failed**（基线 1983 → 新增 145 条） |
+| `pytest tests/ -q` | **2131 passed / 1 skipped / 0 failed**（基线 1983 → 新增 148 条） |
 | `ruff check`（CI 同口径范围） | All checks passed |
 | `ruff format --check` | 全绿 |
 | `mypy pm/ extras/ run.py run_server.py eval_prompts.py` | Success（101 files） |
@@ -430,11 +430,34 @@ BOM 分支直接 `raw.decode(...)`，只有无 BOM 分支做了 `\r\n → \n`。
 
 守卫 `tests/test_budget_requests_gate.py`（8 条：两种单位、取严、非法值、`=0` 的语义）。
 
-### 5.12 现在仍然没修的
+### 5.13 第五轮续二：面板与桌面（此前没审过的两块）
 
-- 无。本轮把 §5.9 与第三轮遗留的两条都做完了。
-- 留给所有者的仍是**判定链上的口径选择**（不是缺陷）：是否要把 `PM_MAX_LLM_CALLS`
-  的计量本身也改成请求数（会让历史预算配置失去可比性，所以默认不做）。
+第三路审计扫了 `pm/panel.py` + `pm/web/_panel.py` + `extras/`，三条中等、三条低。
+
+| 缺陷 | 用户可见后果 | 修法 |
+|---|---|---|
+| ②考卷卡的判决色按 `veto_strong > 0` 上色 | 5 份自带模板里 3 份 CLI 是 `ok=false`/退出码 1，面板画成**绿色 ok** —— 用户据此认为考卷没问题，然后去花钱 | 判决改用 `d.ok`（与退出码同源），强判据条数降为副指标 |
+| ③差分卡「约束条目」读 `structure.items` | CLI 同名字段是 `structure.constraints`，两个数可以一个 0→0、另一个 3→4 ⇒ 两边各说一套 | 改读 `constraints`，`items` 单列一行「可核对条目」 |
+| ①②③端点裸调转发，失败吞成 500 白页 | `ForwardError` 里带的 stderr 尾（唯一自救线索）全丢；同时探针缓存 60 秒内顶部灯仍绿，用户分不清是输入错还是功能坏 | 抽 `_forward()`：`ForwardError`/超时/OSError → **502 + detail**；失败时立刻把探针置红 |
+| 桌面「只读」会刷新 `.git/index` | 实测扫描前后 sha256 变了（工作区文件没动）—— 对一个承诺"绝不修改用户项目"的功能，动了版本库索引就是动了项目 | 子进程加 `GIT_OPTIONAL_LOCKS=0`，并用"扫描前后 index 逐字节相同"钉住 |
+| 桌面文案承诺"空正文也会自动重试" | 实际空正文直接报错 ⇒ 用户以为重试过了，再点一次就是再计费一次 | 改文案并写清理由（解析失败才自动重试；空正文多半是端点/额度问题，自动重试等于替你多花钱） |
+| `cliforward` 注释说"四个退出码都当正常返回" | 读起来像"2/3 的帧也当成功"（实际口径是"不靠退出码判成败，靠 stdout 形状"） | 把话写准，并在 JSON 解析失败的报错里带上退出码 |
+
+顺带更正一处**文档与实现不符**：`pm/panel.py` 与 `pm/cliforward.py` 的模块注释都写着
+"桌面窗口用的是同一份转发"，而 `extras/desktop.py` 自带 Popen（它需要句柄才能"中止"，
+而 `run_cli_json` 是阻塞的），全仓没有 `import pm.cliforward` 的桌面代码。已改准。
+
+守卫：`tests/test_panel.py` +4（502 而非 500、错误串带 stderr 尾、探针转红、超时也算失败；
+判决读 `d.ok`；差分读 constraints）、`tests_extras/test_project_context.py` +1
+（扫描前后 `.git/index` 逐字节相同，**做过变异验证**：去掉 `GIT_OPTIONAL_LOCKS` 当场红）。
+
+审计**核过没问题**的面也记一笔：模板白名单牢固（`../../.env`、绝对路径、`case_templates/../.env`
+全 `TemplateNotFound`）；面板所有 innerHTML 汇聚点都过 `esc()`/`n()`；桌面端没有跨线程 Tk 调用；
+关窗/取消会 terminate 子进程并复位句柄，未见资源泄漏。
+
+### 5.14 现在仍然没修的
+
+- 无。（判定链上的两个口径选择已在 §5.11/§5.12 说明，属所有者决定，不是缺陷。）
 
 ## 六、本轮自己造成的一处事故（如实记）
 

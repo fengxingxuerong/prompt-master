@@ -293,9 +293,15 @@ function bucketBars(d){
 }
 function renderCases(d){
   const total = n(d.cases), strong = n(d.veto_strong), able = n(d.veto_capable);
-  let h = '<p class="verdict ' + (strong > 0 ? "ok" : "bad") + '">'
+  // 判决必须用 `d.ok`（= "没有任何 findings"，与 CLI 退出码 1 同源），
+  // 不能只看强判据条数（2026-10-31 修）：5 份自带模板里 3 份 CLI 是 ok=false / 退出码 1
+  // （缺 scenario、断言复读输入等），旧版按 `strong > 0` 把它们画成绿色"ok"——
+  // 用户据此认为考卷没问题，然后去花钱跑一轮。
+  const ok = d.ok === true;
+  let h = '<p class="verdict ' + (ok ? "ok" : "bad") + '">'
     + total + " 条里 <b>" + able + "</b> 条能否决，其中强判据 <b>" + strong + "</b> 条"
-    + (strong === 0 ? " —— 这份考卷拦不住「写得漂亮但做不到」" : "") + "</p>";
+    + (ok ? "" : " —— 这份考卷有 " + n((d.findings || []).length) + " 处问题，见下")
+    + (strong === 0 ? "；强判据为 0，拦不住「写得漂亮但做不到」" : "") + "</p>";
   h += bucketBars(d);
   h += '<div class="kv"><span>上限 <b>' + n(d.max_cases) + "</b></span>"
     + "<span>提醒项 <b>" + n(d.advisory) + "</b></span>"
@@ -331,12 +337,20 @@ async function runCases(){
 function renderDiff(d){
   const r = d.rules || {};
   const fixed = (r.fixed || []).length, intro = (r.introduced || []).length, still = (r.still || []).length;
+  // 「约束条目」必须读 `structure.constraints`（2026-10-31 修）：CLI 的 diff 用
+  // constraints 报约束条目增删，items 是"可逐条核对的条目"——两个数在一份带 [约束] 段的
+  // 改动里可以一个 0→0、另一个 3→4，面板此前读的是后者却挂着前者的标签。
+  const st = d.structure || {};
+  const consB = st.constraints ? n(st.constraints.before) : 0;
+  const consA = st.constraints ? n(st.constraints.after) : 0;
+  const itemsB = st.items ? n(st.items.before) : 0;
+  const itemsA = st.items ? n(st.items.after) : 0;
   let h = '<p class="verdict ' + (d.regressed ? "bad" : "ok") + '">' + esc(d.summary || "") + "</p>";
   h += '<div class="kv"><span>修好 <b>' + fixed + "</b></span>"
     + "<span>新引入 <b>" + intro + "</b></span>"
     + "<span>仍在 <b>" + still + "</b></span>"
-    + "<span>约束条目 <b>" + n((d.structure || {}).items ? d.structure.items.before : 0)
-    + " → " + n((d.structure || {}).items ? d.structure.items.after : 0) + "</b></span>"
+    + "<span>约束条目 <b>" + consB + " → " + consA + "</b></span>"
+    + "<span>可核对条目 <b>" + itemsB + " → " + itemsA + "</b></span>"
     + "<span>逐字相同 <b>" + (d.identical ? "是" : "否") + "</b></span></div>";
   if (intro) h += '<p class="muted">新引入的这些就是 CI 该拦的那一半：</p>'
     + findingRows(r.introduced.map((c) => ({code: c, detail: "本次新引入的已知事故模式"})), "judge");

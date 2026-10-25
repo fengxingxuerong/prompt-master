@@ -171,7 +171,14 @@ python run.py library --query "分诊"     # 跨任务提示词资产库：检�
 python run.py library --export <run_id> --out my_prompt.md   # 导出成品直接复用
 ```
 
-- `history`：把"看起来高了 3 分"升级为"Δ 均值 ± 95% CI，是否显著"——演示模式的 run 自动排除
+- `history`：把"看起来高了 3 分"升级为"Δ 均值 ± 95% CI，是否显著"——演示模式的 run 自动排除。
+  ⚠️ 判据是 **t 分位**（按 `n−1` 的自由度），不是大样本的 1.96（2026-10-31 改）：
+  n=2 时区间半宽是 12.706×SE，旧写法会把它缩到约 1/6、把"两轮同向"读成"显著"。
+  Agent 消费 `--json` 时要注意 `significant=false` 有**两种**含义，看 `estimable` 区分：
+  - `estimable=true` ⇒ 真的算过，结论是"不显著"；
+  - `estimable=false`（`delta_ci95` 为 `null`）⇒ **不可判**：n<5 且各轮 Δ 完全一致
+    （抖动估不出来），或剔除崩溃臂后可信样本不足 2 条。此时该组的
+    `excluded_untrusted` 仍会逐条点名。
 - `calibrate`：锚点样本上对比评委分与人工专家分（MAE / 偏差 / Pearson r / **过线判定一致率**），
   每次结果入账本 `logs/judge_calibration_history.json`，与上次对比漂移超 ±0.5 告警。
   账本除聚合数外还落**逐条明细**（`items` / `rep_items` / `n_failed` / `failed`）——

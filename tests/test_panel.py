@@ -296,6 +296,72 @@ def test_template_names_are_whitelisted_not_guessed(client, name: str) -> None:
 # ---------------------------------------------------------------------------
 # C. 判据同源：面板返回必须等于当场跑 CLI
 # ---------------------------------------------------------------------------
+def test_forward_failure_is_502_with_the_stderr_tail_not_a_blank_500(client, monkeypatch) -> None:
+    """转发失败要给出可读原因（502 + detail），不许变成 500 白页。
+
+    实测缺陷（2026-10-31 审计）：三个零调用端点裸调 `run_cli_json`，
+    而 `ForwardError` / `subprocess.TimeoutExpired` 都不是 HTTP 异常 ⇒ FastAPI 回
+    `500 text/plain "Internal Server Error"`，`ForwardError` 里带的 stderr 尾（唯一的
+    自救线索）全丢；同时探针缓存 60 秒内顶部灯仍绿，用户分不清是输入错还是功能坏。
+    """
+    import subprocess
+
+    def boom(args, timeout: float = 60.0):
+        raise fwd.ForwardError("run.py 退出码 3：Traceback ... 端点未配置")
+
+    monkeypatch.setattr(panel_mod, "run_cli_json", boom)
+    for path, payload in (
+        ("/api/panel/check", {"prompt": "随便一段提示词"}),
+        ("/api/panel/diff", {"before": "a", "after": "b"}),
+    ):
+        r = client.post(path, json=payload)
+        assert r.status_code == 502, f"{path} 转发失败回了 {r.status_code}（该是 502）"
+        assert "端点未配置" in r.text, f"{path} 把 stderr 尾丢了：{r.text[:200]}"
+
+    # 失败之后顶部的"零调用可用"必须立刻转红，而不是等 60 秒缓存过期
+    monkeypatch.setattr(
+        panel_mod,
+        "run_cli_json",
+        lambda args, timeout=60.0: (_ for _ in ()).throw(fwd.ForwardError("坏了")),
+    )
+    caps = client.get("/api/panel/capabilities").json()
+    assert caps["cli_ok"] is False and "零调用转发不可用" in caps["note"]
+
+    # 超时也算转发失败（旧版这条路走的就是未捕获的 TimeoutExpired）
+    def slow(args, timeout: float = 60.0):
+        raise subprocess.TimeoutExpired(cmd="run.py", timeout=1)
+
+    monkeypatch.setattr(panel_mod, "run_cli_json", slow)
+    assert client.post("/api/panel/check", json={"prompt": "x"}).status_code == 502
+
+
+def test_panel_verdict_uses_ok_not_the_strong_veto_count() -> None:
+    """判决色必须来自 `d.ok`（与 CLI 退出码 1 同源），不能只看强判据条数。
+
+    实测缺陷（2026-10-31 审计）：5 份自带模板里 3 份 CLI 是 `ok=false` / 退出码 1
+    （缺 scenario、断言复读输入等），而面板按 `strong > 0` 画成绿色"ok"——
+    用户据此认为考卷没问题，然后去花钱跑一轮。
+    """
+    import pm.web._panel as panel_web
+
+    src = panel_web.PANEL_HTML
+    assert "d.ok === true" in src, "判决没有读 d.ok"
+    assert 'strong > 0 ? "ok"' not in src, "判决又退回按强判据条数上色"
+
+
+def test_diff_card_reads_constraints_not_items() -> None:
+    """「约束条目」读 `structure.constraints`，与 CLI diff 的同名字段一致。
+
+    两个数可以一个 0→0、另一个 3→4（items 是"可逐条核对的条目"），
+    面板此前读 items 却挂着 constraints 的标签。
+    """
+    import pm.web._panel as panel_web
+
+    src = panel_web.PANEL_HTML
+    assert "st.constraints.before" in src and "st.constraints.after" in src
+    assert "可核对条目" in src, "第二个数要有自己的标签，别和约束条目混成一行"
+
+
 def test_check_endpoint_equals_the_cli_verbatim(client) -> None:
     via_cli = _cli(["check", "--prompt", DEFECTY, "--json"])
     via_panel = client.post("/api/panel/check", json={"prompt": DEFECTY}).json()

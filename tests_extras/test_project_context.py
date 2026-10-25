@@ -110,6 +110,46 @@ def test_list_and_search_tools_are_read_only(tmp_path: Path) -> None:
     assert hits_with_secret == []
 
 
+def test_git_reads_do_not_touch_the_users_index(tmp_path: Path) -> None:
+    """「只读扫描」必须是字面只读：不许刷新/重写用户仓库的 `.git/index`。
+
+    实测缺陷（2026-10-31 审计）：`git status --short` 默认会顺手刷新索引，
+    temp git 仓库里实测扫描前后 `.git/index` 的 sha256 变了（工作区文件没动）。
+    对一个承诺"绝不修改用户项目"的功能来说，动了版本库的索引就是动了用户的项目。
+    修法是给子进程 `GIT_OPTIONAL_LOCKS=0`。
+    """
+    import hashlib
+    import subprocess
+
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "app.py").write_text("print(1)\n", encoding="utf-8")
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=str(root), env=env, capture_output=True, check=False)
+
+    git("init", "-q")
+    git("add", "-A")
+    git("commit", "-qm", "init")
+    (root / "src" / "app.py").write_text("print(2)\n", encoding="utf-8")  # 制造脏工作区
+
+    index = root / ".git" / "index"
+    before = hashlib.sha256(index.read_bytes()).hexdigest()
+
+    snap = pc.git_snapshot(root)
+    assert snap is not None and snap.get("status"), "前置：应当读到未提交改动"
+
+    after = hashlib.sha256(index.read_bytes()).hexdigest()
+    assert before == after, "只读扫描改写了用户的 .git/index（GIT_OPTIONAL_LOCKS 没设？）"
+
+
 def test_git_snapshot_filters_secret_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = make_project(tmp_path)
 

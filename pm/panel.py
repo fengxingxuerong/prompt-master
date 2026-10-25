@@ -4,9 +4,12 @@
 安全响应头、限流、调度器（④那张卡要用 `/api/optimize`）都只有一份。另起一个服务
 就得把那套再实现一遍，而"两份安全头实现"正是本仓一直在收的那类漂移。
 
-判据一律**不在这个文件里产生**：转发与模板白名单都在 `pm.cliforward`，桌面窗口
-（`extras/desktop.py`，2026-10-19 移出主包）用的是同一份。这里只负责 HTTP 形状：入参护栏、
-把 `TemplateNotFound` 翻成 404、把 CLI 的 JSON 原样递出去。
+判据一律**不在这个文件里产生**：转发与模板白名单都在 `pm.cliforward`。桌面窗口
+（`extras/desktop.py`，2026-10-19 移出主包）**不走这一份**：它需要拿到子进程句柄才能
+"中止"，而 `run_cli_json` 是阻塞的（2026-10-31 更正：此前这里写"用的是同一份"，
+与实现不符——全仓没有 `import pm.cliforward` 的桌面代码）。
+这里只负责 HTTP 形状：入参护栏、把 `TemplateNotFound` 翻成 404、把转发失败翻成 502
+（**不许**变成 500 白页——那会把带 stderr 尾的自救信息全丢掉）、把 CLI 的 JSON 原样递出去。
 
 ⚠️ 面板与桌面窗口都**不承诺**"优化更好"。它们渲染的是自评 Δ 与成对盲评，而按项目自己的
 判据（C1 盲评 ≥3/4 且 C2 Δ>本轮噪声带），"优化有效"至今 0 例确证。
@@ -64,6 +67,30 @@ def _cli_probe() -> dict[str, Any]:
     return dict(_probe_cache)
 
 
+def _probe_failed(note: str) -> None:
+    """让"转发坏了"立刻反映到面板顶部那盏灯上（2026-10-31 修）。
+
+    旧版只有首屏探针会写缓存：三个卡片端点转发失败时抛 500，而探针缓存 60 秒内
+    仍报"零调用可用"—— 用户看到绿灯 + 白页，分不清是自己输入错还是功能坏了。
+    """
+    _probe_cache.update({"at": time.time(), "ran": True, "ok": False, "note": note})
+
+
+def _forward(args: list[str], *, timeout: float = 60.0) -> JSONResponse:
+    """把 `run_cli_json` 的失败翻成 502 + 可读 detail（三个零调用端点共用）。
+
+    为什么不让它自己冒到框架：`ForwardError` 与 `subprocess.TimeoutExpired` 都不是
+    HTTP 异常，FastAPI 会给一个 `500 text/plain "Internal Server Error"`，
+    而 `ForwardError` 的 message 里恰好带着 stderr 尾部（"到底哪里错了"的唯一线索）。
+    """
+    try:
+        return JSONResponse(run_cli_json(args, timeout=timeout))
+    except (ForwardError, subprocess.SubprocessError, OSError) as e:
+        msg = str(e) or f"{type(e).__name__}"
+        _probe_failed(f"零调用转发不可用：{msg}"[:400])
+        raise HTTPException(status_code=502, detail=f"转发 run.py 失败：{msg}") from e
+
+
 class PromptIn(BaseModel):
     prompt: str = Field(min_length=1, max_length=SEED_PROMPT_MAX_CHARS, description="待体检正文")
 
@@ -118,7 +145,7 @@ async def templates() -> dict[str, Any]:
 @router.post("/api/panel/check", dependencies=[Depends(require_token)])
 async def panel_check(body: PromptIn) -> JSONResponse:
     """① 提示词体检：转发 `run.py check --prompt ... --json`（零 LLM 调用）。"""
-    return JSONResponse(run_cli_json(["check", "--prompt", body.prompt, "--json"]))
+    return _forward(["check", "--prompt", body.prompt, "--json"])
 
 
 @router.post("/api/panel/cases-check", dependencies=[Depends(require_token)])
@@ -136,16 +163,12 @@ async def panel_cases_check(body: CasesIn) -> JSONResponse:
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "cases.json"
             f.write_text(body.cases, encoding="utf-8")
-            return JSONResponse(
-                run_cli_json(
-                    ["check", "--cases-file", str(f), "--assert-mode", body.assert_mode, "--json"]
-                )
+            return _forward(
+                ["check", "--cases-file", str(f), "--assert-mode", body.assert_mode, "--json"]
             )
     else:
         raise HTTPException(status_code=422, detail="template 与 cases 至少要给一个")
-    return JSONResponse(
-        run_cli_json(["check", "--cases-file", src, "--assert-mode", body.assert_mode, "--json"])
-    )
+    return _forward(["check", "--cases-file", src, "--assert-mode", body.assert_mode, "--json"])
 
 
 @router.post("/api/panel/diff", dependencies=[Depends(require_token)])
@@ -158,4 +181,4 @@ async def panel_diff(body: DiffIn) -> JSONResponse:
         a, b = Path(d) / "a.md", Path(d) / "b.md"
         a.write_text(body.before, encoding="utf-8")
         b.write_text(body.after, encoding="utf-8")
-        return JSONResponse(run_cli_json(["diff", str(a), str(b), "--json"]))
+        return _forward(["diff", str(a), str(b), "--json"])
