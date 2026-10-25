@@ -614,9 +614,15 @@ def test_load_run_history_last_window(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_history_command_json_significance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """样本够（n=6）且方向一致 ⇒ JSON 里判显著。
+
+    2026-10-31 改：这条原来用 n=3、按 1.96 算 CI 判显著。小样本的正确分位是
+    t(n-1)——n=3 时 4.303，同一批数据 CI 变成 [-0.48, 4.48]，**不显著**。
+    所以"显著的形状"要拿足够样本去测，而"n=3 不显著"另有一条（见下一个用例）。
+    """
     _patch_log_dir(monkeypatch, tmp_path)
-    # 同一任务 3 次 run，delta 1/2/3：mean=2, se=sqrt(1/3)≈0.577, CI≈[0.87, 3.13] → 显著
-    for i, d in enumerate((1.0, 2.0, 3.0)):
+    # 6 次 run，delta 1..6：mean=3.5, se≈0.764, t(5)=2.571 → CI≈[1.54, 5.46] → 显著
+    for i, d in enumerate((1.0, 2.0, 3.0, 4.0, 5.0, 6.0)):
         _write_run(
             tmp_path,
             f"sig{i}",
@@ -627,11 +633,37 @@ def test_history_command_json_significance(
         )
     assert cli_history._history_command(["--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["n_runs"] == 3
+    assert payload["n_runs"] == 6
     groups = payload["task_groups"]
-    assert len(groups) == 1 and groups[0]["n_runs"] == 3
+    assert len(groups) == 1 and groups[0]["n_runs"] == 6
     assert groups[0]["significant"] is True
+    assert groups[0]["estimable"] is True
+    assert groups[0]["t_crit"] == 2.571
     assert groups[0]["delta_ci95"][0] > 0
+
+
+def test_history_command_small_sample_is_not_called_significant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """n=3 的三轮同向 Δ 不许判"显著"（t(2)=4.303 下 CI 跨 0）。
+
+    这是"用大样本分位算小样本"的经典假象：旧版按 1.96 得 CI≈[0.87, 3.13] → 显著。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    for i, d in enumerate((1.0, 2.0, 3.0)):
+        _write_run(
+            tmp_path,
+            f"small{i}",
+            task="同一需求",
+            status="passed",
+            aggregate={"avg_score": 7.0 + d},
+            baseline_aggregate={"avg_score": 7.0},
+        )
+    assert cli_history._history_command(["--json"]) == 0
+    g = json.loads(capsys.readouterr().out)["task_groups"][0]
+    assert g["significant"] is False
+    assert g["delta_ci95"][0] < 0 < g["delta_ci95"][1], "CI 跨 0 才是这批数据的真实结论"
+    assert g["note"] == "样本少，结论仅供观察"
 
 
 def test_history_command_insufficient_sample_note(
@@ -736,6 +768,63 @@ def test_library_recommend_no_match(
     assert cli_library._library_recommend(ns) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["recommendations"] == [] and "没有相似" in payload["note"]
+
+
+def test_library_recommend_uses_the_same_threshold_as_the_injection_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """推荐门槛必须与注入路径共用 `memory._SIM_MIN`（0.35），不是 0.05。
+
+    实测缺陷（2026-10-31 审计）：本文件原来写 `> 0.05`，而记忆注入路径是 0.35。
+    于是"写秋天的诗"这类只共享"写/一个/的"这些 bigram 的任务（Dice 0.08~0.11）
+    也被推成"相似资产"——注入路径早就因为一次真实事故（v0 被评委打 1.19）
+    把门槛提到 0.35，两条路径口径不一致，等于只修了一半。
+    """
+    from pm import memory as memory_mod
+
+    _patch_log_dir(monkeypatch, tmp_path)
+    assert cli_library._SIM_MIN == memory_mod._SIM_MIN
+    # "写秋天的诗" 与 "写季度销售报告" 共享的只有"写/一/个"这类模板 bigram
+    _asset_run(tmp_path, "poem", "写秋天的诗", 9.5)
+    ns = argparse.Namespace(task_text="写季度销售报告", json=True)
+    assert cli_library._library_recommend(ns) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["recommendations"] == [], f"不相似的资产被推荐了：{payload['recommendations']}"
+
+
+def test_library_recommend_skips_negative_delta_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Δ<0 的资产不推荐：它通过了，但**比不优化还差**，当参考等于教人变坏。
+
+    实测缺陷（2026-10-31 审计）：`pm/memory.py` 的注入路径一直有这条过滤，
+    `library --recommend` 这条漏了 —— 同一个概念两套实现就是这么漂的。
+    """
+    _patch_log_dir(monkeypatch, tmp_path)
+    _write_run(
+        tmp_path,
+        "worse",
+        task="分析销售数据",
+        status="passed",
+        prompt="# 比基线更差的提示词",
+        aggregate={"avg_score": 8.2},
+        baseline_aggregate={"avg_score": 8.6},
+        trace=[{"node": "test", "channel": "real"}],
+    )
+    _write_run(
+        tmp_path,
+        "better",
+        task="分析销售数据",
+        status="passed",
+        prompt="# 更好的提示词",
+        aggregate={"avg_score": 8.9},
+        baseline_aggregate={"avg_score": 8.1},
+        trace=[{"node": "test", "channel": "real"}],
+    )
+    ns = argparse.Namespace(task_text="分析销售数据并给出结论", json=True)
+    assert cli_library._library_recommend(ns) == 0
+    recs = json.loads(capsys.readouterr().out)["recommendations"]
+    assert [r["run_id"] for r in recs] == ["better"], f"Δ<0 的资产被推荐了：{recs}"
 
 
 def test_library_recommend_requires_task_text() -> None:

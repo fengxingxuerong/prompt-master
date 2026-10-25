@@ -53,6 +53,18 @@ _BAND_POINTS: dict[int, float] = {1: 2.0, 2: 4.5, 3: 6.5, 4: 8.5, 5: 9.5}
 
 # 编造/无依据关键事实的总分封顶值：与 rubric 里"加权总分不得高于 6.0"同口径。
 _FABRICATION_CAP = 6.0
+# 「清单里一条都没满足」的总分封顶（2026-10-31 实测，纯代码推演、零调用）。
+#
+# 为什么需要：台阶按**绝对条数**取档，于是清单越短越掉不下来 —— 一份 3 条约束的
+# 提示词、三条全不满足 → 该维度 5.0（勉强可用），乘 0.25 权重后总分 **8.38 仍通过**；
+# 2 条清单更低到 6.5 → 8.75。而 `_STEPS` 上面的注释写的是「4 条及以上 1-4（需重写）」，
+# 也就是说"4 条"是台阶表的实现细节，不是语义：**"一条要求都没做到"在 2 条清单里
+# 与在 10 条清单里是同一件事**，不该因为清单短就变成"生产可用"。
+#
+# 只封**用例级**总分、不动维度台阶：逐桶改会顺手把"1 条清单违反 1 条"也压死
+# （那不是全盘失败，rubric 对"个别轻微问题"给的就是 8 档）。判据放在
+# `apply_caps` 里，与"编造关键事实"同一个执行点——两者都是"必须由代码兑现的判词"。
+_ALL_VIOLATED_CAP = _FABRICATION_CAP
 # 编造项以"清单里的一条"参与计数，这样它和提示词约束走同一套台阶，不额外开一条罚分路径。
 _FABRICATION_ITEM = "事实性：输出中存在输入无法支撑、且评委未给出推导依据的数值或结论"
 # 提示词自己贡献的条目少于这个数就走印象式：基线臂（原始需求直喂）没有标签段，
@@ -273,10 +285,17 @@ def apply_caps(dims: DimensionScores, details: dict[str, Any]) -> tuple[float, b
 
     绕过 `finalize()` 是有意的：`finalize()` 只会按维度分算加权，而"编造关键事实则总分
     不得高于 6.0"这条必须有一个能真正执行它的地方 —— 否则它仍然只是一句写在提示词里的话。
+    同理"清单里一条都没满足"见 `_ALL_VIOLATED_CAP`。
     """
     weighted = compute_weighted_score(dims)
     for cap in details.get("caps") or []:
         weighted = min(weighted, float(cap))
+    n_items = max(0, int(details.get("n_items") or 0))
+    n_violated = len(details.get("violations") or [])
+    # 至少 2 条才算"全盘未满足"：单条清单的"全违反"就是"个别问题"，rubric 给 8 档，
+    # 且这种薄清单本来由 `checklist_usable` 挡在门外。
+    if n_items >= 2 and n_violated >= n_items:
+        weighted = min(weighted, _ALL_VIOLATED_CAP)
     weighted = round(weighted, 2)
     return weighted, weighted >= PASS_THRESHOLD
 
@@ -418,9 +437,27 @@ def _dedupe_texts(texts: list[str]) -> list[str]:
 
 
 def _is_placeholder(basis: str) -> bool:
-    """「无来源/不清楚/大概是」这类解释等于没解释。"""
+    """「无来源/不清楚/大概是」这类解释等于没解释。
+
+    2026-10-31 补 `未找到`（以及 `不适用`）：`CheckVerdict.evidence` 的字段说明
+    自己就教评委"找不到依据时写『未找到』"，而这个占位符不在判据里 ——
+    evidence 写 `未找到` 照样拿 9.5 顶档，顶档的举证门槛等于没有。
+    """
     b = basis.strip()
-    return b in {"", "无", "不知道", "不确定", "无法判断", "未提供", "n/a", "N/A", "数据缺失"}
+    return b in {
+        "",
+        "无",
+        "不知道",
+        "不确定",
+        "无法判断",
+        "未提供",
+        "未找到",
+        "找不到",
+        "不适用",
+        "n/a",
+        "N/A",
+        "数据缺失",
+    }
 
 
 def _norm(text: str) -> str:
@@ -491,9 +528,16 @@ def has_empty_deliverable_profile(text: str) -> bool:
     命中只意味着"这条高分需要人工看一眼"；是否可上线仍由评委维度分决定。
     """
     stripped = (text or "").strip()
-    if len(stripped) < 8:
-        return True
     hits = sum(stripped.count(m) for m in EMPTY_DELIVERABLE_MARKERS)
+    if len(stripped) < 8:
+        # 短答案**不是**空壳（2026-10-31 修）：旧版在这里无条件 `return True`，
+        # 于是"42"、"YES"、"通过"、"3.5%" 这类**正确且完整**的回答被判空产出、
+        # 硬封顶到 4.0 —— 而 `pm/nodes/execute.py` 的注释里那个真实用例正是"只回答一个数字"。
+        # 判据改成：短，且它本身要么含空产出标记词、要么根本不含字母数字（纯标点/空白）。
+        # 只有长度这一条不够——长度短是好答案的常见形态，不是缺交付物的证据。
+        if hits:
+            return True
+        return not any(ch.isalnum() for ch in stripped)
     if hits < _EMPTY_MARKERS_NEEDED:
         return False
     return _substantive_length(stripped) < _SUBSTANTIVE_MIN_CHARS

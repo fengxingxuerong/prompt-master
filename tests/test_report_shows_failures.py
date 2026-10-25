@@ -74,6 +74,30 @@ def test_warning_says_the_two_columns_must_not_be_added() -> None:
     assert "只数**成功**" in text, "没说清 calls 只数成功"
 
 
+def test_retry_only_round_still_renders_the_table() -> None:
+    """「重试过但没失败过」的轮次也必须渲染这张表（2026-10-31 修）。
+
+    这类轮次的形状是：通道 A 传输层成功、解析失败 → 通道 B 重发。
+    `failed_calls` 是 0（没有异常到端点），`retry_requests` 是 1。
+    旧版只按 failed_calls 判渲染条件，于是"重发过一整发全价请求"这件事
+    在报告里**整段消失**。
+    """
+    usage = {
+        "evaluator": {
+            "calls": 4,
+            "input_tokens": 100,
+            "output_tokens": 200,
+            "latency_ms": 5000,
+            "failed_calls": 0,
+            "failed_latency_ms": 0,
+            "retry_requests": 2,
+        },
+    }
+    text = "\n".join(_usage_lines(_state(usage)))
+    assert "重试请求数" in text, f"只有重试时这段被整段吞掉了：\n{text}"
+    assert "| evaluator | 0 | 0.0s | 2 |" in text
+
+
 def test_no_failure_table_when_everything_succeeded() -> None:
     """没有失败时**不要**渲染这张表——多余的表格是噪音。"""
     usage = {

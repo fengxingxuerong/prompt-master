@@ -363,13 +363,16 @@ def _calibrate_run(ns: argparse.Namespace) -> int:
     try:
         samples = calib.load_samples(Path(ns.samples))
     except (OSError, ValueError, json.JSONDecodeError) as e:
-        print(f"样本加载失败：{e}", file=sys.stderr)
+        # 走 `_calib_error` 而不是裸 print（2026-10-31 修）：这条路径此前 rc=2 但
+        # stdout 为空，而 `--json` 的契约是"stdout 恰好一个 JSON 对象"——
+        # MCP/桌面侧无条件 `json.loads(stdout)`，拿到的是 "Expecting value" 而不是真因。
+        _calib_error(ns, f"样本加载失败：{e}")
         return EXIT_CONFIG
     # 未人工确认的候选已被 load_samples 挡在 samples 外面，这里只负责把这件事说出来：
     # 采了 45 条、实际用 11 条，如果不印这一行，读输出的人会以为 45 条全进了分母。
     pending = getattr(samples, "pending", []) or []
     if not samples:
-        print(_empty_samples_message(ns, pending), file=sys.stderr)
+        _calib_error(ns, _empty_samples_message(ns, pending))
         return EXIT_CONFIG
     if pending:
         print(calib.render_provenance(len(samples) + len(pending), len(pending)), file=sys.stderr)
@@ -380,7 +383,7 @@ def _calibrate_run(ns: argparse.Namespace) -> int:
     for sid, err in errors:
         print(f"  [SKIP] {sid}：{err}", file=sys.stderr)
     if not analysis:
-        print("全部锚点评估失败，无法校准（先跑 run.py --preflight 检查端点）", file=sys.stderr)
+        _calib_error(ns, "全部锚点评估失败，无法校准（先跑 run.py --preflight 检查端点）")
         return EXIT_FAILED
 
     # 复现性：与"准不准"正交的另一件事。一个每次调用在不同口径之间跳变的评委，
@@ -418,16 +421,64 @@ def _empty_samples_message(ns: argparse.Namespace, pending: list[Any]) -> str:
     return f"样本为空：{ns.samples}{hint}"
 
 
+def _quarantine_history(path: Path, why: str) -> None:
+    """账本读不出来时**改名保留**，绝不当空账本继续写。
+
+    实测缺陷（2026-10-31 审计）：旧版 `_load_history` 损坏就 `return []`，而
+    `_save_entry` 随后**整文件重写** —— 实测一份被截断成半截的 2 轮账本，
+    跑完一轮（真实计费）之后只剩下新写的那 1 条，全程零提示。
+    改名而不是删除：账本是校准结论的唯一出处，坏文件本身也是证据。
+    """
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    dest = path.with_name(f"{path.name}.corrupt-{ts}")
+    try:
+        path.replace(dest)
+        kept = f"已改名保留为 {dest.name}"
+    except OSError as e:
+        kept = f"改名失败（{e}），**旧账本仍在原处，本次写入会覆盖它**"
+    print(
+        f"⚠️ 校准账本不可用：{path}（{why}）——{kept}；本次将新建一份账本",
+        file=sys.stderr,
+    )
+
+
 def _load_history() -> list[dict[str, Any]]:
+    """读校准账本；坏文件改名保留并告警，**不静默清零**。
+
+    三种"读得出来但不能用"的形态都要挡：解析失败、顶层不是数组（旧版会把它赋给
+    `history` 然后在 `.append` 上抛 AttributeError，而那正好发生在付费跑完之后、
+    渲染之前 —— 整轮白跑且没有任何输出）、数组里混着非对象。
+    """
     path = _calib_history()
-    history: list[dict[str, Any]] = []
-    if path.exists():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []  # 历史损坏按空账本处理，本次照常记录
-        history = loaded
-    return history
+    if not path.exists():
+        return []
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        _quarantine_history(path, f"无法解析：{e}")
+        return []
+    if not isinstance(loaded, list):
+        _quarantine_history(path, f"顶层不是数组而是 {type(loaded).__name__}")
+        return []
+    rows = [r for r in loaded if isinstance(r, dict)]
+    if len(rows) != len(loaded):
+        print(
+            f"⚠️ 校准账本里有 {len(loaded) - len(rows)} 条不是对象，已跳过（其余照常读取）",
+            file=sys.stderr,
+        )
+    return rows
+
+
+def _write_history(path: Path, history: list[dict[str, Any]]) -> None:
+    """原子写账本：先写同目录临时文件再 `os.replace`。
+
+    直接 `write_text` 的话，写到一半崩掉（磁盘满、进程被杀）就留下一份**语法坏掉的**
+    账本 —— 而下一个读它的人会按"空账本"处理，于是整段历史被一次写入吃掉。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
 
 
 @dataclass(frozen=True)
@@ -638,9 +689,7 @@ def _save_entry(
             }
         )
     history.append(entry)
-    path = _calib_history()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_history(_calib_history(), history)
 
 
 def _print_calibrate_result(

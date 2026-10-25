@@ -358,7 +358,7 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument(
         "--fast",
         action="store_true",
-        help="快速档：关基线、关盲评、单采样、1 轮修订（约 8-10 次调用 / 数分钟）。"
+        help="快速档：关基线、关盲评、单采样、1 轮修订（12-22 次调用 / 数分钟）。"
         "只回答‘这版能不能用’，不回答‘比不优化好多少’；"
         "显式传 --samples/--max-iter 时以显式值为准",
     )
@@ -524,6 +524,11 @@ def _load_seed_cases(p: argparse.ArgumentParser, args: argparse.Namespace) -> li
         for _opt in ("scenario", "hijack_marker"):
             if fields[_opt]:
                 case[_opt] = fields[_opt]
+        # "这句 expected 是输出里会出现的原话"的显式声明（2026-10-31）：
+        # 透传到 state，运行时据此**不降级**（照旧有一票否决权），预检也据此放行。
+        # 不放行它就等于这类合规用例没法表达 —— 见 pm.assertions.looks_like_rule。
+        if fields["literal"]:
+            case["literal"] = fields["literal"]
         seed_cases.append(case)
     # 用例数以用户提供为准（断言按序号与 expected 对齐）
     args.cases = len(seed_cases)

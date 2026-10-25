@@ -148,3 +148,33 @@ def _record_failure(role: str, latency_ms: int) -> None:
     if ledger is None:
         return
     ledger.add_failure(role, latency_ms)
+
+
+def _record_retry(role: str, n: int = 1) -> None:
+    """记一次**额外打到端点**的重试请求（2026-10-31 接通）。
+
+    为什么这个函数现在才出现：`UsageLedger.add_retry_request` 自 §三十·十八 起就存在，
+    但**全仓没有任何生产调用点** —— 于是报告里那列「重试请求数」在每一轮真跑里恒为 0。
+    那比"没有这一列"更坏：读者会把 0 读成"这一轮没重试过"，而实际上 429 退避、
+    连接重试、解析重试都在发生，只是没人记账。
+
+    计数口径：**同一次逻辑调用里，除首发以外的每一条真实 HTTP 请求**。
+    各重试点分别登记（连接重试、限流退避、通道降级、解析重试），
+    所以一次"通道 A 失败 → 通道 B 解析重试 2 次"会记 3 条，
+    而成功那次本身不记 —— 它与上表的 `calls` 一一对应，不该重复。
+    """
+    ledger = current_ledger()
+    if ledger is None:
+        return
+    ledger.add_retry_request(role, n)
+
+
+def _record_retry_if(role: str, cond: bool) -> None:
+    """条件成立才记一条重试（把 `if` 挪进这里，调用点的圈复杂度不涨）。
+
+    为什么要这个小壳：复杂度棘轮对 `structured_call`（CC 24）与
+    `_invoke_with_rate_limit_retry`（CC 11→12）是逐函数预算，
+    "多一个记账分支"这种纯记账的事不该挤占它们的预算——分支本身没有语义。
+    """
+    if cond:
+        _record_retry(role)

@@ -61,8 +61,9 @@ def baseline_node(state: State) -> dict[str, Any]:
     # 采样次数与评分口径两边共用同一组函数，否则 Δ 不可比。
     seed = str(state.get("seed_prompt") or "").strip()
     arm_prompt = seed or task
-    # 与主路共用同一个口径函数：expected / mode / rules 三者必须逐条一致，否则 Δ 不可比
-    _expected, _mode, rules_fn = _case_ground_truth(state)
+    # 与主路共用同一个口径函数：expected / mode / rules / literal 四者必须逐条一致，
+    # 否则 Δ 不可比（`literal` 决定这条断言有没有一票否决权，两臂不同口径 = 假 Δ）
+    _expected, _mode, rules_fn, _literal = _case_ground_truth(state)
 
     judges = _active_judges()
     judge_spec = _judge_spec(judges)
@@ -70,7 +71,14 @@ def baseline_node(state: State) -> dict[str, Any]:
     k = _samples_per_case()
     try:
         runs, n_calls = _run_matrix(
-            cases, arm_prompt, target_model, _expected, _mode, k, _target_concurrency()
+            cases,
+            arm_prompt,
+            target_model,
+            _expected,
+            _mode,
+            k,
+            _target_concurrency(),
+            _literal,
         )
         evals_raw, errors, _, n_eval_calls = _evaluate_runs(
             [r.model_dump() for r in runs],
@@ -86,6 +94,13 @@ def baseline_node(state: State) -> dict[str, Any]:
         logger.warning("基线跑失败（不影响主流程）：%s", e)
         return _apply(state, node, {"errors": [f"baseline: {e}"]}, "baseline_failed", error=str(e))
 
+    # 空产出封顶必须**两臂同口径**（2026-10-31 修）。此前只有主路走
+    # `cap_empty_deliverables`，基线臂拿的是评委裸分：两臂都产出空壳时
+    # 主路 4.0 / 基线 8.9 ⇒ Δ≈−5，报告据此写"优化未带来优势"，
+    # 而真实情况是两臂一样烂。Δ 的全部意义建立在同口径上，这一处不补就是自毁前提。
+    from .judge import cap_empty_deliverables
+
+    cap_empty_deliverables(evals_raw, [r.model_dump() for r in runs])
     evals = [EvaluationResult.model_validate(e) for e in evals_raw]
     agg = AggregateScore.from_evaluations(
         evals,

@@ -115,6 +115,49 @@ def test_violation_steps_follow_the_rubric_bands() -> None:
     assert dims.constraint_compliance == 3.0
 
 
+def test_all_violated_fails_the_case_even_with_a_short_checklist() -> None:
+    """一条要求都没满足 ⇒ 判不通过，不因清单短而停在"生产可用"。
+
+    实测缺陷（2026-10-31，纯代码推演、零调用）：台阶按**绝对条数**取档，3 条清单
+    全违反只掉到 5.0（勉强可用），乘 0.25 权重后总分 **8.38 仍通过**；2 条清单更低到
+    6.5 → 8.75。而 `_STEPS` 的注释写的是「4 条及以上 1-4（需重写）」——
+    "4 条"是台阶表的实现细节，不是语义。
+    修法只在**用例级**封顶（`apply_caps`），不动维度台阶。
+    """
+    for n_items in (2, 3, 4, 7):
+        cl = [{"item": f"[约束] 第{i}条", "bucket": "constraint"} for i in range(1, n_items + 1)]
+        all_bad = {r["item"]: False for r in cl}
+        dims, detail = S.score_checklist(_ev(all_bad), cl)
+        assert dims.constraint_compliance == S._points([r["item"] for r in cl], set(all_bad)) > 0
+        # 逐条都在 violations 里 ⇒ 用例级封顶生效
+        assert len(detail["violations"]) == n_items
+        weighted, passed = S.apply_caps(dims, detail)
+        assert passed is False, f"{n_items} 条清单全违反却通过了（总分 {weighted}）"
+        assert weighted <= S._ALL_VIOLATED_CAP
+
+
+def test_partial_violation_is_not_capped_by_the_all_violated_rule() -> None:
+    """部分违反不许被顺手压平：3 条里违反 2 条仍走原台阶（维度 6.5）。"""
+    cl = [{"item": f"[约束] 第{i}条", "bucket": "constraint"} for i in range(1, 4)]
+    items = {r["item"]: i >= 2 for i, r in enumerate(cl)}  # 前 2 条不满足、第 3 条满足
+    dims, detail = S.score_checklist(_ev(items), cl)
+    assert dims.constraint_compliance == 6.5
+    assert len(detail["violations"]) == 2
+
+
+def test_single_item_checklist_keeps_the_rubric_band() -> None:
+    """1 条清单违反 1 条 = "个别问题"，rubric 给 8 档，不该被判成全盘失败。
+
+    薄清单（提示词自身条目 <2）本来就由 `checklist_usable` 挡在门外，
+    所以这里的 8.0 是"台阶语义"而不是"放水"。
+    """
+    cl = [{"item": "[约束] 不得编造", "bucket": "constraint"}]
+    dims, detail = S.score_checklist(_ev({"[约束] 不得编造": False}), cl)
+    assert dims.constraint_compliance == 8.0
+    weighted, _ = S.apply_caps(dims, detail)
+    assert weighted > S._ALL_VIOLATED_CAP
+
+
 def test_unanswered_item_counts_as_violation() -> None:
     """评委少答一条不该是免费的——否则"回避问题"会稳定抬高分数。"""
     items = {r["item"]: True for r in _CHECKLIST}

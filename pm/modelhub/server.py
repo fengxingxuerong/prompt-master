@@ -13,10 +13,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import queue
 import secrets
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -290,6 +293,45 @@ def chat_completions(
     )
 
 
+def _open_frame_pump(gen: Any, request_id: str) -> tuple[Any, Any]:
+    """起一个守护线程把上游 chunk 泵进**有界**队列，返回 `(queue, closed旗标)`。
+
+    为什么队列必须有界、旗标必须存在（2026-10-31 修泄漏）：客户端断流时 Starlette 会
+    close 下游生成器，`GeneratorExit` 不是 `Exception`，旧版走不到 except，于是
+    ① 上游 `gen` 从不 close ⇒ socket 不释放；② 泵继续往**无界** `queue.Queue()` 里塞，
+    而没人消费 ⇒ 内存随上游产出线性增长。每一条断流都留一个线程 + 一条连接。
+
+    现在：下游一走（`closed.set()`）泵在下一次 put 前就退出；队列满了也退出
+    —— 让它"停"比让它"输"重要。
+    """
+    q: queue.Queue[Any] = queue.Queue(maxsize=64)
+    closed = threading.Event()
+    threading.Thread(
+        target=_pump_frames, args=(gen, q, closed), daemon=True, name=f"sse-pump-{request_id}"
+    ).start()
+    return q, closed
+
+
+def _pump_frames(gen: Any, q: Any, closed: Any) -> None:
+    """泵线程主体：上游异常折成 `"ERR::"` 哨兵，正常/异常都以 `None` 收尾。"""
+    try:
+        for chunk in gen:
+            if closed.is_set():
+                break
+            try:
+                q.put(chunk, timeout=1.0)
+            except queue.Full:
+                # 下游不消费了（断流 / 极慢）：停泵，绝不无界堆积
+                closed.set()
+                break
+    except Exception as e:  # noqa: BLE001
+        with contextlib.suppress(queue.Full):
+            q.put_nowait("ERR::" + str(e))
+    finally:
+        with contextlib.suppress(queue.Full):
+            q.put_nowait(None)
+
+
 def _stream_response(
     hub: ModelHub,
     req: ChatRequest,
@@ -317,7 +359,13 @@ def _stream_response(
     if not candidates:
         raise HTTPException(status_code=502, detail="模型池当前没有可用模型")
 
-    timeout = float(os.getenv("PMH_TIMEOUT", "60") or 60)
+    # 用 pool 的容错解析器而不是裸 float()（2026-10-31 修）：`PMH_TIMEOUT=60s` 这类
+    # 带单位的写法在 pool.py 里是容错的（回退默认），这里裸 float 会抛 ValueError
+    # 且没被捕获 —— 所有 stream 请求直接 500，而非流式请求照常工作，
+    # 表现为"只有流式挂了"，极难从症状反推配置。
+    from .pool import _timeout_seconds
+
+    timeout = _timeout_seconds()
 
     def attempt_stream() -> tuple[ModelEntry, bytes, Iterator[bytes]]:
         """依次尝试候选模型；成功后返回 (entry, 首个 chunk, 剩余 chunk 迭代器)。"""
@@ -479,26 +527,17 @@ def _stream_response(
         # D-L2 心跳保活：推理久/上游慢时，15s 无数据会触发中间层读超时断流。
         # 泵线程把上游 chunk 推进队列；主循环 15s 取不到数据就发 SSE 注释行
         # （": keep-alive"，规范内不当作数据），守护长连接不断。
-        import queue
-        import threading
+        #
+        # 泵、队列与"下游已走"旗标的实现搬到 `_open_frame_pump` / `_pump_frames`：
+        # ① 生命周期（断流要关上游、队列必须有界）是独立的责任，混在 SSE 主循环里
+        #    既测不到也读不懂；② 复杂度棘轮不接受"加一段兜底就让 CC 涨到 31"。
+        q, closed = _open_frame_pump(gen, request_id)
 
-        q: queue.Queue[bytes | str | None] = queue.Queue()
         # 心跳间隔可配：默认 15s（实测上游慢时 15s 无数据会触发中间层读超时断流）。
         # 之所以做成可配而不是写死常量（2026-10-02）：写死时这条心跳路径**无法被测试触发**
         # —— 15s 的等待让任何单测都不可接受，于是它长期是覆盖缺口。
         # 与 PMH_TIMEOUT / PMH_BREAK_THRESHOLD 等同族，走同一个 env 惯例。
         HEARTBEAT = float(os.getenv("PMH_HEARTBEAT_SECONDS", "15") or 15)
-
-        def pump() -> None:
-            try:
-                for chunk in gen:
-                    q.put(chunk)
-            except Exception as e:  # noqa: BLE001
-                q.put("ERR::" + str(e))
-            finally:
-                q.put(None)
-
-        threading.Thread(target=pump, daemon=True, name=f"sse-pump-{request_id}").start()
 
         def hb_comment() -> bytes:
             return f": keep-alive {int(time.time())}\n\n".encode()
@@ -535,6 +574,12 @@ def _stream_response(
                 + "\n\n"
             ).encode("utf-8")
         finally:
+            # 断流/正常结束都走这里：先旗标停泵，再关上游生成器（释放 socket）。
+            closed.set()
+            close = getattr(gen, "close", None)
+            if callable(close):
+                with contextlib.suppress(Exception):
+                    close()
             if ok:
                 hub._mark_success(entry)
             else:
@@ -555,6 +600,19 @@ def _stream_response(
                 agent=agent,
                 role=role,
                 content_chars=content_chars or None,
+            )
+            # 日聚合也要记（2026-10-31 修）：非流式路径在 253 行记 `record_call`，
+            # 而流式这条路此前只写台账事件 —— 于是 `/v1/usage` 的 daily 聚合
+            # **漏掉全部流式调用**。台账（事实源）里有、看板（日聚合）里没有，
+            # 这种"两个读数各说一套"比缺数据更难查：有人对着看板核对账单，会平白少算一半。
+            record_call(
+                model=entry.name,
+                agent=agent or "(unattributed)",
+                role=role or "",
+                success=ok,
+                latency_ms=int((time.time() - t0) * 1000),
+                failovers=0,
+                content_chars=content_chars,
             )
 
     # ⚠️ 这个 return 曾经丢过一版（sse_gen 定义完函数就结束了 → stream=true 拿到 None，

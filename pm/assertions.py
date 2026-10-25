@@ -57,8 +57,33 @@ _RULE_MARKERS = (
 )
 
 
-def looks_like_rule(exp: str) -> bool:
-    """启发式：这段 expected 更像给人看的规则，而不是期望出现的字面片段。"""
+# 「这条 expected 就是输出里会出现的原话」的显式声明：`literal` / `expected_is_literal`。
+# 只认常见真值写法，避免把 `"literal": "no"` 这种字符串读成 True（JSON 里三种类型都可能出现）。
+_LITERAL_TRUE = frozenset({"1", "true", "yes", "y", "on"})
+
+
+def _is_literal_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in _LITERAL_TRUE
+
+
+def looks_like_rule(exp: str, *, literal: bool = False) -> bool:
+    """启发式：这段 expected 更像给人看的规则，而不是期望出现的字面片段。
+
+    `literal=True` 是**用户显式声明**"这就是输出里会出现的原话"，直接放行、不猜。
+    它存在的理由（2026-10-31）：合规类任务里，期望片段本身就会带规则词 ——
+    例如「本公司不得为关联方提供担保」是**输出必须写出来的那句话**，
+    而按标记词判定会被当成需求规则 → 降级成"仅提醒" → 一票否决变装饰；
+    更早一步还会被预检**直接拦下**（`--cases-file` 退 2），于是这类用例根本没法表达。
+
+    为什么不用长度/句式去猜：真实语料里"规则句"是 25~38 字的多分句（判得对），
+    字面片段 ≤11 字，看起来能一刀切；但「必须包含3条结论」（8 字）与
+    「本公司不得对外担保」（9 字）长度几乎一样，语义却相反。
+    猜错的代价是一票否决打错人，所以这里只提供**显式开关**，不做第二次启发式。
+    """
+    if literal:
+        return False
     if any(marker in exp for marker in _RULE_MARKERS):
         return True
     return len(exp) > 80
@@ -89,7 +114,11 @@ def rule_like_expected_detail(
         for i, c in enumerate(cases)
         if str(c.get("mode") or c.get("assert_mode") or default_mode or "contains")
         in {"contains", "exact"}
-        and looks_like_rule(str(c.get("expected") or ""))
+        # `"literal": true` 是显式声明（那几句就是输出里会出现的原话），预检放行
+        and looks_like_rule(
+            str(c.get("expected") or ""),
+            literal=_is_literal_flag(c.get("literal") or c.get("expected_is_literal")),
+        )
     ]
     if not rule_like:
         return None
@@ -101,9 +130,11 @@ def rule_like_expected_detail(
     )
     return (
         f"{where}的 expected 读起来是需求规则而不是字面片段，"
-        "contains/exact 永远命不中。二选一："
+        "contains/exact 永远命不中。三选一："
         '① 改成输出里真会出现的一段字（如 "未提供：订单号"）；'
-        '② 给这几条加 "mode": "rule"（或整体 --assert-mode rule），'
+        "② 如果它本来就是输出必须写出来的原话（合规条款、固定话术这类），"
+        '给这几条加 "literal": true —— 显式声明后照旧逐字比对、照旧有一票否决权；'
+        '③ 给这几条加 "mode": "rule"（或整体 --assert-mode rule），'
         "交给评委逐条核验（默认只提醒不否决，需要硬约束再设 PM_RULE_VETO=1）。"
     )
 
@@ -301,7 +332,9 @@ class AssertionResult(BaseModel):
 RULE_MODE = "rule"
 
 
-def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | None:
+def check_assertion(
+    expected: str, output: str, mode: str, *, literal: bool = False
+) -> AssertionResult | None:
     """执行确定性断言。
 
     返回 None 表示"该用例没有可执行的断言"，调用方应跳过而不是当作失败。
@@ -309,6 +342,9 @@ def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | 
 
     自定义断言（custom:*）不需要 expected：判定完全交由注册的断言函数；
     其余模式必须以非空 expected 为前提（exact/contains/regex 才有"比什么"的问题）。
+
+    `literal=True`：用户显式声明这段 expected 就是输出里会出现的原话 ——
+    含规则词（必须/不得/禁止…）也不再降级成"仅提醒"，照旧参与一票否决。
     """
     if mode == RULE_MODE:
         return None
@@ -355,7 +391,7 @@ def check_assertion(expected: str, output: str, mode: str) -> AssertionResult | 
         return None
 
     # 只对字面比对类模式做提醒：regex / custom / rule 本来就是写“条件”的地方，不该拦。
-    advisory = mode in {"contains", "exact"} and looks_like_rule(exp)
+    advisory = mode in {"contains", "exact"} and looks_like_rule(exp, literal=literal)
     warn = (
         "⚠️ 这条期望读起来像需求规则而不是字面片段，contains/exact 永远命不中；"
         "已只作提醒、不计入否决。要校语义请交给评委，或改用 custom:<name>"

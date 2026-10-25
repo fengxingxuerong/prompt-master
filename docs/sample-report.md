@@ -3,7 +3,7 @@
 > 但分数 / 调用次数 / Δ 全部是桩**，而且桩偏乐观（这里 9.0 / 通过）。
 > 报告头部的「运行通道：假后端」那一行就是机器版的同一句声明（2026-10-23 起报告自带）。
 > 想知道真实口径与它会说的风险，先跑零成本的 `python run.py --dry-run --task "…"` 看预算，
-> 再用 `python run.py --task "…" --fast`（8~10 次调用）跑一轮真的。
+> 再用 `python run.py --task "…" --fast`（12~22 次调用）跑一轮真的。
 > 重新生成：`PM_FAKE_BACKEND=progress python run.py --task "让 AI 分析销售数据" --out docs/sample-report.md`
 > （重生成会覆盖上面这段说明——记得贴回来，`tests/test_sample_report.py` 会盯着它）。
 

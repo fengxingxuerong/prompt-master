@@ -11,9 +11,14 @@
 调用形式两种，行为同一套（`prompt-master` 只是 `run.py` 的装包版，共用同一个启动引导与 `main()`）：
 
 ```bash
-python /绝对路径/prompt-master/run.py --json --task "..."   # 从检出目录跑
-prompt-master --json --task "..."                          # `pip install .` 之后
+python /绝对路径/prompt-master/run.py --json --task "分析销售数据并给出结论"   # 从检出目录跑
+prompt-master --json --task "分析销售数据并给出结论"                          # `pip install .` 之后
 ```
+
+> ⚠️ `--task` 有 **≥4 字**下限（上限 8000）。照抄占位符 `--task "..."`（3 字）或
+> `--task "…"`（1 字）会直接退 **2**「需求描述长度需在 4-8000 字之间」——
+> 它看起来像配置错（2 号退出码也确实是"参数/配置错"），但根因是参数取值太短。
+> 下面所有示例里的 `--task "..."` 都请替换成一句真实需求。
 
 `.env` 的发现顺序（2026-10-22 修）：先按**当前工作目录**向上查找；检出模式下
 再退回仓库根那份。装包态在别的目录跑也读得到该项目自己的 `.env`（修复前读的是
@@ -32,7 +37,7 @@ site-packages 的祖先目录，用户项目里的配置会被静默忽略）。
 ### 同步模式（短任务 / fast 档）
 
 ```bash
-python run.py --task "..." --fast --json
+python run.py --task "分析销售数据并给出结论" --fast --json
 # stdout = 一个 JSON：run_id / status / aggregate / baseline_aggregate / pairwise /
 #            judge_health / judge_seat_absent / best_prompt / report_path / errors ...
 # ⚠️ 基线、盲评与"评委席降级"必须在机器出口里（2026-10-15 实测它们只在报告里，
@@ -57,7 +62,7 @@ python run.py check --cases-file case_templates/sales_analysis.json --json
 #    "max_cases":8,"veto_strong_cases":[2]}
 
 # 再决定改不改：交原稿时不再从零生成，而是做最小改动（保留原稿术语与字段名）
-python run.py --task "..." --prompt-file 我的提示词.md --json      # submit 子命令同参数
+python run.py --task "分析销售数据并给出结论" --prompt-file 我的提示词.md --json      # submit 子命令同参数
 ```
 
 - `--prompt` / `--prompt-file` 互斥；长度 8–20000 字（原稿会作为基线臂进每条用例的每次调用）。
@@ -105,7 +110,7 @@ python run.py diff --base-ref origin/main prompts/我的提示词.md --json
 python run_server.py
 
 # 提交（秒回 run_id，不阻塞）
-python run.py submit --task "..." --cases-file my_cases.json --max-iter 2
+python run.py submit --task "分析销售数据并给出结论" --cases-file my_cases.json --max-iter 2
 # → {"run_id": "...", "message": "..."}   默认连 http://127.0.0.1:8080，可用 --server / PM_SERVER_URL 覆盖
 
 # 等待终态（输出与 --json 同构，含报告全文）
@@ -119,16 +124,17 @@ python run.py report <run_id> --out report.md
 ### 提交前预算决策
 
 ```bash
-python run.py --dry-run --task "..." --cases-file my_cases.json --max-iter 2
+python run.py --dry-run --task "分析销售数据并给出结论" --cases-file my_cases.json --max-iter 2
 # → estimated_llm_calls: {min, max}；不联网不需要 Key。
-# 实测校准：全配置 4 用例双采样 2 轮预估 45~83，第 13 轮实际 81 次 ✓
+# 实测校准：全配置 4 用例双采样 2 轮预估 59~109（2026-10-31 用当前代码复算；
+# 旧文档写的 45~83 是更早一版口径）；第 13 轮实测 81 次 ✓
 ```
 
 ### 真实运行前的成本确认（只对"能问人"的终端）
 
 ```bash
-python run.py --task "..."            # 交互终端下先报价，再要一句 y/N（默认为否）
-python run.py --task "..." --yes      # 确认过就不再问；长任务改用 run_server.py + submit
+python run.py --task "分析销售数据并给出结论"   # 交互终端下先报价，再要一句 y/N（默认为否）
+python run.py --task "分析销售数据并给出结论" --yes   # 确认过就不再问；长任务改用 run_server.py + submit
 ```
 
 - 只在**能问人**时拦：TTY 且非 `--json` 且非 `PM_FAKE_BACKEND` 假后端。**Agent / CI / 管道
@@ -145,9 +151,16 @@ python run.py --task "..." --yes      # 确认过就不再问；长任务改用 
   带 `--checkpoint` 可跨进程断点续跑
 - **澄清策略**：`--json` 与 `--interactive` 互斥。Agent 模式下需求不清晰时系统自动推断，
   假设全部写进报告的「需求侧遗留问题」，请把它当作必须人工确认的字段
-- **用例集**：`--cases-file` 支持 `{"input", "expected", "mode", "scenario", "hijack_marker"}`——
+- **用例集**：`--cases-file` 支持
+  `{"input", "expected", "mode", "scenario", "hijack_marker", "literal"}`——
   `scenario: "injection"` 激活注入存活确定性检测（报告出现「注入存活」小节，判定用系统派生的
   高熵校验码；`hijack_marker` 只是可选的攻击文本）
+- **`literal`（可选，布尔）**：声明"这条 `expected` 就是输出里会出现的原话"。
+  默认情况下，`contains`/`exact` 的 expected 只要含规则词（必须/不得/禁止/要求…）或超过 80 字，
+  就会被判成"需求规则"——**预检直接拦住**（退 2），因为字面比对永远命不中它。
+  合规条款、固定话术这类**本来就是输出原话**的期望，加 `"literal": true` 即可放行：
+  照旧逐字比对、照旧计入一票否决（不再降级成"仅提醒"）。
+  别名 `expected_is_literal` 等价；真值认 `true/1/yes/on`。
 
 ### 三之二·附：记忆层与自检子命令（记忆不用另建，组织历史即可）
 

@@ -288,7 +288,7 @@ def test_render_text_shows_added_hits_on_already_dirty_rules():
     from pm.promptdiff import diff_prompts
 
     before = (
-        "[角色] 你是提示词工程师。\n[规则] 不写「停止处理」这类条款——它们会压低完成度。\n"
+        "[角色] 你是提示词工程师。\n[规则] 无法识别输入结构时停止处理。\n"
         "[任务] 生成一份结构清晰的提示词骨架，覆盖角色、任务、输出格式与边界处理四部分。"
     )
     after = before + "\n[边界] 若输入异常则停止处理，不输出任何结论。"

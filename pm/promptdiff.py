@@ -25,12 +25,20 @@ from __future__ import annotations
 
 import difflib
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .quality import check_prompt_quality, count_constraints, delimiter_problems, structure_items
+from .quality import (
+    _QUOTED as _QUALITY_QUOTED,
+)
+from .quality import (
+    check_prompt_quality,
+    count_constraints,
+    delimiter_problems,
+    structure_items,
+    suppressive_hits,
+)
 from .textio import TextDecodeError, read_text_auto, warn_if_fallback
 
 # 单条增删条目在报告里的展示上限：diff 是给人扫的，不是把两份提示词又贴一遍
@@ -121,21 +129,16 @@ def rule_findings(text: str) -> set[str]:
     return {i.code for i in check_prompt_quality(text).issues}
 
 
-# 引号内的"引用"：把 `不写"停止处理"` 这类**禁止示例列举**与真正的抑制条款区分开。
-# 为什么必须区分（2026-10-02 实测）：OPTIMIZER_SYSTEM 里就写着
-# 「不写"停止处理""不输出任何结论"……」，这是**教模型别写**这类条款的正面规则，
-# 却被 `_SUPPRESSIVE_RULE_RE` 字面命中成一堆 suppressive_rule，
-# 于是"在这个模板上再加一条真的抑制条款"在 code 级完全看不出来（集合前后一样）——
-# 门禁恰好对它最该管的那个模板失效。
-_QUOTED = re.compile(r"「[^」]*」|『[^』]*』|《[^》]*》|“[^”]*”|‘[^’]*’|\"[^\"]*\"|'[^']*'")
+# 引号内的"引用"与否定语境的剥离，唯一实现在 `pm.quality`（2026-10-31 收口）。
+# 历史（保留说明为什么曾在这里）：早期剥引用只在 diff 侧有，`check` 直接对原文 findall，
+# 于是同一份文本 `check` 报 suppressive_rule、`diff` 说"没引入新命中项"。两条路径必须同源，
+# 否则"门禁绿了但体检红了"永远解释不清。`_QUOTED` 仍从本模块导出（测试面在用它）。
+_QUOTED = _QUALITY_QUOTED
 
 
 def _effective_suppressive(text: str) -> set[str]:
-    """只保留**非引用**语境下的抑制式措辞（与实际条款语义相近的那个口径）。"""
-    from .quality import _SUPPRESSIVE_RULE_RE
-
-    stripped = _QUOTED.sub(" ", text or "")
-    return set(_SUPPRESSIVE_RULE_RE.findall(stripped))
+    """只保留**非引用、非否定**语境下的抑制式措辞（与 `check` 同一口径）。"""
+    return set(suppressive_hits(text))
 
 
 def rule_signals(text: str) -> dict[str, set[str]]:

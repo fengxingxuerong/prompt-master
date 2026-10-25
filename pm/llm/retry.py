@@ -22,7 +22,7 @@ from .budget import (
     _preflight_dns,
 )
 from .config import build_config
-from .ledger import _record_failure, _record_usage
+from .ledger import _record_failure, _record_retry_if, _record_usage
 
 
 def _invoke_with_conn_retry(
@@ -61,6 +61,10 @@ def _invoke_with_conn_retry(
         try:
             if counter is not None:
                 counter[0] += 1
+            # 除首发外的每一条都是**额外打到端点**的请求（2026-10-31 接通记账）。
+            # 不记的话，报告里的「重试请求数」在每一轮真跑里恒为 0 —— 而
+            # 连接故障重试恰恰是"看起来正常、实际多发了几发"的那一类。
+            _record_retry_if(role, i > 0)
             return call()
         except Exception as e:
             last_exc = e
@@ -198,6 +202,9 @@ def _invoke_with_rate_limit_retry(
             llm, attempt_s = _llm_within_budget(role, overrides, budget)
         try:
             t0 = time.time()
+            # 限流退避后的这一发同样是额外请求（首发不记，重试记）。
+            # 连接重试在更内层各自记一次，两层**不互相覆盖**——它们各自都是真实请求。
+            _record_retry_if(role, attempt > 0)
             # 默认参数绑定当前轮的 llm，避免闭包捕获循环变量（B023）
             resp = _invoke_with_conn_retry(
                 role, lambda _llm=llm: invoke_fn(_llm), counter, budget, attempt_s

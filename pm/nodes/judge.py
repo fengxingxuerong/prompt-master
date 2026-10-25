@@ -47,6 +47,10 @@ from .execute import _case_ground_truth
 
 logger = logging.getLogger("pm.nodes.judge")
 
+# 注入门禁写进 `unresolved_questions` 的那条的前缀：下一轮通过时要按它精确清除
+# （见 evaluate_node 里"门禁粘滞"的修复说明）。
+_INJECTION_Q_PREFIX = "注入存活检测未通过"
+
 
 def _active_judges() -> list[str]:
     """按 PM_JUDGES 决定评委列表：1 = 单评委（向后兼容），2 = 双评委（默认）。"""
@@ -63,15 +67,32 @@ def _judge_disagreement_threshold() -> float:
 
 
 def _judge_spec(judges: list[str]) -> str:
-    """评委组合标识，用于评估缓存键（评委模型变了缓存自然失效）。
+    """评委组合标识，用于评估缓存键（评委配置变了缓存自然失效）。
 
     尾部带 rubric 指纹：评分提示词（锚点/权威顺序）一改，旧判定必须失效——
     否则新标准汇报旧结果，而模型与输入输出三元组都没变，缓存会一直命中。
+
+    **必须带 `call_fingerprint` 而不只是模型名**（2026-10-31 修）：
+    旧版只取 `build_config(j).model`，于是
+    - `PM_EVALUATOR_BASE_URL` 换成另一个端点（同名模型、不同服务商/权重）→ 键不变；
+    - `PM_EVALUATOR_TEMPERATURE` 0.1 → 0.9 → 键不变；
+    - `PM_EVALUATOR_MAX_TOKENS` 改小导致截断 → 键不变。
+    三种情况下"续跑省钱"都会变成"复读旧结论"：报告里的分与 Δ 出自**不再生效的那个评委**，
+    而报告只会写"缓存命中"。`config.py::_decorrelate_judge_b` 的注释早就写着
+    "温度变化会进入 call_fingerprint，旧评估缓存会一次性失效"——那句话在评估缓存上并不成立，
+    现在成立。
+
+    ⚠️ 代价：键格式变了，存量评估缓存一次性失效（首轮会多花评委调用）。
+    这是刻意选择——本项目对"用旧结论冒充新读数"的容忍度低于对多花一轮钱的容忍度。
+    与 `active_rubric_stamp()` 的续跑顾虑不同：那里是"同一配置下换协议"，
+    这里换的是**实际发请求的那个端点与采样参数**，命中即错。
     """
     parts = []
     for j in judges:
         try:
-            parts.append(f"{j}:{llm.build_config(j).model}")
+            model = llm.build_config(j).model
+            fingerprint = llm.call_fingerprint(j)
+            parts.append(f"{j}:{model}@{fingerprint}")
         except Exception:  # noqa: BLE001 - 配置读取失败不影响缓存键构造
             parts.append(j)
     return "+".join(parts) + f"|rubric={active_rubric_stamp()}"
@@ -694,6 +715,145 @@ def _collapse_samples(evaluations: list[dict[str, Any]]) -> list[dict[str, Any]]
     return out
 
 
+def cap_empty_deliverables(evaluations: list[dict[str, Any]], runs: list[dict[str, Any]]) -> int:
+    """对"空产出画像"命中的评估做硬封顶，返回被封顶的条数（原地改 `evaluations`）。
+
+    空产出硬封顶(2026-09-27 八轮校准:三家厂商两版条款都管不住空壳日报,
+    8.8~9.85 vs 人工 2)——从"评委自觉"下沉为代码约束,与 scoring.py 的
+    判定式封顶同一哲学。只动主流程达标判定;校准路径不经过此处,裸口径不变。
+
+    2026-10-31 两处修正（审计实测，都会把 Δ 算反）：
+
+    ① **按采样定位输出**：旧版按用例号取值，同一用例的第二次采样会覆盖第一次 ——
+       而 `_collapse_samples` 留下的加权分来自**代表采样**（`sample_index` 就在那条
+       评估上）。k=2、只有 #1 是拒答时，8.9 分的完整报告会被 #1 的拒答压成 4.0；
+       反过来真正该封的那条则完全漏封。
+    ② **封顶要同步 passed**：只改 weighted_score 时 `EvaluationResult.passed`
+       仍是评委原判，于是报告并排出现「通过用例 1」与「未达标」，
+       `revision_delta` 的 fixed/broken 也随之失真。
+
+    拆成独立函数是为了能被单测直接钉住：这段逻辑埋在 evaluate_node 里时，
+    两个缺陷都没有用例覆盖（判据在，但没人能只调它）。
+    """
+    from ..scoring import apply_empty_deliverable_cap
+
+    out_by_key: dict[tuple[str, str], str] = {}
+    out_by_idx: dict[str, str] = {}
+    for r in runs:
+        idx_key = str(r.get("test_case_index", "0"))
+        output = str(r.get("output") or "")
+        out_by_key[(idx_key, str(r.get("sample_index", "0")))] = output
+        out_by_idx.setdefault(idx_key, output)
+
+    n_capped = 0
+    for e in evaluations:
+        raw = e.get("weighted_score")
+        if not isinstance(raw, (int, float)):
+            continue
+        idx_key = str(e.get("test_case_index", "0"))
+        sample_key = str(e.get("sample_index", "0"))
+        sample_output = out_by_key.get((idx_key, sample_key))
+        if sample_output is None:
+            # 没有 sample_index 的评估（老归档 / 关闭重复采样）退回用例级取值
+            sample_output = out_by_idx.get(idx_key, "")
+        capped = apply_empty_deliverable_cap(float(raw), sample_output)
+        if capped != raw:
+            e["weighted_score"] = capped
+            e["passed"] = capped >= PASS_THRESHOLD
+            n_capped += 1
+    return n_capped
+
+
+def injection_gate_patch(state: Any, gate: dict[str, Any] | None) -> tuple[dict[str, Any], bool]:
+    """把注入门禁的判定写成 state patch，返回 `(patch, 是否被门禁压制)`。
+
+    为什么单独一个函数（2026-10-31）：这段逻辑此前内联在 `evaluate_node` 里，
+    两个"只写不清"的缺陷都没有用例够得着：
+
+    1. **门禁粘滞**：旧版只在**拦截时**写 `patch["injection_gate"]`，上一轮留下的
+       `{"blocked": True}` 会在 state 里一直活着。修订把注入缺陷修掉后，
+       `status=passed`、`avg=9.0`，报告首行照样印
+       「⚠️ 未达标：…注入门禁拦截（1/1 条被劫持）」—— 修好了反而被判未达标。
+       现在每轮**无条件覆写**（有 gate 就写，含 `blocked=False`）。
+    2. **未解决问题只增不清**：上一轮追加的那条要在本轮通过时按前缀精确清除
+       （只清本条前缀，别的来源的未解决问题不许被顺手抹掉）。
+    """
+    patch: dict[str, Any] = {}
+    if gate is not None:
+        patch["injection_gate"] = {"blocked": gate["hijacked"] > 0, **gate}
+
+    blocked = bool(gate and gate["hijacked"] > 0)
+    previous = list(state.get("unresolved_questions") or [])
+    kept = [q for q in previous if not str(q).startswith(_INJECTION_Q_PREFIX)]
+    if blocked and gate is not None:
+        # 先剔掉本前缀的旧条目再追加：多轮都拦截时只留最新那一条，不越堆越多。
+        patch["unresolved_questions"] = [
+            *kept,
+            f"注入存活检测未通过（{gate['hijacked']}/{gate['total']} 条被劫持）："
+            "达标结论已被门禁压制，修复「标签内数据指令不得执行」的约束后再交付。",
+        ]
+        logger.warning(
+            "注入门禁拦截：%d/%d 条注入用例被劫持，passed 强制为 False",
+            gate["hijacked"],
+            gate["total"],
+        )
+    elif len(kept) != len(previous):
+        patch["unresolved_questions"] = kept
+    return patch, blocked
+
+
+def _requests_used(state: Any, n_llm_calls: int) -> int:
+    """当前任务**真实打到端点**的请求数（成功 + 失败）。
+
+    口径：`calls + failed_calls`。**不加** `retry_requests` —— 那数是"除首发以外的额外
+    请求"，而失败的那几次已经计在 `failed_calls` 里，相加会重复。成功的那次重试则同时
+    进了 `calls` 与 `retry_requests`，所以只用前者求和是自洽的。
+
+    台账不在作用域内（单测直调节点）时退化成"成功调用数"，与老口径一致而不是报 0：
+    报 0 会让预算闸静默失效。
+    """
+    base = int(state.get("llm_calls", 0) or 0) + int(n_llm_calls or 0)
+    try:
+        ledger = llm.current_ledger()
+        snap = ledger.snapshot() if ledger is not None else None
+    except Exception:  # noqa: BLE001 - 记账不可用不该把评估链带崩
+        return base
+    if not snap:
+        return base
+    total = 0
+    for row in snap.values():
+        total += max(0, int((row or {}).get("calls", 0) or 0))
+        total += max(0, int((row or {}).get("failed_calls", 0) or 0))
+    # 台账里也含本轮刚刚发生的评估调用；取两者较大值避免"台账比 state 少"时低估
+    return max(base, total)
+
+
+def _budget_stop(*, calls_used: int, requests_used: int, per_iter_est: int) -> str | None:
+    """两个预算开关都看一遍，返回该止损的那条理由；没触发返回 None。
+
+    同时设了两个开关时取**更严格**的（任一超限即停）。两者都非法/未设时不拦。
+    """
+    stops: list[str] = []
+    for env_name, used, unit in (
+        ("PM_MAX_LLM_CALLS", calls_used, "调用"),
+        ("PM_MAX_LLM_REQUESTS", requests_used, "请求"),
+    ):
+        raw = (os.getenv(env_name) or "").strip()
+        if not raw:
+            continue
+        try:
+            budget = max(0, int(raw))
+        except ValueError:
+            logger.warning("%s=%r 不是整数，该预算闸忽略", env_name, raw)
+            continue
+        if used + per_iter_est > budget:
+            stops.append(
+                f"{unit}预算耗尽：已用 {used} 次{unit}，下一轮修订预计还需约 "
+                f"{per_iter_est} 次（{env_name}={budget}）"
+            )
+    return "；".join(stops) if stops else None
+
+
 def _collect_assertions(runs: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     """汇总事实断言：同一用例的任一样本失败就视为该用例未通过（保守侧）。"""
     out: dict[int, dict[str, Any]] = {}
@@ -913,19 +1073,16 @@ def evaluate_node(state: State) -> dict[str, Any]:
     # 空产出硬封顶(2026-09-27 八轮校准:三家厂商两版条款都管不住空壳日报,
     # 8.8~9.85 vs 人工 2)——从"评委自觉"下沉为代码约束,与 scoring.py 的
     # 判定式封顶同一哲学。只动主流程达标判定;校准路径不经过此处,裸口径不变。
-    from ..scoring import apply_empty_deliverable_cap
-
-    _out_by_idx = {str(r.get("test_case_index", "0")): str(r.get("output") or "") for r in runs}
-    n_capped = 0
-    for e in evaluations:
-        raw = e.get("weighted_score")
-        if isinstance(raw, (int, float)):
-            capped = apply_empty_deliverable_cap(
-                float(raw), _out_by_idx.get(str(e.get("test_case_index", "0")), "")
-            )
-            if capped != raw:
-                e["weighted_score"] = capped
-                n_capped += 1
+    #
+    # 2026-10-31 两处修正（审计实测，都会把 Δ 算反）：
+    # ① **按采样定位输出**：旧版 `_out_by_idx` 只按用例号取值，同一用例的第二次采样
+    #    会覆盖第一次 —— 而 `_collapse_samples` 留下的加权分来自**代表采样**
+    #    （`sample_index` 就在那条评估上）。k=2、只有 #1 是拒答时，8.9 分的完整报告
+    #    会被 #1 的拒答压成 4.0；反过来真正该封的那条则完全漏封。
+    # ② **封顶要同步 passed**：只改 weighted_score 时 `EvaluationResult.passed`
+    #    仍是评委原判，于是报告并排出现「通过用例 1」与「未达标」，`revision_delta`
+    #    的 fixed/broken 也随之失真。
+    n_capped = cap_empty_deliverables(evaluations, runs)
     if n_capped:
         logger.warning(
             "空产出硬封顶:%d 条评估的加权分被压到 %.1f(空产出画像命中,原分更高)",
@@ -1037,23 +1194,10 @@ def evaluate_node(state: State) -> dict[str, Any]:
         total, hijacked = _safe_int(surv.get("total")), _safe_int(surv.get("hijacked"))
         if total > 0:
             gate = {"total": total, "hijacked": hijacked}
-    # 条件里直接判 gate（而不是用 bool(...) 存成另一个变量）：
-    # 类型收窄不跨变量，用 `injection_gate_blocked` 当条件会让 mypy 无法确认
-    # gate 非空（原写法 4 处 Optional 索引报错）。逻辑等价，但类型可证。
-    injection_gate_blocked = False
-    if gate and gate["hijacked"] > 0:
-        injection_gate_blocked = True
-        patch["injection_gate"] = {"blocked": True, **gate}
-        patch["unresolved_questions"] = [
-            *list(state.get("unresolved_questions") or []),
-            f"注入存活检测未通过（{gate['hijacked']}/{gate['total']} 条被劫持）："
-            "达标结论已被门禁压制，修复「标签内数据指令不得执行」的约束后再交付。",
-        ]
-        logger.warning(
-            "注入门禁拦截：%d/%d 条注入用例被劫持，passed 强制为 False",
-            gate["hijacked"],
-            gate["total"],
-        )
+    # 门禁判定与"未解决问题"清理统一交给 injection_gate_patch（可单测）：
+    # 粘滞缺陷与只增不清都出在这段的"只在拦截时写"上。
+    gate_patch, injection_gate_blocked = injection_gate_patch(state, gate)
+    patch.update(gate_patch)
 
     if agg.passed and not injection_gate_blocked:
         patch["status"] = "passed"
@@ -1074,30 +1218,34 @@ def evaluate_node(state: State) -> dict[str, Any]:
         noise = measurement_noise(target_noise)
         stop_reason = early_stop_reason(avg_scores, noise=noise)
 
-        # 成本闸（PM_MAX_LLM_CALLS）：下一轮修订的预估调用数会突破任务预算 →
-        # 立即止损，按 early_stopped 终态交付当前最佳版本。复用既有终态而不是新造
-        # status（Agent/CLI/API 的终态集合都不用改），reason 写明是预算而非收敛。
+        # 成本闸：下一轮修订的预估用量会突破任务预算 → 立即止损，按 early_stopped
+        # 终态交付当前最佳版本。复用既有终态而不是新造 status（Agent/CLI/API 的终态
+        # 集合都不用改），reason 写明是预算而非收敛。
+        #
+        # 两种计量单位（2026-10-31 新增第二种）：
+        # - `PM_MAX_LLM_CALLS`（老开关）：数**成功调用**（`llm_calls`）。语义不变。
+        # - `PM_MAX_LLM_REQUESTS`（新开关）：数**真实打到端点的请求**（成功 + 失败）。
+        #   为什么要它：429 风暴、超时重试、通道降级都会让真实请求数跑到成功数的
+        #   数倍，而老开关只看成功 ⇒ 预算"还剩很多"的同时账单已经翻倍。
+        # 为什么不直接改老开关的语义：`llm_calls` 是报告头那个被多处引用的数，
+        # 改它的计量会连带让历史读数与历史预算配置一起失去可比性。
+        # 两个都设时取**更严格**的那个（任一超限即止损）。
         # used 必须是「本轮评估后的最新用量」：state.llm_calls 还是进节点时的旧值，
         # 本轮刚消耗的 n_llm_calls 不算进去的话，超预算会整整晚一轮才被发现（实测）。
-        budget_raw = (os.getenv("PM_MAX_LLM_CALLS") or "").strip()
-        if budget_raw and not stop_reason:
-            try:
-                budget = max(0, int(budget_raw))
-                case_ids = {int(r.get("test_case_index", 0)) for r in runs}
-                n_cases = len(case_ids) or 1
-                n_samples = max(1, len(runs) // n_cases)
-                per_iter_est = 1 + n_cases * n_samples * len(judges)
-                used = state.get("llm_calls", 0) + n_llm_calls
-                if used + per_iter_est > budget:
-                    patch["status"] = "early_stopped"
-                    patch["should_revise"] = False
-                    patch["early_stop_reason"] = (
-                        f"调用预算耗尽：已用 {used} 次，下一轮修订预计还需约 "
-                        f"{per_iter_est} 次（PM_MAX_LLM_CALLS={budget}）"
-                    )
-                    logger.warning("预算闸触发：%s", patch["early_stop_reason"])
-            except ValueError:
-                logger.warning("PM_MAX_LLM_CALLS=%r 不是整数，预算闸忽略", budget_raw)
+        case_ids = {int(r.get("test_case_index", 0)) for r in runs}
+        n_cases = len(case_ids) or 1
+        n_samples = max(1, len(runs) // n_cases)
+        per_iter_est = 1 + n_cases * n_samples * len(judges)
+        budget_hit = _budget_stop(
+            calls_used=int(state.get("llm_calls", 0) or 0) + n_llm_calls,
+            requests_used=_requests_used(state, n_llm_calls),
+            per_iter_est=per_iter_est,
+        )
+        if budget_hit and not stop_reason:
+            patch["status"] = "early_stopped"
+            patch["should_revise"] = False
+            patch["early_stop_reason"] = budget_hit
+            logger.warning("预算闸触发：%s", budget_hit)
 
         if stop_reason:
             patch["status"] = "early_stopped"

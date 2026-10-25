@@ -166,6 +166,21 @@ def render_cost_section(llm_usage: dict[str, Any] | None) -> list[str]:
     lines.append("")
     lines.append(f"> {cost['note']}。单价来自 `PM_PRICE_*_PER_M`，本系统不内置价目表——")
     lines.append("> 模型单价会变，写死的价目表第二天就是错的，而且错得看不出来。")
+    # 口径声明（2026-10-31）：金额只按**成功调用**返回的 token 折算。
+    # 失败/超时的调用在台账上没有 token（拿不到 usage），因此**不进金额**；
+    # 但上游到底算不算钱，我方无从得知——这必须写出来，否则读者会把"合计"
+    # 当成真实账单，而它只是"我能看见的那部分"。
+    failed_calls = sum(
+        int((row or {}).get("failed_calls", 0) or 0)
+        for row in (llm_usage or {}).values()
+        if isinstance(row, dict)
+    )
+    if failed_calls:
+        lines.append(
+            f"> ⚠️ 口径：金额只按**成功调用**返回的 token 折算。本轮另有 **{failed_calls}** 次"
+            "调用失败/超时，它们在台账上拿不到 token，因而**不计入金额**——"
+            "上游是否已对这几次计费无从得知，所以「合计」是本方能看见的那部分，不是账单。"
+        )
     lines.append("")
     return lines
 

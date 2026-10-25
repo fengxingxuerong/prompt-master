@@ -50,6 +50,34 @@ def test_plain_utf8_and_bom(tmp_path) -> None:
     assert not got_bom.used_fallback
 
 
+def test_every_encoding_path_normalizes_newlines(tmp_path) -> None:
+    """CRLF 必须在**每一条**解码路径上归一化成 LF（含带 BOM 的那条）。
+
+    实测缺陷（2026-10-31 审计）：BOM 分支直接 `raw.decode(...)`，只有无 BOM 分支做了
+    `replace("\\r\\n", "\\n")`。于是同一份内容存成 UTF-8 无 BOM 是 LF、
+    存成 UTF-8-BOM / UTF-16 是 CRLF ⇒ `run.py diff` 把整篇报成"每一行都改了"，
+    送进模型的正文字里还带着 \\r。
+    """
+    body = "第一行\r\n第二行\r\n第三行\r\n"
+    want = "第一行\n第二行\n第三行\n"
+
+    plain = tmp_path / "plain.md"
+    plain.write_bytes(body.encode("utf-8"))
+    assert read_text_auto(plain).text == want
+
+    bom = tmp_path / "bom.md"
+    bom.write_bytes(codecs.BOM_UTF8 + body.encode("utf-8"))
+    assert read_text_auto(bom).text == want, "UTF-8-BOM 分支没归一化换行"
+
+    utf16 = tmp_path / "utf16.md"
+    utf16.write_bytes(codecs.BOM_UTF16_LE + body.encode("utf-16-le"))
+    assert read_text_auto(utf16).text == want, "UTF-16 分支没归一化换行"
+
+    lone_cr = tmp_path / "cr.md"
+    lone_cr.write_bytes("第一行\r第二行\r".encode())
+    assert read_text_auto(lone_cr).text == "第一行\n第二行\n"
+
+
 def test_gbk_falls_back_and_is_flagged(tmp_path, capsys) -> None:
     gbk = tmp_path / "gbk.md"
     gbk.write_bytes(TEXT.encode("gbk"))

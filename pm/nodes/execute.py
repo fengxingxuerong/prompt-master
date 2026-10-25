@@ -271,16 +271,17 @@ def _target_concurrency() -> int:
     return max(1, val)
 
 
-def _attach_assertion(run: TestRun, expected: str, mode: str) -> TestRun:
+def _attach_assertion(run: TestRun, expected: str, mode: str, *, literal: bool = False) -> TestRun:
     """把确定性断言结果写进 TestRun；无标注（且非自定义断言）或调用失败的用例跳过。
 
     custom:* 断言不需要 expected（判定全在注册函数里），必须放行。
+    `literal=True`：用例显式声明"expected 是输出里会出现的原话"，含规则词也不降级。
     """
     if run.error:
         return run
     if not expected and not (mode and mode.startswith("custom:")):
         return run
-    result = check_assertion(expected, run.output, mode or "contains")
+    result = check_assertion(expected, run.output, mode or "contains", literal=literal)
     if result is not None:
         run.assertion = result.model_dump()
     return run
@@ -322,6 +323,7 @@ def _run_one_target(
     expected: str = "",
     assert_mode: str = "",
     sample: int = 0,
+    literal: bool = False,
 ) -> TestRun:
     """执行单条测试用例；命中目标输出缓存时直接复用（断点续跑省 API）。
 
@@ -351,6 +353,7 @@ def _run_one_target(
                     ),
                     expected,
                     assert_mode,
+                    literal=literal,
                 )
             except ValidationError:
                 pass  # 缓存内容异常则重新调用
@@ -404,13 +407,13 @@ def _run_one_target(
                 "latency_ms": run.latency_ms,
             },
         )
-    return _attach_assertion(run, expected, assert_mode)
+    return _attach_assertion(run, expected, assert_mode, literal=literal)
 
 
 def _case_ground_truth(
     state: State,
-) -> tuple[Callable[[int], str], Callable[[int], str], Callable[[int], str]]:
-    """一份种子用例集的三种口径：(expected_fn, mode_fn, rules_fn)。
+) -> tuple[Callable[[int], str], Callable[[int], str], Callable[[int], str], Callable[[int], bool]]:
+    """一份种子用例集的四种口径：(expected_fn, mode_fn, rules_fn, literal_fn)。
 
     为什么每条自带 mode：真实需求就是混着写的 —— 一行断言“输出里必须有
     `未提供：订单号`”（字面），另一行断言“不得编造取件时间”（语义）。全局单一 mode
@@ -437,7 +440,19 @@ def _case_ground_truth(
         # 只有这条用例自己选了 rule 模式，它的 expected 才是给评委的核对清单
         return expected(i) if mode(i) == RULE_MODE else ""
 
-    return expected, mode, rules
+    def literal(i: int) -> bool:
+        """这条用例有没有显式声明"expected 是输出里会出现的原话"。
+
+        与 `mode` 同一套取值路径（`_field` 会剥空白并转成布尔可判的字符串）：
+        读 `literal` 与 `expected_is_literal`（后者是更啰嗦但更不会误读的写法）。
+        真值串与 `pm.assertions.looks_like_rule` 的放行口径一致，只认常见的几种真值。
+        """
+        if not 0 <= i < len(seeds):
+            return False
+        raw = _field(seeds[i], "literal") or _field(seeds[i], "expected_is_literal")
+        return raw.lower() in {"1", "true", "yes", "y", "on"}
+
+    return expected, mode, rules, literal
 
 
 def _run_matrix(
@@ -448,12 +463,17 @@ def _run_matrix(
     mode_fn: Callable[[int], str],
     k: int,
     concurrency: int,
+    literal_fn: Callable[[int], bool] | None = None,
 ) -> tuple[list[TestRun], int]:
     """对 (用例 × 采样) 矩阵跑 target 调用，返回按用例/采样序号排序的结果与真实调用数。
 
     抽成函数是为了让 test 与 baseline 共用同一套并发/缓存/断言逻辑，
     否则基线只是另一份手写实现，很容易跟主路跑偏（口径不一致的对比没有意义）。
+
+    `literal_fn` 可选：用例显式声明"expected 是输出里会出现的原话"时返回 True，
+    该条断言的规则词不再让它降级成"仅提醒"（见 `check_assertion` 的 `literal`）。
     """
+    is_literal = literal_fn or (lambda _i: False)
     work = [(i, c, s) for i, c in enumerate(cases) for s in range(k)]
     if concurrency <= 1 or len(work) <= 1:
         runs = [
@@ -465,6 +485,7 @@ def _run_matrix(
                 expected=expected_fn(i),
                 assert_mode=mode_fn(i),
                 sample=s,
+                literal=is_literal(i),
             )
             for i, c, s in work
         ]
@@ -479,6 +500,7 @@ def _run_matrix(
                 expected=expected_fn(job[0]),
                 assert_mode=mode_fn(job[0]),
                 sample=job[2],
+                literal=is_literal(job[0]),
             )
 
         # carry_context 不是可选项：ThreadPoolExecutor 不继承 ContextVar，
@@ -559,11 +581,18 @@ def test_node(state: State) -> dict[str, Any]:
     target_model = state.get("target_model", "未指定")
     max_concurrency = _target_concurrency()
     # ground-truth：seed_cases 里的 expected / mode 与 test_cases 按序号一一对应
-    expected_fn, mode_fn, _rules = _case_ground_truth(state)
+    expected_fn, mode_fn, _rules, literal_fn = _case_ground_truth(state)
 
     k = _samples_per_case()
     runs, n_real_calls = _run_matrix(
-        list(cases), prompt, target_model, expected_fn, mode_fn, k, max_concurrency
+        list(cases),
+        prompt,
+        target_model,
+        expected_fn,
+        mode_fn,
+        k,
+        max_concurrency,
+        literal_fn,
     )
 
     n_failed = sum(1 for r in runs if r.error)

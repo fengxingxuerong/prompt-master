@@ -165,6 +165,38 @@ def test_render_cost_section_shape_and_disclaimer(monkeypatch):
     assert "不内置价目表" in out
 
 
+def test_render_cost_discloses_that_failures_are_not_billed(monkeypatch):
+    """有失败调用时，成本段必须说清"金额只含成功调用"（2026-10-31）。
+
+    为什么必须写：失败/超时的调用在台账上拿不到 token，于是**不进金额**；
+    但上游到底算不算钱我方无从得知。不写这一句，读者会把「合计」当账单，
+    而它只是"我能看见的那部分"——本项目的立身之本就是"如实说清哪里还不行"。
+    """
+    _set(monkeypatch, PM_PRICE_INPUT_PER_M="1", PM_PRICE_OUTPUT_PER_M="2")
+    usage = {
+        "evaluator": {
+            "calls": 2,
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "latency_ms": 1000,
+            "failed_calls": 3,
+            "failed_latency_ms": 900,
+            "retry_requests": 4,
+        }
+    }
+    out = "\n".join(render_cost_section(usage))
+    assert "只按**成功调用**" in out
+    assert "**3**" in out, "失败次数要点名，不能只说一句笼统的免责"
+    assert "不计入金额" in out
+
+
+def test_render_cost_says_nothing_extra_when_no_failures(monkeypatch):
+    """没有失败时不许凭空渲染那段警告（噪声会让"有问题的轮"失去辨识度）。"""
+    _set(monkeypatch, PM_PRICE_INPUT_PER_M="1", PM_PRICE_OUTPUT_PER_M="2")
+    out = "\n".join(render_cost_section(USAGE))
+    assert "只按**成功调用**" not in out
+
+
 def test_render_sorts_by_cost_desc(monkeypatch):
     _set(monkeypatch, PM_PRICE_INPUT_PER_M="1", PM_PRICE_OUTPUT_PER_M="1")
     lines = render_cost_section(USAGE)

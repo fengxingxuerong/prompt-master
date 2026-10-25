@@ -17,6 +17,7 @@
 | `GET /api/race/{race_id}` | 赛马进度（完成数 / 各任务状态） |
 | `GET /api/race/{race_id}/report` | 赛马横向对比报告（评分总览表 + 各任务完整报告） |
 | `GET /api/health` | 健康检查 |
+| `GET /api/history` | 运行历史 + 同任务 Δ 显著性（**设了 `PM_API_TOKEN` 时受 token 保护**：它含任务原文与分数） |
 | `GET /panel` | **插件面板**（单 HTML 小窗口：体检 / 考卷有几票 / 两版差分三张零调用卡 + ④优化闭环） |
 | `GET /api/panel/capabilities` | 面板首屏自检：转发通不通（**当场真跑一发 CLI**，缓存 60 秒）、要不要 token、有没有 Key |
 | `GET /api/panel/templates` | `case_templates/` 的当场列举（只给名字与条数） |
@@ -125,7 +126,8 @@
 | `test_cases` / `evaluations` / `trace` | 用例、逐条评估结果、节点轨迹 |
 | `llm_calls` / `llm_usage` | 调用数（按节点累计）与按角色的 token/耗时台账 |
 | `prompt_quality_issues` | 代码侧质量门警告（元话语泄漏 / 约束超载 / 净增量超预算等） |
-| `early_stop_reason` / `error` | 提前终止原因 / 失败原因 |
+| `early_stop_reason` / `error` | 提前终止原因 / 失败原因（一句话） |
+| `errors` | 节点级失败明细（**列表**，最多 20 条）：`error` 只说"因何终止"，具体哪一步报了什么在这里 |
 
 报告类响应（`ReportResponse` / `RaceReportResponse`）固定是 `{run_id|race_id, report}`，
 `report` 是完整 Markdown；报告里若出现「本轮 Δ 不可采信」，说明本臂有整条用例没有有效样本，

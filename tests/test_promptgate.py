@@ -39,10 +39,15 @@ RUN = [sys.executable, str(ROOT / "run.py")]
 
 # 干净模板正文：零规则命中（用于"干净→脏"变异，判定最直观）
 CLEAN_BODY = "[角色] 你是成对评审员。\n[任务] 比较两份候选输出并选出更好的那一份。"
-# 本来就命中 suppressive_rule 的模板正文（引号内是"禁止示例列举"，不是真条款）
+# 本来就命中 suppressive_rule 的模板正文。
+# 2026-10-31 起必须写成**真条款**（不带引号、不带否定）才算脏：`check` 与这里共用
+# `pm.quality.suppressive_hits`，会剥掉引号内的"禁止示例列举"和否定语境
+# （`不写「停止处理」…` 是教模型别这么写的正面规则，不该判成抑制条款）。
+# 只留引号形态的话这份正文是干净的，"加重"通道就没有底噪可测。
 DIRTY_BODY = (
-    "[角色] 你是提示词工程师。\n[规则] 不写「停止处理」「不输出任何结论」这类条款——\n"
-    "它们会压低任务完成度。\n[任务] 生成一份结构清晰的提示词骨架。"
+    "[角色] 你是提示词工程师。\n[规则] 无法识别输入结构时停止处理。\n"
+    "另外不写「不输出任何结论」这类条款——它们会压低任务完成度。\n"
+    "[任务] 生成一份结构清晰的提示词骨架。"
 )
 
 
@@ -145,7 +150,12 @@ def test_auto_discovery_refuses_to_use_head_as_its_own_baseline(tmp_path):
     (tmp_path / "prompts.py").write_text(CLEAN_T, encoding="utf-8")
     _init_repo(tmp_path)
     head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     ).stdout.strip()
     with pytest.raises(GateError, match=r"等于当前 HEAD|找不到可用的基线"):
         resolve_base(None, tmp_path, head_sha=head)
@@ -260,10 +270,21 @@ def test_adding_a_real_clause_to_an_already_dirty_template_is_caught(tmp_path):
 
 def test_quoted_examples_are_not_treated_as_real_clauses():
     """引号里的**禁止示例列举**不是真条款：本来就存在的引用不该被算成命中项，
-    否则基线满命中、任何改动看起来都"没变化"（实测就是这么被掩盖的）。"""
-    from pm.promptdiff import rule_signals
+    否则基线满命中、任何改动看起来都"没变化"（实测就是这么被掩盖的）。
 
-    assert "suppressive_rule" not in rule_signals(DIRTY_BODY)
+    2026-10-31 起 `check` 也走同一套剥离（此前只有 diff 剥、check 不剥），
+    所以这条同时证明了"两条路径同源"。
+    """
+    from pm.promptdiff import rule_signals
+    from pm.quality import check_prompt_quality, suppressive_hits
+
+    quoted_only = (
+        "[角色] 你是提示词工程师。\n[规则] 不写「停止处理」「不输出任何结论」这类条款——\n"
+        "它们会压低任务完成度。\n[任务] 生成一份结构清晰的提示词骨架。"
+    )
+    assert "suppressive_rule" not in rule_signals(quoted_only)
+    assert not any(i.code == "suppressive_rule" for i in check_prompt_quality(quoted_only).issues)
+    assert suppressive_hits(quoted_only) == []
 
 
 def test_wording_polish_is_not_a_regression(tmp_path):

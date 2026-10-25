@@ -24,6 +24,7 @@ from pm.casesaudit import (
     has_assertion,
     is_advisory,
     missing_scenarios,
+    mode_of,
 )
 from pm.cli.support import MAX_SEED_CASES
 
@@ -112,6 +113,23 @@ def test_bucket_partition_is_exhaustive() -> None:
     s = audit_cases(cases, max_cases=MAX_SEED_CASES)["stats"]
     assert s["veto_capable"] + s["advisory"] + s["judge_only"] + s["no_assertion"] == 5, s
     assert (s["veto_capable"], s["advisory"], s["judge_only"], s["no_assertion"]) == (2, 1, 1, 1), s
+
+
+def test_assert_mode_key_is_honoured_like_the_executor() -> None:
+    """用例 JSON 允许用 `assert_mode` 而不是 `mode`（`support.case_entry_fields` 就认它）。
+
+    2026-10-31 修：`mode_of` 只读 `mode`，于是同一份 JSON 换个键名就变成两套结论 ——
+    `{"assert_mode":"custom:x","expected":""}` 被报"白占一个用例位"（运行时其实执行），
+    `{"assert_mode":"rule"}` 被算成 contains（judge_only 桶全数错）。
+    """
+    custom = {"input": "a", "expected": "", "assert_mode": "custom:no_such"}
+    judge_only = {"input": "b", "expected": "", "assert_mode": RULE_MODE}
+    cases = [custom, judge_only]
+    s = audit_cases(cases, max_cases=MAX_SEED_CASES)["stats"]
+    assert mode_of(custom) == "custom:no_such"
+    assert mode_of(judge_only) == RULE_MODE
+    assert s["judge_only"] == 1, s
+    assert s["no_assertion"] == 0, "custom 模式被误报成没有断言"
 
 
 def test_assertion_eligibility_matches_the_executor_itself() -> None:

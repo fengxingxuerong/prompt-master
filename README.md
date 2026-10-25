@@ -11,7 +11,7 @@
 |---|---|---|
 | 体检一版已有提示词 | `run.py check --prompt-file x.md` | 零调用、零出网，命中规则退出码 1 |
 | CI 里只拦本次新引入的坑 | `run.py gate` | 零调用，判增量不判绝对值 |
-| 跑完整闭环：生成 → 用例 → 评估 → 修订 | `run.py --task "…"` | 会花钱，先 `--preflight` |
+| 跑完整闭环：生成 → 用例 → 评估 → 修订 | `run.py --task "让 AI 分析销售数据"` | 会花钱，先 `--preflight` |
 
 **先选入口**——按你的处境挑一行即可，不必先读完这篇：
 
@@ -19,10 +19,10 @@
 |---|---|---|
 | 手上已有一版提示词，只想先看有没有硬伤 | `run.py check --prompt-file x.md` | **零调用、零出网** |
 | 想在**自己仓库**的 CI 里只拦"本次新引入"的坑 | `run.py diff --base-ref origin/main x.md`（或 `run.py gate`） | **零调用** |
-| 先知道"跑一轮大概多少次调用" | `run.py --dry-run --task "…"` | **零调用** |
+| 先知道"跑一轮大概多少次调用" | `run.py --dry-run --task "让 AI 分析销售数据"` | **零调用** |
 | 第一次真跑，先确认端点活着 | `run.py --preflight` | 少量调用 |
-| 人在终端，跑完整闭环 | `run.py --task "…"`（交互终端下会**先报价、要一句 y/N**） | 计费 |
-| 长任务不想占终端 | `python run_server.py` + `run.py submit --task "…"`，再 `run.py wait <run_id>` | 计费 |
+| 人在终端，跑完整闭环 | `run.py --task "让 AI 分析销售数据"`（交互终端下会**先报价、要一句 y/N**） | 计费 |
+| 长任务不想占终端 | `python run_server.py` + `run.py submit --task "让 AI 分析销售数据"`，再 `run.py wait <run_id>` | 计费 |
 | 让别的 Agent 调它 | MCP：`python -m pm.mcp_server`（stdio） | 零调用与计费都有 |
 | 不想碰命令行 | `run.py panel`（浏览器小窗）/ `run.py desktop`（原生窗，可选附件） | 生成计费 |
 
@@ -38,10 +38,13 @@ python run.py check --prompt-file 我的提示词.md   # 零调用，先免费�
 
 ```bash
 python run.py --preflight                # 逐角色冒烟，花大钱之前必做
-python run.py --task "让 AI 分析销售数据" --fast   # 第一次先用快速档：约 8-10 次调用 / 数分钟
+python run.py --task "让 AI 分析销售数据" --fast   # 第一次先用快速档：12-22 次调用 / 数分钟
 python run.py --task "让 AI 分析销售数据" --target-model deepseek-v3   # 完整闭环：45-102 次调用
-python run.py --task "…" --prompt-file 我的提示词.md   # 改已有那版，Δ = 比你自己好多少
+python run.py --task "让 AI 分析销售数据" --prompt-file 我的提示词.md   # 改已有那版，Δ = 比你自己好多少
 ```
+
+> ⚠️ `--task` 有 **≥4 字**下限（≤8000）。照抄占位符 `--task "..."`（3 字）或 `--task "…"`（1 字）
+> 会退 **2**「需求描述长度需在 4-8000 字之间」—— 退出码 2 读起来像配置错，实际是参数太短。
 
 **新手最少只填这 3 个字段**（复制 `.env.example` 为 `.env` 后，其余保留默认即可跑）：
 
@@ -56,7 +59,7 @@ python run.py --task "…" --prompt-file 我的提示词.md   # 改已有那版�
 
 - 想**先看产出长什么样**：[`docs/sample-report.md`](docs/sample-report.md)（假后端产出的**形状示例**：分节结构真实、读数全是桩）。
 - 想**先确认配置对不对**：`python run.py doctor`（零调用：Python / .env / Key / 角色 / 日志 / 端口 / 常驻服务 / MCP 一次说清）。
-- 想**不花钱先跑一遍链路**：`PM_FAKE_BACKEND=progress python run.py --task "…" --fast`。
+- 想**不花钱先跑一遍链路**：`PM_FAKE_BACKEND=progress python run.py --task "让 AI 分析销售数据" --fast`。
 - 想**装成命令**（Agent 配置里不写绝对路径）：`pip install . && prompt-master --help`。
 - 退出码是给 Agent 做分支的协议：`0` 达标 / `1` 未达标但已交付 / `2` 参数或配置错 / `3` 运行失败；
   加 `--json` 时 stdout 恰好一个 JSON 对象，进度全走 stderr。
@@ -142,7 +145,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；1984 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；2129 条，无 Key、禁止真实出网）
 extras/             可选附件（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 case_templates/     可直接喂 --cases-file 的领域用例集
 releases/           三服务套件与历史发布快照（不是本产品）

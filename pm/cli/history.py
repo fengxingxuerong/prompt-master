@@ -158,8 +158,45 @@ def _load_run_history(last: int, include_demo: bool) -> list[dict[str, Any]]:
     return rows
 
 
+# 小样本必须用 t 分位而不是 1.96（2026-10-31 修）。1.96 是**大样本**正太分位，
+# 在 n=2~4 时会把区间算窄到近乎一半，于是"两三条臂碰巧同向"就被判成显著。
+# 表只列到 df=30，更大的按 1.96（与正太渐近一致）。
+_T_CRIT_95: dict[int, float] = {
+    1: 12.706,
+    2: 4.303,
+    3: 3.182,
+    4: 2.776,
+    5: 2.571,
+    6: 2.447,
+    7: 2.365,
+    8: 2.306,
+    9: 2.262,
+    10: 2.228,
+    11: 2.201,
+    12: 2.179,
+    13: 2.160,
+    14: 2.145,
+    15: 2.131,
+    16: 2.120,
+    17: 2.110,
+    18: 2.101,
+    19: 2.093,
+    20: 2.086,
+    25: 2.060,
+    30: 2.042,
+}
+
+
+def _t_crit(df: int) -> float:
+    """95% 双侧 t 分位；表外按 1.96（渐近正太）。df>30 时差值 <2%，不影响判定。"""
+    if df in _T_CRIT_95:
+        return _T_CRIT_95[df]
+    larger = [d for d in _T_CRIT_95 if d > df]
+    return _T_CRIT_95[min(larger)] if larger else 1.96
+
+
 def _task_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """按 (task, 尺子) 分组做 Δ 的配对统计：均值 ± 1.96×SE，置信区间不含 0 才算显著。
+    """按 (task, 尺子) 分组做 Δ 的配对统计：均值 ± t×SE，置信区间不含 0 才算显著。
 
     独立成函数是因为它是"**哪些臂计入**"这个决定（§三十·一），而
     `_history_command` 只该管渲染。两件事挤在一个函数里时，
@@ -167,6 +204,16 @@ def _task_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     分组键带尺子身份（§三十一）：同一任务的跨代轮次（评委换型前后）**不配对**——
     Δ 的刻度与噪声随尺而变，混算出来的均值是两把尺的算术平均，不代表任何一把。
+
+    ⚠️ 2026-10-31 三处修正（审计实测，每一条都会造出**假的"显著"**）：
+
+    1. **SE=0 时不再判显著**：所有 Δ 完全相同 ⇒ var=0 ⇒ se=0 ⇒ 区间宽度为 0，
+       于是 [0.5, 0.5] 也"显著"。但 Δ 本身是**两位小数取整**过的，
+       "两次都恰好 0.5"不构成证据；这种情况要说"不可判"，而不是给一个零宽区间。
+    2. **小样本用 t 分位**（见 `_t_crit`）：n=3 时 1.96 换成 4.303，
+       实测 [0.1, 0.5, 0.9] 由"显著"翻成"不显著"。
+    3. **可信臂不足 2 条的组不再被静默丢弃**：旧版 `continue` 之后，
+       该组的崩溃臂连"被点名"的机会都没有，而注释里写的恰恰是"必须点名"。
     """
     import math
 
@@ -181,12 +228,40 @@ def _task_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         deltas = [float(r["delta"]) for r in rs if r["trusted"]]
         n = len(deltas)
+        excluded = [
+            {"run_id": r["run_id"], "delta": r["delta"], "opt_avg": r["opt_avg"]}
+            for r in rs
+            if not r["trusted"]
+        ]
         if n < 2:
-            continue  # 崩的臂被点名之后，可信臂不足 2 条就不给显著性判定
+            # 崩的臂被点名之后，可信臂不足 2 条：**不给判定，但要出现在结果里**
+            # （旧版 continue ⇒ 这一组连同它的排除清单一起消失）。
+            task_stats.append(
+                {
+                    "task": task,
+                    "judge_gen": gen,
+                    "n_runs": n,
+                    "deltas": deltas,
+                    "delta_mean": round(sum(deltas) / n, 2) if deltas else None,
+                    "delta_ci95": None,
+                    "significant": False,
+                    "estimable": False,
+                    "excluded_untrusted": excluded,
+                    "note": "可信臂不足 2 条，无法给出显著性判定",
+                    "run_ids": [],
+                }
+            )
+            continue
         mean = sum(deltas) / n
         var = sum((x - mean) ** 2 for x in deltas) / (n - 1)
         se = math.sqrt(var / n)
-        lo, hi = mean - 1.96 * se, mean + 1.96 * se
+        critical = _t_crit(n - 1)
+        lo, hi = mean - critical * se, mean + critical * se
+        # SE 为 0 = 从这批数据里**估不出**抖动，不是"抖动为零"。
+        # 只在小样本时改成"不可判"：n≥5 且各轮 Δ 一模一样，那本身就是一致性证据，
+        # 按显著处理并不离谱；n=2 的"两次都一样"没有任何信息量。
+        # 与报告里"采样噪声 0.0 读作没测到"同一条纪律。
+        se_unmeasurable = var <= 0.0 and n < 5
         task_stats.append(
             {
                 "task": task,
@@ -195,21 +270,29 @@ def _task_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "deltas": deltas,
                 "delta_mean": round(mean, 2),
                 "delta_ci95": [round(lo, 2), round(hi, 2)],
-                "significant": lo > 0 or hi < 0,
+                "significant": (not se_unmeasurable) and (lo > 0 or hi < 0),
+                "estimable": not se_unmeasurable,
+                "t_crit": critical,
                 # §三十·一：崩掉的臂**不参与**统计，但必须**点名**。
                 # 曾经它们被"噪声不可估"这条过滤静默删掉（见 `_load_run_history`），
                 # 于是 Δ 均值从 +1.34 顶到 +2.15、CI 从跨 0 变成不含 0 ——
                 # 一个"显著"的结论是被筛出来的。现在它明写在输出里。
-                "excluded_untrusted": [
-                    {"run_id": r["run_id"], "delta": r["delta"], "opt_avg": r["opt_avg"]}
-                    for r in rs
-                    if not r["trusted"]
-                ],
-                "note": "样本少，结论仅供观察" if n < 5 else None,
+                "excluded_untrusted": excluded,
+                "note": _stat_note(n, se_unmeasurable),
                 "run_ids": [r["run_id"] for r in rs if r["trusted"]],
             }
         )
     return task_stats
+
+
+def _stat_note(n: int, se_unmeasurable: bool) -> str | None:
+    """该组要带的那句实话；没有可说的话返回 None（别渲染空括号）。"""
+    parts: list[str] = []
+    if se_unmeasurable:
+        parts.append("各轮 Δ 完全相同，抖动估不出来（不是抖动为零）")
+    if n < 5:
+        parts.append("样本少，结论仅供观察")
+    return "；".join(parts) or None
 
 
 def _history_command(argv: list[str]) -> int:
@@ -272,11 +355,18 @@ def _history_command(argv: list[str]) -> int:
 
 def _stat_line(s: dict[str, Any]) -> str:
     """一个 (task, 尺子) 组的显著性行，带上尺子身份（§三十一）。"""
-    mark = "✅ 显著" if s["significant"] else "⚠️ 不显著"
+    if not s.get("estimable", True):
+        # 不可判的时候不许印"不显著"——那也是一个判定，会让人以为"测过了，没效果"
+        mark = "❔ 不可判"
+    else:
+        mark = "✅ 显著" if s["significant"] else "⚠️ 不显著"
     note = f"（{s['note']}）" if s["note"] else ""
-    lo, hi = s["delta_ci95"]
+    ci = s.get("delta_ci95")
+    dm = s["delta_mean"]
+    mean_text = f"{dm:+.2f}" if isinstance(dm, (int, float)) else "-"
+    ci_text = f"CI [{ci[0]:+.2f}, {ci[1]:+.2f}]" if ci else "CI 不可估"
     return (
-        f"  {mark}  Δ均值 {s['delta_mean']:+.2f}  CI [{lo:+.2f}, {hi:+.2f}]"
+        f"  {mark}  Δ均值 {mean_text}  {ci_text}"
         f"  n={s['n_runs']} {note}｜评委 {s['judge_gen']}｜{s['task']}"
     )
 

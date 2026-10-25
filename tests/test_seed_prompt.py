@@ -166,7 +166,7 @@ def _arm_prompt_for(monkeypatch, state) -> str:
     monkeypatch.setenv("PM_BASELINE", "1")
     captured: dict[str, str] = {}
 
-    def fake_matrix(cases, prompt, target_model, expected, mode, k, conc):
+    def fake_matrix(cases, prompt, target_model, expected, mode, k, conc, _literal=None):
         captured["prompt"] = prompt
         raise _Probe
 

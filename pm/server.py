@@ -18,6 +18,7 @@ FastAPI 服务层：将 PromptMaster 优化闭环包装为 REST API。
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -266,6 +267,16 @@ if _rate_per_min == 0:
 _limiter = SlidingWindowLimiter(max_events=max(1, _rate_per_min)) if _rate_per_min > 0 else None
 
 
+def _mask_key(key: str) -> str:
+    """日志里代表一个限流 key 的安全形式（IP 原样、令牌打指纹）。"""
+    if not key:
+        return "(empty)"
+    # 纯 IP / IPv6 原样打：排障要看的正是"谁在打"
+    if key.count(".") == 3 or (":" in key and all(ch in "0123456789abcdefABCDEF:." for ch in key)):
+        return key
+    return "token:" + hashlib.sha256(key.encode("utf-8", errors="replace")).hexdigest()[:8]
+
+
 async def enforce_rate_limit(request: Request, cost: int = 1) -> None:
     """提交端点的限流检查（在 handler 内显式调用，不是 Depends）。
 
@@ -285,7 +296,12 @@ async def enforce_rate_limit(request: Request, cost: int = 1) -> None:
     cost = max(1, int(cost or 1))
     ok, retry_after = _limiter.acquire(key, cost)
     if not ok:
-        logger.warning("限流触发：key=%s cost=%d，%.1fs 后可重试", key, cost, retry_after)
+        # 不许把 key 原文写进日志（2026-10-31 修）：设了 PM_API_TOKEN 时 key **就是**
+        # 那个管理口令，触发 429 就会把令牌明文落进 logs/（而 logs/ 是要随报告一起看的）。
+        # 打指纹而不是前缀：前缀对短 token 等于全露。
+        logger.warning(
+            "限流触发：key=%s cost=%d，%.1fs 后可重试", _mask_key(key), cost, retry_after
+        )
         raise HTTPException(
             status_code=429,
             detail=f"提交过于频繁（每分钟上限 {_rate_per_min} 次提交），请 {max(1, int(retry_after) + 1)} 秒后重试",
@@ -373,6 +389,9 @@ class StatusResponse(BaseModel):
     baseline_aggregate: dict[str, Any] | None = None
     pairwise: dict[str, Any] | None = None
     early_stop_reason: str | None = None
+    # 节点级失败明细（2026-10-31 补）：`error` 只说"因何终止"，具体哪一步报了什么在
+    # state["errors"] 里。控制台要展示它，否则失败时只有一块红 badge。
+    errors: list[str] = []
     prompt_quality_issues: list[dict[str, Any]] = []
     # 按角色的 token 用量与耗时（{role: {calls, input_tokens, output_tokens, latency_ms}}）
     llm_usage: dict[str, dict[str, int]] = {}

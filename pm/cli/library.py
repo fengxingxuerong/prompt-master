@@ -8,9 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .history import _TERMINAL_STATUS
-from .support import EXIT_CONFIG, EXIT_FAILED, log_dir
-
 # --------------------------------------------------------------------------
 # library 子命令：跨任务提示词资产库（记忆层·读侧）
 #
@@ -19,33 +16,86 @@ from .support import EXIT_CONFIG, EXIT_FAILED, log_dir
 # --export 直接导出成品 —— 让"上次优化过类似需求"从印象变成可查询的事实。
 # 终态集合沿用 history 段的 _TERMINAL_STATUS 定义。
 # --------------------------------------------------------------------------
+# 相似度**唯一实现**在 `pm/memory.py`（2026-10-31 收口）。
+#
+# 这里原本抄了一份 `_text_bigrams` / `_dice` / `_TEMPLATE_NOISE`，于是同一个概念长出
+# 两套门槛：注入路径 `_SIM_MIN = 0.35`，而本文件写着 `> 0.05` —— 实测
+# "写秋天的诗"（Dice 0.51）与一堆 0.08 / 0.11 的噪声全被推成"相似资产"。
+# 推荐一个不相似资产比不推荐危险得多：它会带偏新任务的提示词，
+# 而注入路径早就因为一次真实事故（v0 被评委打 1.19）把门槛提到 0.35。
+from ..memory import _SIM_MIN, _dice
+from ..memory import _sim_grams as _task_sim_grams
+from ..memory import _text_bigrams as _text_bigrams  # 测试面：实现在 memory，唯一一份
+from .history import _TERMINAL_STATUS
+from .support import EXIT_CONFIG, EXIT_FAILED, log_dir
 
 
-def _text_bigrams(text: str) -> set[str]:
-    """中文/混排文本的字符 bigram 集合：不依赖分词，对短文本相似度足够稳。"""
-    t = "".join(text.split())
-    if len(t) < 2:
-        return {t} if t else set()
-    return {t[i : i + 2] for i in range(len(t) - 1)}
+def _recommend_candidate(
+    run: dict[str, Any] | None, new_grams: set[str]
+) -> tuple[float, dict[str, Any]] | None:
+    """把一个 run 变成推荐候选；不合格返回 None。
+
+    准入条件（每一条都对应过一次实测事故）：
+    - 不是终态通过 → 跳过（半成品没有参考价值）；
+    - demo/假后端 → 跳过（分数是桩）；
+    - 没有提示词正文 → 跳过（标题不是资产）；
+    - **Δ < 0** → 跳过：通过了但**比不优化还差**，拿它当 few-shot 参考等于教新任务变坏。
+      `pm/memory.py` 的注入路径一直有这条过滤，这里曾漏了；
+    - 相似度 < `memory._SIM_MIN` → 跳过：门槛与注入路径共用 0.35。旧版这里是 0.05，
+      实测"写秋天的诗"能给"写季度销售报告"当参考（Dice 0.51），而 0.08/0.11 的噪声全过。
+
+    抽成函数有两个原因：① `_library_recommend` 的圈复杂度预算（纯准入判断不该占它）；
+    ② 这些准入条件从此只有一处，注入路径与 CLI 路径不会再各写一套。
+    """
+    if run is None:
+        return None
+    if run.get("status") != "passed":
+        return None
+    if "fake" in {str(e.get("channel")) for e in (run.get("trace") or [])}:
+        return None
+    prompt = str(run.get("prompt") or "")
+    if not prompt.strip():
+        return None
+    if _is_worse_than_baseline(run):
+        return None
+    score = _dice(new_grams, _task_sim_grams(str(run.get("task") or "")))
+    if score < _SIM_MIN:
+        return None
+    agg = run.get("aggregate") or {}
+    return (
+        score,
+        {
+            "run_id": run.get("run_id"),
+            "similarity": round(score, 3),
+            "avg_score": agg.get("avg_score"),
+            "delta": _delta_of(run),
+            "task": str(run.get("task") or "")[:60],
+            "prompt_chars": len(prompt),
+        },
+    )
 
 
-def _dice(a: set[str], b: set[str]) -> float:
-    """Dice 系数：比 Jaccard 对长短不等的文本更平滑。"""
-    if not a or not b:
-        return 0.0
-    return 2 * len(a & b) / (len(a) + len(b))
+def _is_worse_than_baseline(run: dict[str, Any]) -> bool:
+    """该轮是否"通过了但比基线更差"（Δ 为负且有 Δ 可算）。
+
+    抽成函数是为了不把 `_library_recommend` 的圈复杂度顶过预算：
+    这个判据是一个语义决定（"差的资产不许当参考"），不该和遍历/排序挤在一层。
+    """
+    delta = _delta_of(run)
+    return delta is not None and delta < 0
 
 
-# 所有任务描述共享的模板短语（"帮我写一个 prompt 让 AI ..."）——不剥离的话，
-# 模板前缀的重叠会淹没真正的领域相似性（实测 0.124 的假相似全来自它）
-_TEMPLATE_NOISE = ("帮我写", "写一个", "写个", "prompt", "提示词", "让ai", "让 ai", "的prompt")
+def _delta_of(run: dict[str, Any]) -> float | None:
+    """该轮的 Δ（优化后 − 基线）；任一侧缺分返回 None。
 
-
-def _task_sim_grams(text: str) -> set[str]:
-    cleaned = (text or "").lower()
-    for noise in _TEMPLATE_NOISE:
-        cleaned = cleaned.replace(noise, "")
-    return _text_bigrams(cleaned)
+    推荐要按"Δ ≥ 0"过滤：通过但**比不优化还差**的那一版，当 few-shot 参考等于
+    教新任务怎么变坏。口径与 `history` 的 Δ 一致（两边都读 aggregate 的 avg_score）。
+    """
+    opt = (run.get("aggregate") or {}).get("avg_score")
+    base = (run.get("baseline_aggregate") or {}).get("avg_score")
+    if not isinstance(opt, (int, float)) or not isinstance(base, (int, float)):
+        return None
+    return round(float(opt) - float(base), 2)
 
 
 def _load_run_file(path: Path) -> dict[str, Any] | None:
@@ -72,6 +122,19 @@ def _load_run_file(path: Path) -> dict[str, Any] | None:
     return data
 
 
+def _error_out(ns: argparse.Namespace, msg: str, code: int) -> None:
+    """非零退出时的统一出口：`--json` 下也必须给一个 JSON 对象。
+
+    README 的契约是"`--json` 时 stdout 恰好一个 JSON 对象"，而 MCP（`_run_cli_json`）
+    与桌面端都**无条件** `json.loads(stdout)`。旧版这条路径只往 stderr 打一句，
+    调用方拿到的是 `Expecting value: line 1 column 1 (char 0)` —— 一个与真因无关的报错。
+    """
+    if getattr(ns, "json", False):
+        print(json.dumps({"error": msg, "exit_code": code}, ensure_ascii=False))
+    else:
+        print(msg, file=sys.stderr)
+
+
 def _library_recommend(ns: argparse.Namespace) -> int:
     """记忆层·写侧入口：新任务 → 历史相似资产 top-3。
 
@@ -83,32 +146,9 @@ def _library_recommend(ns: argparse.Namespace) -> int:
     new_grams = _task_sim_grams(ns.task_text or "")
     scored: list[tuple[float, dict[str, Any]]] = []
     for f in sorted(log_dir().glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
-        d = _load_run_file(f)
-        if d is None:
-            continue
-        if d.get("status") != "passed":
-            continue
-        channels = {str(e.get("channel")) for e in (d.get("trace") or [])}
-        if "fake" in channels:
-            continue
-        prompt = str(d.get("prompt") or "")
-        if not prompt.strip():
-            continue
-        score = _dice(new_grams, _task_sim_grams(str(d.get("task") or "")))
-        if score > 0.05:
-            agg = d.get("aggregate") or {}
-            scored.append(
-                (
-                    score,
-                    {
-                        "run_id": d.get("run_id"),
-                        "similarity": round(score, 3),
-                        "avg_score": agg.get("avg_score"),
-                        "task": str(d.get("task") or "")[:60],
-                        "prompt_chars": len(prompt),
-                    },
-                )
-            )
+        cand = _recommend_candidate(_load_run_file(f), new_grams)
+        if cand is not None:
+            scored.append(cand)
     # 同任务多轮去重：只保留每条 task 的最高分 run（否则 12 轮 e2e 的同一任务会霸榜）。
     # 同 task 的相似度必然相同，所以这里按分数挑，而不是按遍历序先到先得
     best_by_task: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -199,10 +239,10 @@ def _library_command(argv: list[str]) -> int:
                 }
                 break
         if not target:
-            print(f"找不到运行：{ns.export}", file=sys.stderr)
+            _error_out(ns, f"找不到运行：{ns.export}", EXIT_CONFIG)
             return EXIT_CONFIG
         if not (target.get("prompt") or "").strip():
-            print(f"运行 {ns.export} 没有可导出的提示词", file=sys.stderr)
+            _error_out(ns, f"运行 {ns.export} 没有可导出的提示词", EXIT_FAILED)
             return EXIT_FAILED
         out = _export_out_path(ns)
         out.parent.mkdir(parents=True, exist_ok=True)

@@ -39,10 +39,14 @@ Real run (set `PM_API_KEY`, see `.env.example`):
 
 ```bash
 python run.py --preflight                # smoke-test every role before burning budget
-python run.py --task "analyze sales data" --fast      # first run: ~8-10 calls / a few minutes
+python run.py --task "analyze sales data" --fast      # first run: 12-22 calls / a few minutes
 python run.py --task "analyze sales data" --target-model deepseek-v3   # full loop: 45-102 calls
 python run.py --task "…" --prompt-file my_prompt.md   # improve your own draft; Δ = vs. your version
 ```
+
+> ⚠️ `--task` has a **4-character minimum**: copying the placeholder `--task "..."` (3 chars)
+> or `--task "…"` (1 char) exits with code 2 ("task length must be 4-8000 chars") —
+> which looks like a config error but is an argument error.
 
 **Beginners only need these 3 variables** (copy `.env.example` to `.env`, leave the rest at default):
 
@@ -116,7 +120,7 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 
 | Item | Value |
 |---|---|
-| Tests | **1,984 collected**, no API key, no live network |
+| Tests | **2,129 collected**, no API key, no live network |
 | Coverage | gated at floor 92 on `pm/` and floor 93 on `pm/modelhub/*`; measured values drift per round — the only maintained table lives in `docs/operations.md` (this README no longer copies snapshots) |
 | CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
 | Interfaces | CLI (13 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |

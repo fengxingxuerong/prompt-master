@@ -19,6 +19,9 @@
 
 | 工具 | 用途 |
 |---|---|
+| `prompt_check` | **零调用**体检一版提示词：确定性规则 + 结构统计（先免费判断要不要花钱） |
+| `prompt_diff` | **零调用**两版提示词差分：修好几条 / 新引入几条（`regressed` 直接可当门禁） |
+| `cases_check` | **零调用**用例集体检：这套考卷有几票能否决、哪些断言是空转 |
 | `estimate_cost` | 提交前预算预估（调用数区间，不联网） |
 | `optimize_submit` | 提交任务 → run_id（秒回；**需先常驻 `python run_server.py`**） |
 | `optimize_status` / `optimize_wait` / `optimize_report` | 轮询 / 阻塞等终态（含报告全文）/ 取报告 |
@@ -31,9 +34,11 @@
 ### 方式 B：CLI（四态退出码）
 
 ```bash
-python run.py --json --task "..." --cases-file cases.json --max-iter 2
+python run.py --json --task "分析销售数据并给出结论" --cases-file cases.json --max-iter 2
 # 或（`pip install .` 之后，无需知道仓库在哪）：
-prompt-master --json --task "..." --cases-file cases.json --max-iter 2
+prompt-master --json --task "分析销售数据并给出结论" --cases-file cases.json --max-iter 2
+# ⚠️ `--task` 有 **≥4 字**下限：照抄占位符 `--task "..."`（3 字）/ `--task "…"`（1 字）
+#    会直接退 2「需求描述长度需在 4-8000 字之间」，看起来像配置错而其实是参数错
 # 退出码：0=达标交付（取 best_prompt） 1=未达标但已交付（读报告遗留问题）
 #         2=参数/配置错误（不要原样重试） 3=运行失败（看 errors；重试安全）
 ```

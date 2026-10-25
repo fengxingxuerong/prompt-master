@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pm.assertions import RULE_MODE, looks_like_rule
+from pm.assertions import RULE_MODE, _is_literal_flag, looks_like_rule
 
 # 与 run.py 的 --assert-mode 缺省值一致（那条 help 写的就是"默认 contains"）。
 DEFAULT_MODE = "contains"
@@ -42,7 +42,16 @@ INJECTION_MIN_CASES = 3  # n≥3 才要求注入那一格：两条用例时不�
 
 
 def mode_of(case: dict[str, Any]) -> str:
-    return str(case.get("mode") or DEFAULT_MODE)
+    """这条用例实际会跑的断言模式。
+
+    2026-10-31 补 `assert_mode` 回退：运行时（`pm/nodes/execute.py::_mode_for`、
+    `pm/cli/support.py::case_entry_fields`）读的是 `mode or assert_mode or 缺省`，
+    而这里只读 `mode`。于是同一份 JSON 换成 `"assert_mode"` 键就变成两套结论：
+    一条 `{"assert_mode": "custom:x", "expected": ""}` 会被体检报成
+    "no_assertion（白占一个用例位）"，而它跑起来其实是执行的；
+    `{"assert_mode": "rule"}` 会被算成 contains，judge_only 四个桶全数错。
+    """
+    return str(case.get("mode") or case.get("assert_mode") or DEFAULT_MODE)
 
 
 def mode_is_valid(mode: str) -> bool:
@@ -62,8 +71,16 @@ def has_assertion(case: dict[str, Any]) -> bool:
 
 
 def is_advisory(case: dict[str, Any]) -> bool:
-    """contains/exact 的 expected 读起来像需求规则 ⇒ 执行时被降级成提醒，不计入否决。"""
+    """contains/exact 的 expected 读起来像需求规则 ⇒ 执行时被降级成提醒，不计入否决。
+
+    `"literal": true` 的用例不算（2026-10-31）：那是用户显式声明"这就是输出里会出现
+    的原话"，运行时照旧逐字比对、照旧有一票否决权。体检必须与运行时同一口径，
+    否则会出现"体检说这条没有否决权、跑起来它却真的否决了"。
+    """
     if mode_of(case) not in LITERAL_MODES:
+        return False
+    raw = case.get("literal") or case.get("expected_is_literal")
+    if _is_literal_flag(raw):
         return False
     return looks_like_rule(str(case.get("expected") or ""))
 

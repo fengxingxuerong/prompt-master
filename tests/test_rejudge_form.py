@@ -97,8 +97,16 @@ def test_inline_script_is_syntactically_valid(tmp_path):
     assert m
     js = tmp_path / "inline.js"
     js.write_text(m.group(1), encoding="utf-8")
+    # encoding 必须显式给：Windows 的默认码页是 cp936，node 吐 UTF-8 时
+    # `text=True` 会走 locale 解码 → 读取线程抛 UnicodeDecodeError、
+    # rc.stdout/stderr 变空。判据就退化成"什么都不含"，报错信息也变成空白。
     rc = subprocess.run(
-        [shutil.which("node"), "--check", str(js)], capture_output=True, text=True, check=False
+        [shutil.which("node"), "--check", str(js)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
     )
     assert rc.returncode == 0, rc.stderr
 
@@ -113,6 +121,8 @@ def test_dom_smoke(tmp_path):
         [shutil.which("node"), str(SMOKE), str(html), str(ANCHORS)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
         env=dict(os.environ),
     )

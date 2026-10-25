@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,6 +60,19 @@ WEAK_META_MARKERS: list[str] = [
 ]
 WEAK_COMBO_MIN = 2
 
+
+def _normalize_for_markers(text: str) -> str:
+    """特征句比对的归一化：NFKC + 去全部空白。
+
+    为什么需要（2026-10-31 审实）：强特征是**含空格的精确子串**，交付物把
+    `你是一位严格的 AI 输出质量评估专家` 写成 `严格的AI输出质量评估专家`
+    就整条逃过检测 —— 而去空格恰恰是模型改写时最常见的动作。
+    只做归一化（NFKC 统一全角/半角、去空白），**不引入同义词猜测**：
+    判据仍要求原句骨架逐字出现。
+    """
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text or ""))
+
+
 # 交付物长度下限（字符）：低于此值视为空泛 / 截断 / 未生成
 MIN_PROMPT_LENGTH = 100
 
@@ -77,19 +91,117 @@ SIZE_GROWTH_RATIO = 1.3
 # （实测 8.75→7.88），且与"边界情况必须继续作答"的骨架要求相冲突。
 _SUPPRESSIVE_RULE_RE = re.compile(
     r"(停止处理|终止处理|不再输出|不输出任何结论|不输出结论|仅输出固定 ?token|"
-    r"固定输出[「\"']?数据缺失|拒绝(?:回答|输出))"
+    r"固定输出[「\"']?数据缺失|拒绝(?:回答|输出)|不返回(?:任何)?(?:内容|结果|输出)|"
+    r"(?:直接|立即|一律)终止)"
 )
+
+# 引号内的"引用"：把 `不写"停止处理"` 这类**禁止示例列举**与真正的抑制条款区分开。
+# 为什么必须区分（2026-10-02 实测）：OPTIMIZER_SYSTEM 里就写着
+# 「不写"停止处理""不输出任何结论"……」，这是**教模型别写**这类条款的正面规则，
+# 却被 `_SUPPRESSIVE_RULE_RE` 字面命中成一堆 suppressive_rule ——
+# 于是"在这个模板上再加一条真的抑制条款"在 code 级完全看不出来（集合前后一样）。
+#
+# ⚠️ 单引号分支必须写 `[^'\n]`（2026-10-31 修）：原来的 `[^']*` 会跨行匹配，
+# 正文里两个英文撇号（`Don't … user's`）就把中间整段"当作引用"抹掉 ——
+# 那段里的 `停止处理 / 不输出结论` 随之一起消失，`run.py diff` 报"无回归"、
+# CI 的 gate 静默放行。这是"剥引用"这个优化自己长出来的洞。
+_QUOTED = re.compile(r"「[^」]*」|『[^』]*』|《[^》]*》|“[^”]*”|‘[^’]*’|\"[^\"]*\"|'[^'\n]*'")
+
+# 匹配项前面的否定词：`不得停止处理` / `禁止拒绝回答` / `无需不输出结论` 是**正面规则**
+# （要求继续作答），不是抑制条款。窗口取 8 字：中文句式里否定词紧贴动词，
+# 8 字足以覆盖"在任何情况下都不得"这类前置修饰，又不会把相邻分句的否定算进来。
+_NEGATION_BEFORE_RE = re.compile(r"(?:不得|禁止|不可|不应|不要|勿|避免|无需|不必|严禁)\s*$")
+_NEGATION_WINDOW = 8
+
+
+def suppressive_hits(text: str) -> list[str]:
+    """命中的抑制型措辞，**已剥掉引用与否定语境**（`check` 与 `diff` 共用这一个口径）。
+
+    为什么必须共用（2026-10-31 审计）：`pm/promptdiff.py` 早就对"引用"做了剥离，
+    而 `check_prompt_quality` 直接对着原文 findall。两条路径对同一份文本给出不同答案——
+    `check` 报 1 条 suppressive_rule，`diff` 说这一版没引入任何新命中项。
+
+    否定语境同理：模块 docstring 自己推荐的正确写法
+    「边界处理应写成『标注缺失 + 继续输出其余内容』，而不是停止处理」里的"停止处理"
+    被字面命中，于是**照文档建议改的提示词反而被判问题、强制重写**。
+    实测代价有记录（`blanket` 那条同类误杀：均分 5.78→4.76、提前终止）。
+    """
+    stripped = _QUOTED.sub(" ", text or "")
+    hits: list[str] = []
+    for m in _SUPPRESSIVE_RULE_RE.finditer(stripped):
+        prefix = stripped[max(0, m.start() - _NEGATION_WINDOW) : m.start()]
+        if _NEGATION_BEFORE_RE.search(prefix):
+            continue
+        hits.append(m.group(0))
+    # 去重但保留首次出现顺序（报告里按原文顺序读更顺）
+    return list(dict.fromkeys(hits))
+
 
 # 约束条目只在「约束语义」的标签段里数：[任务]/[输出格式] 里的编号是交付物清单
 # （如"1. 趋势结论 2. 异常点"），把它们算进来会把合格提示词误杀。
-_SECTION_HEADER_RE = re.compile(r"^\s*\[([^\[\]]{1,8})\]\s*$")
+#
+# 段头的**全部**合法写法（2026-10-31 收口成一处判定）：此前只认 `[约束]` 与 `## 约束`，
+# 于是一份写成
+#     要求：
+#     1. …（12 条）
+# 的提示词实测 count_constraints = 0 —— ≤8 预算闸对裸冒号段头整条失效，
+# 而本模块另一处 docstring 写着"绕过成本必须为零"。四种形态各自都有真实来源：
+_SECTION_FORMS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\s*[\[【]([^\[\]【】]{1,8})[\]】]\s*$"),  # [约束] / 【约束】
+    # 标题式允许更长：`## Output Format` 这类英文段名 13 字符就会卡在 12 的旧上限外
+    re.compile(r"^\s*#{1,3}\s*([^\[\]#【】]{1,20}?)\s*#*\s*$"),  # ## 约束 / ## 约束 ##
+    re.compile(r"^\s*\*{1,3}\s*([^*\n]{1,12}?)\s*\*{1,3}\s*$"),  # **约束**
+    re.compile(r"^\s*_{1,3}\s*([^_\n]{1,12}?)\s*_{1,3}\s*$"),  # __约束__
+)
+# 裸段名 + 冒号（`要求：` / `约束：`）：中文提示词最常见的段头写法。
+# 收紧到"整行只有一个短名词 + 冒号"：长度 ≤8、不含空白与常见标点，
+# 这样 `请按以下要求输出：`（长度超了）与 `1. 要求：`（首个非空字符前有编号）
+# 这类正文句子不会被当成段头。
+_BARE_COLON_HEADER_RE = re.compile(r"^\s*([^\s\[\]【】#*_:：，。；！？、]{1,8})\s*[：:]\s*$")
+
+
+def _section_header(line: str) -> str | None:
+    """一行是否是**独占一行**的段头；是则返回段名，否则 None。
+
+    单一判定点：`count_constraints`（数编号条目、管 ≤8 预算）与 `structure_items`
+    （摊平成清单、给判定式评分用）必须用同一套段头识别。两处各写一遍就必然漂 ——
+    2026-10-13 已经发生过一次（`## 约束` 在一处认、另一处不认，预算闸对标题式失效）。
+    """
+    for form in _SECTION_FORMS:
+        m = form.match(line)
+        if m:
+            return m.group(1)
+    m = _BARE_COLON_HEADER_RE.match(line)
+    if m:
+        name = m.group(1)
+        # 纯数字/编号开头的不是段名（`1：` 这种是条目行，交给 _NUMBERED_ITEM_RE）
+        if not name[0].isdigit():
+            return name
+    return None
+
+
 # 段名同义词要覆盖全：只认「约束|边界」时，交付物把段名写成 [要求] / [规则]
 # 就能带着 20 条编号约束"合规"通过预算闸——绕过成本为零。
-_CONSTRAINT_SECTION_RE = re.compile(r"约束|边界|规则|要求|限制|禁止|规范|须知|注意")
+# 英文形态（2026-10-31 补）：`## Rules` / `## Requirements` 与此前的中文段名同等对待，
+# 否则一份英文提示词整条预算闸形同虚设。用局部内联标志 `(?i:...)`，
+# 避免影响同一正则里中文分支的行为。
+_CONSTRAINT_SECTION_RE = re.compile(
+    r"约束|边界|规则|要求|限制|禁止|规范|须知|注意|"
+    r"(?i:constraint|rules?|requirement|restriction|prohibit|guideline|must)"
+)
 # 但这些段里的编号是交付物骨架而不是约束，即便段名撞上上面的词也不算（[输出要求]、
 # [格式规范] 里列的是"第一部分/第二部分"，数进来就是误杀）。
-_NON_CONSTRAINT_SECTION_RE = re.compile(r"任务|背景|角色|格式|输出|示例|骨架|流程|步骤|结构")
-_NUMBERED_ITEM_RE = re.compile(r"^\s*\d+\s*[.、)）]\s*\S")
+# `内容|交付|验收|写作|质量`（2026-10-31 补）来自实测误杀：`## 内容要求` / `## 交付要求`
+# 各 9 条列的是"要写哪些部分"，被判 constraint_overload 会触发无谓重写 ——
+# 按本模块一贯的取舍（误杀比漏报贵），这类段名一律只放行、不判罪。
+_NON_CONSTRAINT_SECTION_RE = re.compile(
+    r"任务|背景|角色|格式|输出|示例|骨架|流程|步骤|结构|内容|交付|验收|写作|质量|"
+    r"(?i:task|background|role|format|output|example|skeleton|process|steps?|structure|"
+    r"content|deliverable|schema)"
+)
+# 编号条目：`1.` / `1、` / `1)` / `1．`(全角句点) / `(1)` / `（1）` / `①`。
+# 扩展来自实测漏判：一份用 `(1)` 或 `①` 编号的 12 条约束此前数出 0 条。
+_NUMBERED_ITEM_RE = re.compile(r"^\s*(?:\d+\s*[.．、)）]|[(（]\d+[)）]|[①-⑳])\s*\S")
 # 定界符配平：<输入>…<输入>（重复开标签）这类畸形会在真实调用里放大注入面 ——
 # 目标模型看到两个开标签，分不清哪段才是"数据区"，上一轮评审在 Run A 的最终提示词里就抓到过。
 _OPEN_TAG_RE = re.compile(r"<([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]{0,20})>")
@@ -108,29 +220,91 @@ _CLOSE_TAG_RE = re.compile(r"</([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]{0,20})>"
 # 加否定守卫的原因（第 2 轮实测）：v1 里「若输入数据完整（所有字段均有值），**不得**标注
 # 「数据缺失」」被前版正则命中——这是反向规则（数据完整时禁止标缺失），语义与兜底完全相反。
 _BLANKET_SCOPE_RE = re.compile(
-    r"(各结论位置|全部结论|所有结论|整体标注|一律标注|统一标注|所有字段|全部字段)"
+    r"(各结论位置|全部结论|所有结论|整体标注|一律标注|统一标注|所有字段|全部字段|"
+    r"每段结论|各段落|所有输出位置)"
 )
+# 否定词表（2026-10-31 补 `不需要/不必/无需/无须`）：实测漏判
+# 「数据完整（所有字段均有值）时**不需要**标注「数据缺失」」—— 这是反向规则
+# （数据完整时禁止标缺失），语义与兜底完全相反，却被判成兜底。
 _BLANKET_MARKING_RE = re.compile(
-    r"(不得|禁止|不应|不可|不要|勿|避免)?\s*(?:标注|标记|标为|输出|填写|写为|写作)"
+    r"(不得|禁止|不应|不可|不要|勿|避免|不需要|不必|无需|无须)?\s*"
+    r"(?:标注|标记|标为|输出|填写|写为|写作)"
     r"\s*[「“\"']?(数据缺失|缺失)"
 )
-# 限定作用域的正面表述（出现任意一个即视为已区分两种缺失）
-_PER_FIELD_RE = re.compile(r"(已有数据|其余|剩余|照常输出|照常列出|仍须输出|仍要输出)")
+# 限定作用域的正面表述（"已经区分了两种缺失"的那一半）。
+#
+# ⚠️ 2026-10-31：这个正则在被定义后**从未被调用过**（全仓只有定义行那次匹配），
+# 也就是"已区分两种缺失则豁免"这句话只是一句注释，实现里并不存在。现在接进去了。
+# 收窄 `其余|剩余` → `其余字段|其余内容|剩余字段`：裸「其余」会把
+# 「并跳过其余分析」这种真兜底放过去（审计的最强反例就长这样）。
+_PER_FIELD_RE = re.compile(
+    r"(已有数据|其余字段|其余内容|剩余字段|照常输出|照常列出|仍须输出|仍要输出)"
+)
+# 模块自己推荐的"空输入分支"措辞：`输入完全为空 → 可整体标注缺失`。
+# 这是**正确写法**（docstring 里那两条互斥规则的第 ① 条），不能判成兜底。
+_EMPTY_INPUT_BRANCH_RE = re.compile(r"(输入(?:完全|彻底)?为空|零字符|无任何输入|输入为空字符串)")
+
+
+def _line_around(text: str, pos: int) -> str:
+    """返回 `pos` 所在的那一整行（用于"这条措辞和它的限定语是否在同一句里"）。"""
+    start = text.rfind("\n", 0, pos) + 1
+    end = text.find("\n", pos)
+    return text[start : end if end != -1 else len(text)]
 
 
 def blanket_missing_branch(prompt: str) -> bool:
-    """交付物是否把「数据缺失」写成全局兜底（而不是按字段限定作用域）。
+    """交付物是否把「数据缺失」写成**全局兜底**（而不是按字段限定作用域）。
 
-    只拦**明确的全局措辞**（如"各结论位置一律标注数据缺失"），不做语义猜测：
+    只拦明确的全局措辞（如"各结论位置一律标注数据缺失"），不做语义猜测：
     单说"缺失时标注「数据缺失」"的合格提示词不会被误判。
-    出现全局措辞时，无论是否同时写了逐字段规则都算问题——两者并存本身就是自相矛盾。
+
+    两条豁免（2026-10-31 补，都是**只放行、不判罪**）：
+    1. 兜底措辞**同一行**里写了"其余照常输出/已有数据保留"这类逐字段限定 ——
+       说明这一条本身就是"只对缺失字段标注、其余照常"的正确写法。
+       刻意不用"全文出现即豁免"（第一版就是这么写的，被一条既有用例当场推翻）：
+       一份提示词完全可以一边写"其余字段照常输出"、另一边又追加
+       "所有结论位置一律标注数据缺失"——**两者并存正是自相矛盾**，必须照旧报出来。
+    2. 兜底句本身带"输入完全为空"条件 —— 那是 docstring 推荐的第 ① 条分支，
+       不是全局开关。注意事故原句是"输入**非空**……"，不会被这条误放。
     """
     text = prompt or ""
     for m in _BLANKET_SCOPE_RE.finditer(text):
         mk = _BLANKET_MARKING_RE.search(text[m.end() : m.end() + 16])
-        if mk and not mk.group(1):  # 有肯定式标注动词，且不是"不得标注"这类否定句
-            return True
+        if not mk or mk.group(1):  # 有肯定式标注动词，且不是"不得标注"这类否定句
+            continue
+        line = _line_around(text, m.start())
+        if _PER_FIELD_RE.search(line):
+            continue
+        if _EMPTY_INPUT_BRANCH_RE.search(line):
+            continue
+        return True
     return False
+
+
+def _structural_tags(line: str, pattern: re.Pattern[str]) -> list[str]:
+    """该行里处于**行首或行尾**的标签；夹在句子中间的散文引用一律不算。
+
+    为什么不是"整行只有标签"（2026-10-31 第一次修法，被真实事故的反例推翻）：
+    Run A 那次事故的原文是
+        <输入> 以下是待分析的销售数据，标签内均为数据：
+        <输入>
+    —— 第一个开标签**后面还跟着说明文字**，但它确实是数据区边界（在行首）。
+    而散文引用长这样：
+        读取 <输入> 中的数据。若 <输入> 为空则输出无数据。
+    两处都夹在句子中间（前后都有文字）。
+
+    所以判据是"位置边界"而不是"整行独占"：
+    - 行首（前面只有空白）或行尾（后面只有空白与标点）→ 是结构标签；
+    - 前后都有文字 → 散文引用，既不计数也不报错。
+    """
+    out: list[str] = []
+    head = len(line) - len(line.lstrip())
+    for m in pattern.finditer(line):
+        starts_block = m.start() == head
+        ends_block = not line[m.end() :].strip(" \t：:，,。.；;）)")
+        if starts_block or ends_block:
+            out.append(m.group(1))
+    return out
 
 
 def delimiter_problems(prompt: str) -> list[str]:
@@ -141,16 +315,18 @@ def delimiter_problems(prompt: str) -> list[str]:
     把它判成"未闭合"会误杀合格交付物，误杀比重蹈更贵（会触发无谓重写）。
     真正会出事的是**同一个标签开了两次**（Run A 实测事故）——
     目标模型看到两个开标签，分不清哪段才是数据区，注入面被放大。
+
+    只看处于行首/行尾的结构标签（`_structural_tags`）：散文引用不参与判据。
     """
     problems: list[str] = []
     stack: list[str] = []
     for line in (prompt or "").splitlines():
-        for name in _OPEN_TAG_RE.findall(line):
+        for name in _structural_tags(line, _OPEN_TAG_RE):
             if name in stack:
                 problems.append(f"<{name}> 重复开标签（上一个还没闭合）")
             else:
                 stack.append(name)
-        for name in _CLOSE_TAG_RE.findall(line):
+        for name in _structural_tags(line, _CLOSE_TAG_RE):
             if name in stack:
                 stack.pop()
             else:
@@ -186,11 +362,11 @@ def count_constraints(prompt: str) -> dict[str, Any]:
     current: str | None = None
     current_count = 0
     for line in (prompt or "").splitlines():
-        m = _SECTION_HEADER_RE.match(line) or _HEADING_SECTION_RE.match(line)
-        if m:
+        header = _section_header(line)
+        if header is not None:
             if current is not None and current_count:
                 parts.append((current, current_count))
-            current = m.group(1)
+            current = header
             current_count = 0
             continue
         if (
@@ -216,9 +392,6 @@ _BULLET_ITEM_RE = re.compile(r"^\s*[-•*]\s*\S")
 _INLINE_SECTION_RE = re.compile(
     r"^\s*(?:\[([^\[\]]{1,8})\]|#{1,3}\s*([^\[\]#]{1,12})[：:])\s*(\S.*)$"
 )
-# Markdown 标题式段落（`# 角色` / `## 约束`）：真实交付物里比方括号标签更常见。
-# 只认 1-3 级标题，4 级以下通常是正文层次而不是段落名。
-_HEADING_SECTION_RE = re.compile(r"^\s*#{1,3}\s*([^\[\]#]{1,12})\s*$")
 # 同行条目的分隔符：只用分号与句号 —— 顿号/逗号会把"缺失 A、B 字段"这类
 # 一个作用域并列多项的条目切成半截，切错比不切更坏（判据要对，不要多）。
 _ITEM_SPLIT_RE = re.compile(r"[；;。]")
@@ -241,9 +414,9 @@ def structure_items(prompt: str) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     current: str | None = None
     for line in (prompt or "").splitlines():
-        bare = _SECTION_HEADER_RE.match(line) or _HEADING_SECTION_RE.match(line)
-        if bare:
-            current = bare.group(1)
+        header = _section_header(line)
+        if header is not None:
+            current = header
             continue
         head = _INLINE_SECTION_RE.match(line)
         if head:
@@ -324,8 +497,13 @@ def check_prompt_quality(prompt: str) -> QualityReport:
         issues.append(QualityIssue("too_short", "提示词为空"))
         return QualityReport(issues)
 
-    strong = [m for m in STRONG_META_MARKERS if m in prompt]
-    weak = [m for m in WEAK_META_MARKERS if m in prompt]
+    # 元话语判据不能是"含空格的精确子串"（2026-10-31 修）：
+    # 交付物把 `你是一位严格的 AI 输出质量评估专家` 写成 `严格的AI输出质量评估专家`
+    # （去掉空格）就整条逃过检测，而这是模型改写时的常见动作。
+    # 归一化只做 NFKC + 去空白 + 全角转半角标点，不引入任何同义词猜测。
+    normalized = _normalize_for_markers(prompt)
+    strong = [m for m in STRONG_META_MARKERS if _normalize_for_markers(m) in normalized]
+    weak = [m for m in WEAK_META_MARKERS if _normalize_for_markers(m) in normalized]
     if strong:
         issues.append(
             QualityIssue("meta_leak", f"疑似元话语泄漏：命中优化流程特征句「{strong[0]}」")
@@ -393,7 +571,7 @@ def check_prompt_quality(prompt: str) -> QualityReport:
             )
         )
 
-    suppressive = _SUPPRESSIVE_RULE_RE.findall(prompt or "")
+    suppressive = suppressive_hits(prompt or "")
     if suppressive:
         issues.append(
             QualityIssue(

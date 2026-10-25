@@ -22,7 +22,7 @@ from .budget import (
     _is_transient_conn_error,
 )
 from .config import build_config
-from .ledger import _record_failure, _tokens_of
+from .ledger import _record_failure, _record_retry_if, _tokens_of
 from .schema import (
     _ChannelASkipped,
     _model_required_fields,
@@ -110,6 +110,9 @@ def structured_call(
     so_kwargs: dict[str, Any] = {"include_raw": False}
     if method:
         so_kwargs["method"] = method
+    # 通道 A 是否**真的发过请求**（用来判断进入通道 B 算不算一次额外请求）：
+    # `_ChannelASkipped` 是能力缓存命中的"跳过"，那时一条请求都没发。
+    reqs_before_a = requests_counter[0]
     try:
         skip_reason = _skip_channel_a(cfg)
         if skip_reason:
@@ -171,10 +174,18 @@ def structured_call(
     schema_block = _schema_hint_block(model_cls)
     temp = cfg.temperature
 
+    # 通道 A 真的发过请求又失败 ⇒ 通道 B 的第一发也是**额外请求**，记一条重试
+    # （2026-10-31 接通记账：此前报告里「重试请求数」恒为 0，于是
+    # "A 空返回 → B 再发一整发全价请求"这件事在任何表里都看不见）。
+    # 通道 A 被"跳过"（_ChannelASkipped）时没发请求，不算重试。
+    _record_retry_if(role, requests_counter[0] > reqs_before_a)
+
     for attempt in range(1, max_retries + 1):
         if budget is not None and budget.remaining() <= 0:
             # 名额还剩、预算没了 ⇒ 停。旧版这里会把剩下的解析重试名额各再烧一个 timeout
             raise budget.exceeded(requests_counter[0], last_err or "通道 A 未拿到结果")
+        # 解析失败后的重试：每一条也是一张真实账单
+        _record_retry_if(role, attempt > 1)
         retry_hint = ""
         if last_err:
             retry_hint = (

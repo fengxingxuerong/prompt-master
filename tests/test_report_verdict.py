@@ -87,7 +87,29 @@ def test_passed_verdict_says_passed() -> None:
     )
     assert "达标" in _head(text)
     assert "未达标" not in _head(text)
-    assert "| 判定 | 通过（≥8.0） |" in text, "无门禁拦截时总览仍应判通过"
+    assert "| 判定 | 通过（≥8.0）" in text, "无门禁拦截时总览仍应判通过"
+
+
+def test_archive_without_threshold_discloses_that_the_number_is_current_config() -> None:
+    """老归档没有冻住的阈值时，必须说清那个数是"当前配置"而不是当轮判定依据。
+
+    实测缺陷（2026-10-31 审计）：`passed` 是计算时用当时的 `PM_PASS_THRESHOLD` 定死的，
+    而报告在渲染时再读一次环境变量。`run_0792cd9acf75`（当时阈值 8.5、avg 8.25
+    ⇒ passed=False）按后来的默认 8.0 渲染时，总览每道闸都过、首行却写"未达标"，
+    报告解释不了自己的判定；反过来会印出"✅ 达标：均分 7.8 ≥ 阈值 8.0"这种假命题。
+    """
+    text, _ = render_report(_state(status="passed", aggregate=_agg(avg_score=9.0, passed=True)))
+    assert "本轮归档未记录阈值" in text, "没说明这个 8.0 是现在读的配置"
+
+
+def test_frozen_threshold_wins_over_the_current_env() -> None:
+    """归档里冻住了阈值（8.5）时，渲染必须用它，而不是当前默认 8.0。"""
+    agg = _agg(avg_score=8.25, ci_lower=8.25, passed=False)
+    agg["threshold"] = 8.5
+    text, _ = render_report(_state(aggregate=agg))
+    head = _head(text)
+    assert "8.5" in head, f"用了当前配置的阈值而不是当轮的：{head}"
+    assert "阈值 8.0" not in head
 
 
 def test_failed_run_says_there_is_nothing_to_deliver() -> None:

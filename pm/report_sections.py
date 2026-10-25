@@ -80,6 +80,35 @@ def _header_lines(state: ReportState) -> list[str]:
     return lines
 
 
+def _agg_threshold(agg: dict[str, Any]) -> float:
+    """本轮判定用的阈值 —— **以归档为准**，缺失时才回退到当前环境值。
+
+    `passed` 是计算时用当轮 `PM_PASS_THRESHOLD` 定死的，如果渲染时再读一次环境变量，
+    两次数不一致就会印出自相矛盾的结论（实测 `run_0792cd9acf75`：当时阈值 8.5、
+    avg 8.25 ⇒ passed=False，按后来的默认 8.0 渲染时总览每道闸都过而首行写"未达标"）。
+    老归档没有这个字段，回退是不得已——所以 `_threshold_is_archived` 会让调用方
+    把"这是回退值"明说出来，而不是假装它是当轮的判定依据。
+    """
+    val = agg.get("threshold")
+    if isinstance(val, (int, float)) and float(val) > 0:
+        return float(val)
+    return PASS_THRESHOLD
+
+
+def _threshold_is_archived(agg: dict[str, Any]) -> bool:
+    val = agg.get("threshold")
+    return isinstance(val, (int, float)) and float(val) > 0
+
+
+def _fmt_num(value: float) -> str:
+    """阈值这类小数的显示形式：整数保留一位小数（`8.0` 而不是 `8`），非整数原样。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{v:.1f}" if v == int(v) else f"{v:g}"
+
+
 def _verdict_head(agg: dict[str, Any]) -> str:
     """结论那一行的措辞必须与数字自洽（2026-10-23 修）。
 
@@ -87,11 +116,15 @@ def _verdict_head(agg: dict[str, Any]) -> str:
     短板容忍带或事实断言上，均分本身已过线，实测印出过「均分 8.5 < 阈值 8.0」
     这种事实错误，而结论行是读者唯一必读的一行。这里对着 `AggregateScore.passed`
     的每道闸逐一描述，不新算任何数。
+
+    2026-10-31：阈值改读 `agg["threshold"]`（当轮冻结值），不再读环境变量——
+    否则"当时的判定"与"现在印的阈值"会各说一套。
     """
     avg = agg.get("avg_score")
-    tol_line = PASS_THRESHOLD - PASS_SHORTFALL_TOLERANCE
+    thr = _agg_threshold(agg)
+    tol_line = thr - PASS_SHORTFALL_TOLERANCE
     if agg.get("passed"):
-        return f"✅ **达标**：均分 {avg} ≥ 阈值 {PASS_THRESHOLD}"
+        return f"✅ **达标**：均分 {avg} ≥ 阈值 {_fmt_num(thr)}"
     reasons: list[str] = []
     blockers: list[str] = []
     lower = agg.get("ci_lower")
@@ -115,12 +148,12 @@ def _verdict_head(agg: dict[str, Any]) -> str:
         )
     # 顺序敏感：均分条款先入列，再判空——否则「只卡均分一道闸」的轮会
     # 掉进兜底分支，读者看不到是分数没过线。
-    if isinstance(avg, (int, float)) and float(avg) < PASS_THRESHOLD:
-        reasons.insert(0, f"均分 {avg} < 阈值 {PASS_THRESHOLD}")
+    if isinstance(avg, (int, float)) and float(avg) < thr:
+        reasons.insert(0, f"均分 {avg} < 阈值 {_fmt_num(thr)}")
     if not reasons:
         return "⚠️ **未达标**（判定依据见「评分总览」）"
-    if isinstance(avg, (int, float)) and float(avg) >= PASS_THRESHOLD:
-        return f"⚠️ **未达标**：均分 {avg} 已达阈值 {PASS_THRESHOLD}，但" + "；".join(reasons)
+    if isinstance(avg, (int, float)) and float(avg) >= thr:
+        return f"⚠️ **未达标**：均分 {avg} 已达阈值 {_fmt_num(thr)}，但" + "；".join(reasons)
     return "⚠️ **未达标**：" + "；".join(reasons)
 
 
@@ -237,7 +270,12 @@ def _score_overview_lines(state: ReportState) -> list[str]:
         if isinstance(gate, dict) and gate.get("blocked"):
             verdict = "未达标（分数过阈值，注入门禁拦截）"
         else:
-            verdict = f"通过（≥{PASS_THRESHOLD}）" if agg.get("passed") else "未达标"
+            thr = _agg_threshold(agg)
+            verdict = f"通过（≥{_fmt_num(thr)}）" if agg.get("passed") else "未达标"
+            if not _threshold_is_archived(agg):
+                # 老归档没有冻住的阈值：照旧印判定，但要说明这个数是"当前配置"，
+                # 而不是这一轮的判定依据（判定结果以归档里的 `passed` 为准）。
+                verdict += f"（本轮归档未记录阈值，此处 {_fmt_num(thr)} 取自当前配置）"
         lines.append(f"| 判定 | {verdict} |")
         lines.extend(_scoring_protocol_lines(state))
     else:
@@ -824,7 +862,14 @@ def _usage_lines(state: ReportState) -> list[str]:
     #
     # 为什么必须显示：以前失败的调用在台账上完全不存在，于是「真的慢」与「一直失败」
     # 在这张表上长得一样——本会话已因此查错三轮（查错本账/误判偶发长尾/误判端点排队）。
-    if any(int((usage.get(r) or {}).get("failed_calls", 0) or 0) for r in usage):
+    # 触发条件必须同时看 `retry_requests`（2026-10-31 修）：只有"解析失败后重发"时
+    # 上一发的传输层是成功的，`failed_calls` 为 0 而 `retry_requests` 可能 >0 ——
+    # 只判 failed_calls 会让这段在"重试过但没失败过"的轮次里整段消失。
+    if any(
+        int((usage.get(r) or {}).get("failed_calls", 0) or 0)
+        or int((usage.get(r) or {}).get("retry_requests", 0) or 0)
+        for r in usage
+    ):
         lines.append("> ⚠️ 上表的「调用次数」只数**成功**的调用。失败/重试另列于下表——")
         lines.append("> 两者不可相加：相加会得到一个既不是真实请求数、也不是成功数的混合值。")
         lines.append("")
@@ -860,18 +905,32 @@ def _usage_lines(state: ReportState) -> list[str]:
 
 
 def _assertion_lines(state: ReportState) -> list[str]:
-    """事实断言（ground-truth）结果：确定性校验的逐条对错，评委分之外的硬证据。"""
-    assert_runs = [
-        (r, r["assertion"]) for r in _test_runs(state) if isinstance(r.get("assertion"), dict)
-    ]
-    if not assert_runs:
+    """事实断言（ground-truth）结果：确定性校验的逐条对错，评委分之外的硬证据。
+
+    按**用例**去重（2026-10-31 修）：`test_runs` 是逐**采样**的，`PM_SAMPLES_PER_CASE=2`
+    时同一用例会出现两行。实测 `run_13f9a99096e9` 的 case#0/#1 各两行共 4 行，
+    而 `aggregate.n_assertions` 是 2 —— 读者会以为查了 4 条。同一用例的任一样本失败
+    即视为该用例失败（与 `_collect_assertions` 的保守口径一致），所以保留失败那条。
+    """
+    by_case: dict[Any, dict[str, Any]] = {}
+    for r in _test_runs(state):
+        a = r.get("assertion")
+        if not isinstance(a, dict):
+            continue
+        key = r.get("test_case_index", "?")
+        prev = by_case.get(key)
+        # 失败的优先留下：同一用例两次采样一次过、一次没过时，报"过"等于掩盖证据。
+        if prev is None or (prev.get("passed") and not a.get("passed")):
+            by_case[key] = a
+    if not by_case:
         return []
     lines: list[str] = []
     lines.append("## 事实断言（ground-truth 校验）")
     lines.append("")
     lines.append("| 用例 | 模式 | 结果 | 说明 | 期望片段 |")
     lines.append("|---|---|---|---|---|")
-    for r, a in assert_runs:
+    for idx in sorted(by_case, key=lambda k: str(k)):
+        a = by_case[idx]
         exp_cell = str(a.get("expected") or "")
         if len(exp_cell) > 120:
             exp_cell = exp_cell[:120] + "…"
@@ -880,10 +939,9 @@ def _assertion_lines(state: ReportState) -> list[str]:
         else:
             mark = "✅ 通过" if a.get("passed") else "❌ 未通过"
         lines.append(
-            f"| case#{r.get('test_case_index', '?')} | {a.get('mode', '-')} "
-            f"| {mark} | {a.get('detail', '')} | {exp_cell} |"
+            f"| case#{idx} | {a.get('mode', '-')} | {mark} | {a.get('detail', '')} | {exp_cell} |"
         )
-    if any(str(a.get("mode")) == "rule" for _, a in assert_runs):
+    if any(str(a.get("mode")) == "rule" for a in by_case.values()):
         lines.append("")
         lines.append(
             "> `rule` 行由**评委**逐条核验（带主观噪声），默认不计入否决；"

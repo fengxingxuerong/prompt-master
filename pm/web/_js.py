@@ -149,6 +149,13 @@ function renderChat(r){
   card += `<div class="bc-row"><span>LLM 调用</span><b>${r.llm_calls ?? 0}</b></div>`;
   if(agg.avg_score != null) card += `<div class="bc-row"><span>当前均分 / 最低</span><b>${agg.avg_score} / ${agg.min_score}</b></div>`;
   if(r.early_stop_reason) card += `<div class="bc-row"><span>早停原因</span><b class="u-warn">${esc(r.early_stop_reason)}</b></div>`;
+  // 失败原因必须显示（2026-10-31 修）：这台控制台此前只画 status/iteration/llm_calls/均分/早停，
+  // 而 `StatusResponse.error` 一个字都不读 —— 无 Key、配额打满、端点点挂时用户只看到一块红 badge，
+  // 还得自己去翻日志；异常路径没有 final_report，点「加载完整报告」只会 404。
+  if(r.error) card += `<div class="bc-row"><span>错误</span><b class="u-warn">${esc(r.error)}</b></div>`;
+  if((r.errors||[]).length){
+    card += `<div class="bc-row"><span>错误明细</span><b class="u-warn">${esc((r.errors||[]).slice(0,3).join("；"))}</b></div>`;
+  }
   if((r.prompt_quality_issues||[]).length) card += `<div class="bc-row"><span>质量警告</span><b class="u-warn">${r.prompt_quality_issues.length} 条</b></div>`;
   card += "</div>";
 
@@ -288,10 +295,14 @@ function renderScoreView(r){
   const ds = latest && latest.dimension_scores ? latest.dimension_scores : {};
 
   const passed = agg.passed;
+  // 阈值取归档里的当轮值（2026-10-31 修）：写死 8.0 时，改过 PM_PASS_THRESHOLD 的轮次
+  // 会在报告说"阈值 8.5"、控制台说"≥8.0"，两边各说一套。
+  const thr = (agg.threshold != null && isFinite(Number(agg.threshold))) ? Number(agg.threshold) : 8.0;
+  const thrText = thr.toFixed(1);
   const delta = (agg.avg_score != null && base.avg_score != null) ? (agg.avg_score - base.avg_score) : null;
 
   let cards = `<div class="score-cards">
-    <div class="stat-card"><h4>判定</h4><div class="big ${passed?'ok':'bad'}">${passed?'通过':'未达标'}</div><div class="sub">阈值 ${agg.avg_score!=null?'≥ 8.0':''}</div></div>
+    <div class="stat-card"><h4>判定</h4><div class="big ${passed?'ok':'bad'}">${passed?'通过':'未达标'}</div><div class="sub">阈值 ${agg.avg_score!=null?('≥ ' + thrText):''}</div></div>
     <div class="stat-card"><h4>聚合分数</h4><div class="big">${agg.avg_score ?? '-'}</div><div class="sub">最低 ${agg.min_score ?? '-'} · 下界 ${agg.ci_lower ?? '-'}</div></div>`;
   if(delta != null){
     const dCls = delta > 0 ? "ok" : (delta < 0 ? "bad" : "");
@@ -301,7 +312,9 @@ function renderScoreView(r){
     const vColor = pw.verdict==="better"?"ok":(pw.verdict==="worse"?"bad":"");
     cards += `<div class="stat-card"><h4>成对盲评</h4><div class="big ${vColor}">${esc(pw.verdict)}</div><div class="sub">胜${(pw.votes&&pw.votes.better)||0}/负${(pw.votes&&pw.votes.worse)||0}/平${(pw.votes&&pw.votes.tie)||0}${pw.conflict?' · ⚠️结论冲突':''}</div></div>`;
   }
-  if(agg.noise != null) cards += `<div class="stat-card"><h4>采样噪声</h4><div class="big">${agg.noise.toFixed(2)}</div><div class="sub">SEM ${agg.sem ?? '-'} · 样本 ${agg.n_samples ?? '-'}</div></div>`;
+  // 噪声 0.0 有歧义（2026-10-31 修）：报告整章都写着"0.0 = 没测到"，而控制台直接印
+  // "0.00"，读起来像"零噪声"。`noise_measurable` 是聚合里已有的判据，照它标。
+  if(agg.noise != null) cards += `<div class="stat-card"><h4>采样噪声</h4><div class="big">${(agg.noise_measurable === false) ? '不可估' : agg.noise.toFixed(2)}</div><div class="sub">${(agg.noise_measurable === false) ? '重复打分无差异 ⇒ 测不出噪声' : ''}SEM ${agg.sem ?? '-'} · 样本 ${agg.n_samples ?? '-'}</div></div>`;
   if(agg.judge_bias != null) cards += `<div class="stat-card"><h4>评委偏差</h4><div class="big ${agg.judge_bias_warning?'u-warn':'u-text'}">${agg.judge_bias.toFixed(2)}</div><div class="sub">${agg.judge_bias_warning?'⚠️ 可能放水':'正常'}</div></div>`;
   cards += "</div>";
 
@@ -327,7 +340,7 @@ function renderScoreView(r){
 
   // 画图
   drawRadar("radar", dims.map(d=>ds[d] ?? 0), dims.map(d=>dimCN[d]));
-  drawCurve("curve", (r.prompt_version_list||[]).map(v=>v.avg_score));
+  drawCurve("curve", (r.prompt_version_list||[]).map(v=>v.avg_score), thr);
 }
 """
 
@@ -387,8 +400,15 @@ function drawRadar(id, vals, labels){
 }
 
 // ---- canvas 版本曲线 ----
-function drawCurve(id, scores){
+function drawCurve(id, scores, thr){
   const c = $(id); if(!c) return;
+  // 版本里 avg_score 可能是 null（revise 刚 append 的那一版还没被评估，见
+  // pm/nodes/revise.py 的 PromptVersion 默认值）。旧版直接 toFixed ⇒ TypeError，
+  // 而整个渲染包在 poll 的 catch 里，症状是"图表空白 + 左栏停止刷新 + 零提示"。
+  // 这里先滤掉非数值，再去重"哪些版本还没有分"，并如实说明缺了几版。
+  const raw = Array.isArray(scores) ? scores : [];
+  const nMissing = raw.filter(s => s == null || !isFinite(Number(s))).length;
+  scores = raw.filter(s => s != null && isFinite(Number(s))).map(Number);
   const dpr = window.devicePixelRatio || 1;
   const W = 320, H = 200; c.width = W*dpr; c.height = H*dpr; c.style.width=W+"px"; c.style.height=H+"px";
   const ctx = c.getContext("2d"); ctx.scale(dpr, dpr);
@@ -403,11 +423,12 @@ function drawCurve(id, scores){
     ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke();
     ctx.fillText(v.toFixed(0), pad-4, y+3);
   }
-  // 8.0 阈值线
-  if(minV <= 8 && 8 <= maxV){
-    const y = H-pad - (8-minV)/(maxV-minV)*(H-2*pad);
+  // 阈值线：用调用方给的本轮阈值（缺省 8.0），不再写死
+  const thrLine = (typeof thr === "number" && isFinite(thr)) ? thr : 8.0;
+  if(minV <= thrLine && thrLine <= maxV){
+    const y = H-pad - (thrLine-minV)/(maxV-minV)*(H-2*pad);
     ctx.strokeStyle = "#3ecf8e"; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = "#3ecf8e"; ctx.textAlign = "left"; ctx.fillText("8.0 阈值", pad+4, y-3);
+    ctx.fillStyle = "#3ecf8e"; ctx.textAlign = "left"; ctx.fillText(thrLine.toFixed(1) + " 阈值", pad+4, y-3);
   }
   // 数据
   const xs = scores.map((_,i)=> scores.length===1 ? W/2 : pad + i*(W-2*pad)/(scores.length-1));
@@ -421,6 +442,11 @@ function drawCurve(id, scores){
   });
   ctx.fillStyle="#6b7280"; ctx.textAlign="center";
   xs.forEach((x,i)=> ctx.fillText("v"+i, x, H-pad+14));
+  // 缺失版本要说明，不然"曲线只画了 2 个点"会被读成"只有 2 个版本"
+  if(nMissing){
+    ctx.fillStyle="#f59e0b"; ctx.textAlign="left";
+    ctx.fillText(`另有 ${nMissing} 版未评估（无分数，未画）`, pad, H-4);
+  }
 }
 """
 
@@ -535,15 +561,29 @@ async function renderHistory(){
     const d = await api("/api/history");
     historyLoaded = true;
     let html = "";
+    // 这里的每一个字段都必须过 esc()（2026-10-31 修 XSS）：task 是**任务原文**，
+    // 而它来自 run.py history --json 的 runs[].task。旧版这几处裸拼 innerHTML，
+    // 是整页唯一没转义的数据入口——操作员点「历史」时，一条形如
+    // `<b>✅ 显著 Δ+2.00</b>` 或 `</td></tr><tr><td>…` 的任务名就能伪造结论、插假行。
+    // CSP 的 script-src 只挡住"执行脚本"，挡不住"让页面说谎"。
     if(d.task_groups && d.task_groups.length){
       html += '<h3>同任务跨 run 显著性（Δ 均值 ± 95% CI；按评委尺子分代）</h3>';
       for(const g of d.task_groups){
         const mark = g.significant ? "✅ 显著" : "⚠️ 不显著";
+        const lo = (g.delta_ci95 && g.delta_ci95[0] != null) ? Number(g.delta_ci95[0]).toFixed(2) : "-";
+        const hi = (g.delta_ci95 && g.delta_ci95[1] != null) ? Number(g.delta_ci95[1]).toFixed(2) : "-";
+        const dm = g.delta_mean != null ? (g.delta_mean >= 0 ? "+" : "") + Number(g.delta_mean).toFixed(2) : "-";
+        // 未转义的外部字段一律先取进局部量并 esc，再插进模板 —— 这样"有没有漏转义"
+        // 可以用一条静态判据钉住（见 tests/test_web_console_frontend.py）。
+        const gTask = esc(g.task);
+        const gNote = esc(g.note ? "，" + g.note : "");
+        const gGen = esc(g.judge_gen);
+        const gN = esc(g.n_runs);
         html += `<div class="hist-group">` +
-          `<b>${mark}</b> Δ均值 <b>${g.delta_mean >= 0 ? "+" : ""}${g.delta_mean}</b>` +
-          ` CI [${g.delta_ci95[0]}, ${g.delta_ci95[1]}]（n=${g.n_runs}${g.note ? "，" + g.note : ""}）` +
-          `<div class="hist-gen">评委 ${g.judge_gen}</div>` +
-          `<div class="u-dim">${g.task}</div></div>`;
+          `<b>${mark}</b> Δ均值 <b>${esc(dm)}</b>` +
+          ` CI [${esc(lo)}, ${esc(hi)}]（n=${gN}${gNote}）` +
+          `<div class="hist-gen">评委 ${gGen}</div>` +
+          `<div class="u-dim">${gTask}</div></div>`;
       }
       html += "<h3>最近运行</h3>";
     }
@@ -552,7 +592,7 @@ async function renderHistory(){
       const ba = r.base_avg != null ? r.base_avg.toFixed(2) : "-";
       const oa = r.opt_avg != null ? r.opt_avg.toFixed(2) : "-";
       const dl = r.delta != null ? (r.delta >= 0 ? "+" : "") + r.delta.toFixed(2) : "-";
-      html += `<tr><td>${r.mtime}</td><td>${r.run_id}</td><td>${r.status}</td><td>${ba}</td><td>${oa}</td><td>${dl}</td><td>${r.llm_calls}</td><td>${r.task}</td></tr>`;
+      html += `<tr><td>${esc(r.mtime)}</td><td>${esc(r.run_id)}</td><td>${esc(r.status)}</td><td>${esc(ba)}</td><td>${esc(oa)}</td><td>${esc(dl)}</td><td>${esc(r.llm_calls)}</td><td>${esc(r.task)}</td></tr>`;
     }
     html += "</table>";
     v.innerHTML = html;

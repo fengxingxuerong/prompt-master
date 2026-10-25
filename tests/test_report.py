@@ -210,6 +210,44 @@ def test_cases_short_note_blocks_inflated_confidence():
     assert "不足：期望 8 条，本次不予判定达标" in text
 
 
+def test_assertion_rows_are_deduplicated_per_case():
+    """同一用例的多次采样只出一行（2026-10-31 修）。
+
+    实测 `run_13f9a99096e9`（PM_SAMPLES_PER_CASE=2）：case#0/#1 各两行共 4 行，
+    而 `aggregate.n_assertions` 是 2 —— 读者会以为查了 4 条。
+    同一用例一次过、一次没过时，留下**没过**的那条（与 `_collect_assertions`
+    的保守口径一致：任一样本失败即视为该用例失败）。
+    """
+    state = _state(
+        test_runs=[
+            {
+                "test_case_index": 0,
+                "sample_index": 0,
+                "assertion": {
+                    "mode": "contains",
+                    "passed": True,
+                    "detail": "通过",
+                    "expected": "华东",
+                },
+            },
+            {
+                "test_case_index": 0,
+                "sample_index": 1,
+                "assertion": {
+                    "mode": "contains",
+                    "passed": False,
+                    "detail": "第二次采样没写华东",
+                    "expected": "华东",
+                },
+            },
+        ]
+    )
+    text, _ = render_report(state)
+    rows = [ln for ln in text.splitlines() if ln.startswith("| case#0 ")]
+    assert len(rows) == 1, f"同一用例渲染了 {len(rows)} 行：{rows}"
+    assert "❌ 未通过" in rows[0], "留下了通过的那条，等于掩盖证据"
+
+
 def test_assertion_rows_are_rendered_as_hard_evidence():
     state = _state(
         test_runs=[

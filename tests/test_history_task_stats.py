@@ -50,39 +50,61 @@ def _run(
 # 准入：剔到不够就不给判定
 # --------------------------------------------------------------------------
 def test_single_trusted_arm_after_exclusion_gets_no_verdict() -> None:
-    """崩溃臂剔完只剩 1 条：不给显著性判定。n=1 的 SE 无定义，
-    以前这条会走到 `var=(n-1)` 除零 / 或给出无意义的 CI。"""
+    """崩溃臂剔完只剩 1 条：不给显著性判定，但**这一组不许消失**。
+
+    2026-10-31 修：旧版这里 `continue`，于是该组的崩溃臂连"被点名"的机会都没有 ——
+    而同一个函数的注释写的恰恰是"崩臂必须点名"。现在输出一行 `estimable=False`、
+    `delta_ci95=None`，并保留其 `excluded_untrusted`。
+    """
     rows = [_run("r1", "t", 0.0), _run("r2", "t", 3.0, trusted=False)]
-    assert _task_stats(rows) == []
+    out = _task_stats(rows)
+    assert len(out) == 1, "只剩一个可信臂时整组被吞掉了：崩臂也就跟着消失了"
+    assert out[0]["estimable"] is False
+    assert out[0]["delta_ci95"] is None
+    assert out[0]["note"] == "可信臂不足 2 条，无法给出显著性判定"
+    assert [e["run_id"] for e in out[0]["excluded_untrusted"]] == ["r2"]
 
 
-def test_two_trusted_arms_are_judged_but_flagged_as_small_sample() -> None:
-    """n=2 照判，但 note 必须是"样本少"。
+def test_two_trusted_arms_use_the_t_quantile_not_1_96() -> None:
+    """n=2 必须用 t(1)=12.706，而不是大样本的 1.96。
 
-    注意这里**不能**顺手断言"n=2 一定不显著"：两点样本的 CI 半宽是 0.98×|Δ|，
-    只要 Δ 足够大 CI 就不含 0（1.0/3.0 → [0.04, 3.96]，确实显著）。
-    n=2 的"可信度"是靠 note 那句话兜的，不是靠统计本身兜——所以 note 才是要钉的那半。
+    2026-10-31 修（数学错误，不是取舍）：两点样本的 95% 区间半宽是 12.706×SE，
+    旧版按 1.96 算，把区间缩到约 1/6，于是 [1.0, 3.0] 被判"显著"。
+    这个区间在统计上没有意义——n=2 只够说"两轮同向"，不够说"显著"。
     """
     rows = [_run("r1", "t", 1.0), _run("r2", "t", 3.0)]
     out = _task_stats(rows)
     assert len(out) == 1
     assert out[0]["n_runs"] == 2
+    assert out[0]["t_crit"] == 12.706
     assert out[0]["note"] == "样本少，结论仅供观察"
-    assert out[0]["delta_ci95"] == [0.04, 3.96]
+    # 均值 2.0，SE = sqrt(2/2) = 1.0 ⇒ [2.0 - 12.706, 2.0 + 12.706]
+    lo, hi = out[0]["delta_ci95"]
+    assert lo == -10.71 and hi == 14.71
+    assert out[0]["significant"] is False
 
 
-def test_zero_variance_group_reports_a_degenerate_interval() -> None:
-    """两条 Δ 完全相同时 SE=0，CI 退化成一点 [5.0, 5.0]，不含 0 → 判显著。
+def test_zero_variance_with_small_n_is_not_estimable() -> None:
+    """两条 Δ 完全相同时 SE=0 ⇒ 抖动**估不出来**（不是"抖动为零"）。
 
-    这是 `mean ± 1.96·SE` 的固有性质，不是实现缺陷；但它的**实际含义**远弱于
-    字面的"✅ 显著"——所以 mitigation 是 note。把真实行为钉在这里，
-    免得有人以为它一定给出"不显著"而改坏判据。
+    2026-10-31 修：旧版按 `mean ± 1.96·SE` 得到一个宽度为 0 的区间、判"显著"。
+    Δ 本身是两位小数取整过的，"两次都恰好 5.0"不构成证据——与报告里
+    「采样噪声 0.0 读作没测到」同一条纪律。n≥5 时仍按显著处理（见下一条）。
     """
     rows = [_run("r1", "t", 5.0), _run("r2", "t", 5.0)]
     out = _task_stats(rows)[0]
     assert out["delta_ci95"] == [5.0, 5.0]
+    assert out["significant"] is False
+    assert out["estimable"] is False
+    assert "抖动估不出来" in (out["note"] or "")
+
+
+def test_zero_variance_with_enough_runs_is_still_significant() -> None:
+    """n≥5 且各轮 Δ 一模一样 = 一致性证据，仍按显著处理（不许被上一条的修法顺手压平）。"""
+    rows = [_run(f"r{i}", "t", 5.0) for i in range(5)]
+    out = _task_stats(rows)[0]
+    assert out["estimable"] is True
     assert out["significant"] is True
-    assert out["note"] == "样本少，结论仅供观察"
 
 
 def test_five_arms_drop_the_small_sample_warning() -> None:
@@ -104,9 +126,12 @@ def test_tasks_are_grouped_independently() -> None:
     rows += [_run("b1", "task-b", 5.0), _run("b2", "task-b", 5.0)]
     out = {s["task"]: s for s in _task_stats(rows)}
     assert set(out) == {"task-a", "task-b"}
-    # task-b 的 Δ 恒等 → SE=0 → CI 退化成一点，按"CI 不含 0 即显著"判显著（见上一个测试）
-    assert out["task-b"]["significant"] is True
-    assert out["task-a"]["significant"] is True
+    # n=2 的 t 分位是 12.706，两组都不足以判显著（旧版按 1.96 会双双判"显著"）
+    assert out["task-b"]["estimable"] is False
+    assert out["task-a"]["significant"] is False
+    # 关键是"各判各的"：两组的 n 与 CI 必须来自各自的样本
+    assert out["task-a"]["n_runs"] == 2 and out["task-b"]["n_runs"] == 2
+    assert out["task-a"]["delta_mean"] == 2.0 and out["task-b"]["delta_mean"] == 5.0
 
 
 # --------------------------------------------------------------------------

@@ -166,17 +166,32 @@ def case_entry_fields(item: Any) -> dict[str, str]:
 
     空 input、mode 合法性、条数上限都由调用方按自己的场景报 —— 跑批要先拦（退出码 2），
     体检要数着报（退出码 1），两边不能共用同一处报错顺序。
+
+    `literal` 是"这句 expected 是输出里会出现的原话"的显式声明（2026-10-31）：
+    它必须在取值阶段就带过来，否则预检会拦下一份本该合法的合规用例，
+    而运行时也拿不到一票否决权（见 `pm.assertions.looks_like_rule`）。
     """
     if isinstance(item, str):
         item = {"input": item}
     if not isinstance(item, dict):
-        return {"input": "", "expected": "", "mode_raw": "", "scenario": "", "hijack_marker": ""}
+        return {
+            "input": "",
+            "expected": "",
+            "mode_raw": "",
+            "scenario": "",
+            "hijack_marker": "",
+            "literal": "",
+        }
+    literal_raw = item.get("literal")
+    if literal_raw in (None, ""):
+        literal_raw = item.get("expected_is_literal")
     return {
         "input": str(item.get("input") or ""),
         "expected": str(item.get("expected") or ""),
         "mode_raw": str(item.get("mode") or item.get("assert_mode") or "").strip(),
         "scenario": str(item.get("scenario") or "").strip(),
         "hijack_marker": str(item.get("hijack_marker") or "").strip(),
+        "literal": "" if literal_raw in (None, "") else str(literal_raw).strip(),
     }
 
 

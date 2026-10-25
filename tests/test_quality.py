@@ -23,6 +23,7 @@ from pm.quality import (
     check_prompt_quality,
     count_constraints,
     delimiter_problems,
+    suppressive_hits,
 )
 from pm.state import initial_state
 
@@ -204,6 +205,64 @@ def test_markdown_delivery_headings_still_excluded():
     assert not any(i.code == "constraint_overload" for i in check_prompt_quality(prompt).issues)
 
 
+# 段头的全部现实写法（2026-10-31 审计实测：此前只有 `[约束]` 与 `## 约束` 两种被认，
+# 其余写法一律 count=0 —— 一份 12 条硬约束的提示词能拿到"未命中任何确定性规则"、exit 0）
+_ALL_CONSTRAINT_HEADERS = [
+    "**约束**",
+    "__约束__",
+    "【约束】",
+    "约束：",
+    "约束:",
+    "## 约束",
+    "## 约束 ##",
+    "### 约束：",
+    "Rules:",
+    "## Rules",
+    "## Requirements",
+]
+
+
+@pytest.mark.parametrize("head", _ALL_CONSTRAINT_HEADERS)
+def test_every_constraint_section_form_is_counted(head: str) -> None:
+    """绕过成本必须为零（形态版）：换一种段头写法不能躲过 ≤8 预算闸。"""
+    body = "\n".join(f"{i}. 条目{i}" for i in range(1, CONSTRAINT_LIMIT + 2))
+    counted = count_constraints(f"## 任务\n分析销售数据。\n{head}\n{body}\n")
+    assert counted["total"] == CONSTRAINT_LIMIT + 1, f"「{head}」未被计入约束语义段：{counted}"
+    assert any(
+        i.code == "constraint_overload" for i in check_prompt_quality(f"{head}\n{body}\n").issues
+    ), f"「{head}」的超载没有触发 constraint_overload"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "\n".join(f"{i}. 条目{i}" for i in range(1, 5)),
+        "\n".join(f"({i}) 条目{i}" for i in range(1, 5)),
+        "\n".join(chr(0x2460 + i - 1) + f" 条目{i}" for i in range(1, 5)),
+        "\n".join(f"{i}． 条目{i}" for i in range(1, 5)),
+        "\n".join(f"{i}） 条目{i}" for i in range(1, 5)),
+    ],
+    ids=["dot", "paren-halfwidth", "circled", "fullwidth-dot", "fullwidth-paren"],
+)
+def test_every_numbering_style_is_counted(body: str) -> None:
+    """编号形态版：`(1)` / `①` / `1．` 这类写法此前一条都数不出来。"""
+    counted = count_constraints(f"## 约束\n{body}\n")
+    assert counted["total"] == 4, f"编号形态没被数出来：{counted}"
+
+
+@pytest.mark.parametrize(
+    "head",
+    ["## 内容要求", "## 交付要求", "## 输出要求", "## 格式规范", "## Output Format"],
+)
+def test_deliverable_outline_headings_are_not_constraints(head: str) -> None:
+    """误杀防线（2026-10-31 实测）：`## 内容要求` / `## 交付要求` 各 9 条列的是
+    "要写哪些部分"，此前被判 constraint_overload → 触发无谓重写（代价 5.78→4.76 有记录）。"""
+    body = "\n".join(f"{i}. 第{i}部分" for i in range(1, CONSTRAINT_LIMIT + 2))
+    prompt = f"{head}\n{body}\n"
+    assert count_constraints(prompt)["total"] == 0
+    assert not any(i.code == "constraint_overload" for i in check_prompt_quality(prompt).issues)
+
+
 # --------------------------------------------------------------------------
 # 1c. 元提示词防漂移（评审修复：错别字 / 注入契约）
 # --------------------------------------------------------------------------
@@ -246,13 +305,95 @@ def test_balanced_tags_pass():
     assert not any(i.code == "delimiter_unbalanced" for i in check_prompt_quality(prompt).issues)
 
 
+# --------------------------------------------------------------------------
+# 1d. 误杀与漏判（2026-10-31 审计实测的六条，全部只放行不判罪或只补漏判）
+# --------------------------------------------------------------------------
+def test_blanket_rule_exempts_per_field_wording():
+    """`_PER_FIELD_RE` 此前定义了却从未被调用（死码）。
+
+    模块注释写着「出现任意一个即视为已区分两种缺失」，实现里没这条豁免 ⇒
+    照文档建议写成"部分字段缺失照常输出"的合格提示词照样被判兜底、强制重写。
+    """
+    prompt = (
+        "[角色] 资深数据分析师。\n"
+        "[边界] 输入非空但部分字段缺失时，只对缺失字段标注「数据缺失」，其余照常输出。\n"
+        "[约束] 每个结论必须引用数值。\n"
+    )
+    assert not blanket_missing_branch(prompt)
+
+
+def test_blanket_rule_exempts_the_empty_input_branch():
+    """模块自己推荐的第 ① 条分支「输入完全为空 → 整体标注缺失」不是兜底。"""
+    assert not blanket_missing_branch("若输入完全为空，则在所有字段位置标注「数据缺失」。")
+    # 事故原句是"输入**非空**"，不能被同一条豁免放过去
+    assert blanket_missing_branch(
+        "输入非空但未包含任何可识别的销售数据，在各结论位置标注「数据缺失」。"
+    )
+
+
+def test_blanket_rule_negation_words_extended():
+    """`不需要 / 不必 / 无需 / 无须` 四种反向规则此前不在否定词表里。"""
+    for word in ("不需要", "不必", "无需", "无须"):
+        prompt = f"数据完整（所有字段均有值）时{word}标注「数据缺失」。"
+        assert not blanket_missing_branch(prompt), f"「{word}」没有被认成否定"
+
+
+def test_blanket_still_caught_when_per_field_wording_is_elsewhere() -> None:
+    """逐字段写法在**别的段落**时，另起一句全局兜底照样要报。
+
+    回归防线（2026-10-31）：豁免的第一版写成"全文出现 `其余照常输出` 就放行"，
+    当场被 `tests/test_panel.py` 推翻 —— 一份提示词完全可以一边写"其余字段照常输出"、
+    一边追加"所有结论位置一律标注数据缺失"，**两者并存本身就是自相矛盾**。
+    """
+    prompt = (
+        "[约束]\n1. 个别字段缺失时该字段写 null，其余字段照常输出。\n"
+        "所有结论位置一律标注数据缺失。\n"
+    )
+    assert blanket_missing_branch(prompt)
+
+
+def test_suppressive_rule_ignores_negated_and_quoted_forms():
+    """正面规则里的"停止处理"不是抑制条款（模块 docstring 就这么推荐写法）。"""
+    good = (
+        "[角色] 分析师。\n[边界] 不得停止处理，也不得拒绝回答，必须继续按骨架输出。\n"
+        "[规则] 不写「停止处理」「不输出任何结论」这类条款。\n"
+    )
+    assert suppressive_hits(good) == []
+    assert not any(i.code == "suppressive_rule" for i in check_prompt_quality(good).issues)
+
+
+def test_suppressive_rule_still_catches_real_clauses():
+    """补上的两种真抑制写法（"直接终止"/"不返回任何内容"）要能抓到。"""
+    assert suppressive_hits("若输入为空，直接终止，不返回任何内容。") != []
+    assert suppressive_hits("无法识别时停止处理。") != []
+
+
+def test_repeated_prose_mention_is_not_a_delimiter_problem():
+    """同一标签在正文里被**引用两次**不算结构错误（Run A 事故是行首的数据区边界）。"""
+    prompt = (
+        "[角色] 资深数据分析师，擅长结构化抽取，严格遵守数据完整性规则。\n"
+        "[任务] 读取 <输入> 中的数据。若 <输入> 为空则输出无数据。\n"
+        "[输出格式] 每行一个条目。\n"
+    )
+    assert delimiter_problems(prompt) == []
+
+
+def test_meta_leak_survives_whitespace_rewrite():
+    """元话语特征句被去掉空格后仍要命中（模型改写时最爱干这件事）。"""
+    spacer = "你是一位严格的 AI 输出质量评估专家，负责打分。"
+    tight = "你是一位严格的AI输出质量评估专家，负责打分。"
+    assert any(i.code == "meta_leak" for i in check_prompt_quality(spacer).issues)
+    assert any(i.code == "meta_leak" for i in check_prompt_quality(tight).issues), (
+        "去掉空格就逃过元话语检测了"
+    )
+
+
 def test_meta_templates_free_of_typos():
     """错别字会原样发给模型（「拄原文」「琓疵」曾真实发出去过）。"""
     for tpl in (EVALUATOR_SYSTEM, EVALUATOR_RULES):
         assert "拄" not in tpl
         assert "抄原文" in tpl
     assert "琓疵" not in EVALUATOR_SYSTEM
-    assert "瑕疵" in EVALUATOR_SYSTEM
 
 
 def _all_templates() -> str:

@@ -921,6 +921,13 @@ class AggregateScore(BaseModel):
     cases_complete: bool = True
     n_passed: int
     passed: bool
+    # 本轮判定用的阈值（2026-10-31 冻结）：`passed` 在**计算时**用当时的 `PM_PASS_THRESHOLD`
+    # 定死，而报告此前在**渲染时**再读一次环境变量——两次数不一致时报告会自相矛盾：
+    # 实测 `run_0792cd9acf75`（当时阈值 8.5，avg 8.25 → passed=False），
+    # 按后来的默认 8.0 渲染，总览每道闸都过、首行却印"未达标"，而报告解释不了原因；
+    # 反过来把 passed 置 True 渲染，会印出"✅ 达标：均分 7.8 ≥ 阈值 8.0"这种假命题。
+    # 老归档没有这个字段（None）时，渲染侧回退到当前环境值并**明示是回退**。
+    threshold: float | None = None
     all_issues: list[str] = Field(default_factory=list)
     all_suggestions: list[str] = Field(default_factory=list)
     # 事实断言（ground-truth）聚合（LLM 分配评审追记）：确定性校验对达标有一票否决权
@@ -984,6 +991,7 @@ class AggregateScore(BaseModel):
                 cases_complete=False,
                 n_passed=0,
                 passed=False,
+                threshold=threshold,
                 all_issues=[
                     f"[评估口径] 未产生任何评估结果（期望 {expected or 'N'} 条用例），不足以下结论"
                 ],
@@ -1121,6 +1129,8 @@ class AggregateScore(BaseModel):
                 and min(scores) >= threshold - PASS_SHORTFALL_TOLERANCE
                 and not assertion_veto
             ),
+            # 把"判定用的阈值"一起冻住：渲染只读它，不再读环境变量（见字段注释）。
+            threshold=threshold,
             all_issues=issues,
             all_suggestions=suggestions,
             n_assertions=n_assert,

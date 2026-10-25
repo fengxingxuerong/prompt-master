@@ -48,6 +48,15 @@ _BOMS: tuple[tuple[bytes, str], ...] = (
 )
 
 
+def _normalize_newlines(text: str) -> str:
+    """CRLF/CR → LF。**每条返回路径都必须过它**（含 BOM 分支）。
+
+    这个函数存在的唯一理由就是"只有一处实现"：2026-10-31 之前它被写成两个分支里
+    各自的内联表达式，而 BOM 那条分支**漏了** ⇒ 同一内容换个 BOM 就整篇 diff 全红。
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def read_text_auto(path: str | Path) -> DecodedText:
     """读取用户文本文件，按 UTF-8 → GB18030 的顺序解码。
 
@@ -62,7 +71,11 @@ def read_text_auto(path: str | Path) -> DecodedText:
     for bom, encoding in _BOMS:
         if raw.startswith(bom):
             try:
-                return DecodedText(raw.decode(encoding), encoding, str(p))
+                # BOM 分支也必须归一化换行（2026-10-31 修）：旧版这里直接 decode，
+                # 于是**同一份内容**存成 UTF-8 无 BOM 是 LF、存成 UTF-8-BOM / UTF-16 是 CRLF
+                # ⇒ `run.py diff` 把整篇报成"每一行都改了"，送进模型的正文字里还带着 \r。
+                # 归一化只碰换行，不动 BOM 之外的任何字节语义。
+                return DecodedText(_normalize_newlines(raw.decode(encoding)), encoding, str(p))
             except UnicodeDecodeError as e:  # pragma: no cover - BOM 正确时几乎不可达
                 raise TextDecodeError(f"{p} 的 {encoding} BOM 无法解码：{e}") from e
 
@@ -76,7 +89,7 @@ def read_text_auto(path: str | Path) -> DecodedText:
             text = raw.decode(encoding)
             # 与 Path.read_text 的 universal newlines 同口径：CRLF/CR 统一成 LF。
             # 不归一化会让"同一份文件"在 diff 两侧因换行风格不同而全行重写。
-            return DecodedText(text.replace("\r\n", "\n").replace("\r", "\n"), encoding, str(p))
+            return DecodedText(_normalize_newlines(text), encoding, str(p))
         except UnicodeDecodeError:
             continue
     raise TextDecodeError(f"{p} 既不是 UTF-8 也不是 GB18030 编码；请另存为 UTF-8 后重试")

@@ -826,14 +826,16 @@ def test_case_ground_truth_per_mode():
             {"input": "c", "expected": "\\d{4}", "assert_mode": "regex"},
         ],
     }
-    expected, mode, rules = _case_ground_truth(state)
+    expected, mode, rules, literal = _case_ground_truth(state)
     assert [mode(i) for i in range(3)] == ["contains", "rule", "regex"]
     assert expected(1) == "不得编造取件时间"
     assert [rules(i) for i in range(3)] == ["", "不得编造取件时间", ""]
-    assert expected(9) == "" and mode(9) == "" and rules(9) == ""
+    # 第四口径：没声明 literal 的一律 False（声明了才放行规则词，见 test_literal_flag_*）
+    assert [literal(i) for i in range(3)] == [False, False, False]
+    assert expected(9) == "" and mode(9) == "" and rules(9) == "" and literal(9) is False
     # 没种子就不能拿全局 mode 去比空串
     empty = _case_ground_truth({"assertion_mode": "rule", "seed_cases": []})
-    assert empty[1](0) == "" and empty[2](0) == ""
+    assert empty[1](0) == "" and empty[2](0) == "" and empty[3](0) is False
 
 
 def test_mixed_modes_end_to_end():

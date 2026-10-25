@@ -66,10 +66,33 @@ class SlidingWindowLimiter:
                 return False, min(self.window_seconds, max(0.0, retry_after))
             dq.extend(now for _ in range(cost))
             if len(self._events) > _MAX_KEYS:
-                # 只清空桶，不动还有余留的 key：正在活跃的调用方不受影响
-                for k in [k for k, v in self._events.items() if not v]:
-                    del self._events[k]
+                self._prune(now)
             return True, 0.0
+
+    def _prune(self, now: float) -> None:
+        """把 key 数压回 `_MAX_KEYS` 以内（调用方必须已持锁）。
+
+        旧版只删"空桶"，而桶只会在**同一个 key 再次 acquire** 时被剪空 ——
+        于是一万多个不同来源的 key 谁也不再来，字典就停在一万多项，`_MAX_KEYS`
+        形同虚设（实测 10200 个 key → len=10200，再打一次变 10201）。
+        `--proxy-headers` 下源 IP 可伪造，这条路径等于给了一个无界的增长面。
+
+        两段式：先删"整桶都已滑出窗口"的死桶（它们本来下次访问也会被清空），
+        再按"最近一次活动时间"从旧到新淘汰到上限。淘汰活跃桶会让该 key 的配额重置 ——
+        这是有意的取舍：**内存有界优先**，限流本身对这类"换着 key 打"的攻击
+        本来就不构成防线（那是反代/网关的活）。
+        """
+        if not self._events:
+            return
+        cutoff = now - self.window_seconds
+        dead = [k for k, v in self._events.items() if not v or v[-1] <= cutoff]
+        for k in dead:
+            del self._events[k]
+        overflow = len(self._events) - _MAX_KEYS
+        if overflow > 0:
+            oldest = sorted(self._events.items(), key=lambda kv: kv[1][-1] if kv[1] else 0.0)
+            for k, _ in oldest[:overflow]:
+                del self._events[k]
 
     @property
     def denied_count(self) -> int:

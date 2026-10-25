@@ -23,6 +23,7 @@ import os
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, cast
@@ -113,6 +114,10 @@ def _progress_of(state: dict[str, Any]) -> dict[str, Any]:
     out["baseline_aggregate"] = state.get("baseline_aggregate")
     out["pairwise"] = state.get("pairwise")
     out["early_stop_reason"] = state.get("early_stop_reason")
+    # 失败明细（2026-10-31 补）：`error` 只有"因何而终止"那一句，节点级的具体报错
+    # 全在 state["errors"] 里。控制台此前一个都不读，于是无 Key / 配额打满 / 端点点挂时
+    # 用户只看到一块红 badge，还得自己去翻 logs/。截到 20 条：进度轮询不该驮整份 errors。
+    out["errors"] = [str(e) for e in (state.get("errors", []) or [])][:20]
     # 按角色的 token/调用/耗时台账（运行中随节点推进实时刷新）
     out["llm_usage"] = dict(state.get("llm_usage", {}) or {})
     out["prompt_quality_issues"] = [
@@ -182,7 +187,25 @@ class TaskManager:
         future = self._executor.submit(self._run_task, run_id, kwargs)
         with self._lock:
             self._futures[run_id] = future
+        # 完成即摘除（2026-10-31 修）：记录表有 PM_MAX_TASKS 上限，而 `_futures` 只增不删
+        # （只有 shutdown() 才清空）—— 长跑的服务进程里这是无界增长。
+        # 用回调而不是在 _run_task 里 pop：那条路径异常退出时也要摘，
+        # 而 add_done_callback 无论正常/异常/取消都会触发。
+        future.add_done_callback(self._forget_callback(run_id))
         return run_id
+
+    def _forget_callback(self, run_id: str) -> Callable[[Future[None]], None]:
+        """构造一个"任务结束就摘掉 future"的回调（显式标注类型，mypy strict 要求）。"""
+
+        def _done(_future: Future[None]) -> None:
+            self._forget_future(run_id)
+
+        return _done
+
+    def _forget_future(self, run_id: str) -> None:
+        """任务结束后摘掉 future 引用（回调里跑，可能与本线程的 submit 并发）。"""
+        with self._lock:
+            self._futures.pop(run_id, None)
 
     def get_status(self, run_id: str) -> dict[str, Any] | None:
         """查询任务状态。运行中读实时快照，结束后读最终状态（H2）。"""

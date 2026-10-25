@@ -105,11 +105,32 @@ class RecordStore(Protocol):
 
     def get_race(self, race_id: str) -> RaceRecord | None: ...
 
+    def list_race_ids(self) -> list[str]: ...
+
     def count_races(self) -> int: ...
 
     def evict(self, limit: int) -> None: ...
 
     def close(self) -> None: ...
+
+
+def _evict_limit(limit: int) -> int | None:
+    """把 `evict(limit)` 的参数归一成"保留几条"；`None` = 不淘汰。
+
+    ⚠️ 两个后端此前对 `limit <= 0` 的处理**不一样**（2026-10-31 审计实测）：
+    - 内存后端：`while len > 0` 把表清空 ⇒ `TaskManager` 提交完立刻 404；
+      `limit < 0` 时 `next(iter({}))` 还会抛 `StopIteration`（空表再迭代一次）；
+    - sqlite 后端：`max(1, ...)` 夹到 1 ⇒ 同样参数留着 1 条。
+    同一个配置在两个后端给出不同结果，是最难查的一类问题（换 `PM_TASK_DB` 就变行为）。
+
+    统一语义：**`limit <= 0` = 不淘汰**（"别设上限"），这也是用户写 0 时通常的意思；
+    真要清空请显式调用 `evict(1)` 之后手动删，别用 0 表达。
+    """
+    try:
+        n = int(limit)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
 
 
 class MemoryStore:
@@ -157,12 +178,22 @@ class MemoryStore:
         with self._lock:
             return len(self._races)
 
+    def list_race_ids(self) -> list[str]:
+        with self._lock:
+            return list(self._races)
+
     def evict(self, limit: int) -> None:
-        """按插入序淘汰最旧记录（两个表各自独立）。"""
+        """按插入序淘汰最旧记录（两个表各自独立）；`limit <= 0` = 不淘汰。"""
+        keep = _evict_limit(limit)
+        if keep is None:
+            return
         with self._lock:
             for table in (self._tasks, self._races):
-                while len(table) > limit:
-                    table.pop(next(iter(table)), None)
+                while len(table) > keep:
+                    oldest = next(iter(table), None)
+                    if oldest is None:  # 空表：没有可淘汰的（旧版这里会 StopIteration）
+                        break
+                    table.pop(oldest, None)
 
     def close(self) -> None:
         return None
@@ -231,17 +262,30 @@ class SqliteStore:
         self._put("task", rec.run_id, _dump(rec))
 
     def update_task(self, run_id: str, **fields: Any) -> None:
-        """只更新传入的字段（读-改-写）。进度刷新高频调用，避免重写整条大记录。"""
+        """只更新传入的字段（读-改-写）。
+
+        ⚠️ 必须**在同一把锁里**完成读与写（2026-10-31 修）：旧版 `_get` 与 `_put`
+        各自取锁，两个线程同时更新同一任务的不同字段时会互相覆盖 ——
+        实测「线程 A 写 status、线程 B 写 progress」丢其中一个。
+        调度器正好是"进度刷新"与"状态流转"两个来源并发写，这条路径每天都在走。
+        """
         if not fields:
             return
-        raw = self._get("task", run_id)
-        if raw is None:
-            return
-        data = json.loads(raw)
-        for k, v in fields.items():
-            if k in _TASK_FIELDS and k != "run_id":
-                data[k] = str(v) if (k == "report_path" and v is not None) else v
-        self._put("task", run_id, json.dumps(data, ensure_ascii=False, default=str))
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payload FROM records WHERE kind='task' AND id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                return
+            data = json.loads(row[0])
+            for k, v in fields.items():
+                if k in _TASK_FIELDS and k != "run_id":
+                    data[k] = str(v) if (k == "report_path" and v is not None) else v
+            self._conn.execute(
+                "UPDATE records SET payload=? WHERE kind='task' AND id=?",
+                (json.dumps(data, ensure_ascii=False, default=str), run_id),
+            )
+            self._conn.commit()
 
     def get_task(self, run_id: str) -> TaskRecord | None:
         raw = self._get("task", run_id)
@@ -265,18 +309,27 @@ class SqliteStore:
         raw = self._get("race", race_id)
         return _load_race(raw) if raw else None
 
+    def list_race_ids(self) -> list[str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id FROM records WHERE kind='race' ORDER BY seq"
+            ).fetchall()
+        return [r[0] for r in rows]
+
     def count_races(self) -> int:
         return self._count("race")
 
     # ---- 淘汰 / 关闭 ----
     def evict(self, limit: int) -> None:
-        limit = max(1, int(limit))
+        keep = _evict_limit(limit)
+        if keep is None:
+            return
         with self._lock:
             for kind in ("task", "race"):
                 self._conn.execute(
                     "DELETE FROM records WHERE kind=? AND seq NOT IN "
                     "(SELECT seq FROM records WHERE kind=? ORDER BY seq DESC LIMIT ?)",
-                    (kind, kind, limit),
+                    (kind, kind, keep),
                 )
             self._conn.commit()
 
@@ -303,7 +356,11 @@ class RecordView(Mapping[str, TaskRecord | RaceRecord]):
         return rec
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._store.list_task_ids()) if self._kind == "task" else iter(())
+        # ⚠️ race 视图此前返回空迭代器（2026-10-31 修）：`len(view) == 1` 而
+        # `list(view) == []` —— 能数不能逛，任何 `for k in view` 的写法都会静默拿到空。
+        if self._kind == "task":
+            return iter(self._store.list_task_ids())
+        return iter(self._store.list_race_ids())
 
     def __len__(self) -> int:
         return self._store.count_tasks() if self._kind == "task" else self._store.count_races()
