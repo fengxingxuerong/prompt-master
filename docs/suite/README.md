@@ -93,24 +93,21 @@ PY = D:\projects\prompt-master\.venv\Scripts\python.exe
 | `/api/notifications` 的 `count` 硬编码 0 | 实测 3 条告警时 `items=3` 而 `count=0` ⇒ 前端按 count 判空，通知中心永远"没有告警" | `count = len(items)` |
 | 撤销连按两次只回滚同一步却每次报成功 | 第二次仍命中同一条 `before` 快照，`ok:true`、`restored_to` 相同 | 回滚时给目标打 `undone: True`，循环跳过 |
 | `PATCH /api/tasks` 的 `due` 绕过格式校验 | 创建端有 `YYYY-MM-DD` 正则、PATCH 端没有 ⇒ `{"due": "下周五"}` 能落盘，而看板用字符串比 `due < today` 判逾期 ⇒ **逾期恒 0** | PATCH 端补同一把尺 |
+| **探针只看 HTTP 200**（watchdog / monitor） | 把 `orders.db` / `sessions.db` 写成垃圾字节，服务仍回 200 + `status:"ok"`（只把 `storage` 记成 `error: DatabaseError`）⇒ 探针报"活着"，**监控盲区** | 健康判据升级为：200 **且** `status=="ok"` **且** `storage` 不以 `error` 开头；进程活着但自报不健康时**只告警不重启**（重启修不好一个坏掉的库，只会把现场重启掉） |
+| **探针不带令牌** | 带 token 的部署里 `/api/tasks` 等数据接口恒 401 ⇒ "超时任务告警"这条路径静默不触发，巡检日志看不出异常 | 探针按服务的 `*_TOKEN` 环境变量带 `X-API-Key`；401 在告警里点名"探针未带令牌？" |
+| **`rotate_ledger.py` 三处**：路径写死 / 只轮一份 / 失败被吞 | 换机器就指向空目录并当成功；三套服务的 `data/*.jsonl` 不在范围；Windows 上文件被占用时 `PermissionError` 只 print 一行 ⇒ 台账**从未轮转**而日志看不出 | 根路径按 `__file__` 现算；范围改成 `logs/*.jsonl` + `releases/*/data/*.jsonl`；`rotate()` 返回 `{scanned, rotated, skipped, errors}`，失败进 `errors` 并由 watchdog 落告警 |
+| `monitor_suite.py` 文档说会检测"口径漂移" | 代码里从来没有比较过（只记录计数） | 删掉那句承诺，改为如实说"只记录不比较"（固定数字当基线会天天误报） |
 
 ### 已知但**未修**（每条都实测过，按危害排序）
 
-1. **watchdog / monitor 只看 HTTP 200**：把 `orders.db` / `sessions.db` 写成垃圾字节，
-   服务仍回 200 + `status:"ok"`（只把 `storage` 记成 error），探针照样报"活着"；
-   而带 token 的部署里探针自己又不带令牌 ⇒ 恒 401，超时告警静默不触发。
-   `monitor_suite.py` 自述的"orders≠7 / tasks≠6 口径漂移"在代码里根本没有（只记录不比较）。
-2. `five_dim_audit.py` 把"无 `WWW-Authenticate` 头"记成"写接口无鉴权"——三服务本就用 401 JSON
+1. `five_dim_audit.py` 把"无 `WWW-Authenticate` 头"记成"写接口无鉴权"——三服务本就用 401 JSON
    而不带该头 ⇒ 每次体检固定一条误报；`smoke_suite.py` 自称三服务却不含 triage，
    401 时计数记 null 仍报全绿。
-3. `rotate_ledger.py` 硬编码本机绝对路径、只轮转 `logs/modelhub_ledger.jsonl`（三套 `data/*.jsonl`
-   不在范围），被 watchdog 每 30s 调；Windows 上文件被占用时 `replace` 抛 PermissionError
-   被吞掉只打印 ⇒ **轮转静默失效**。
-4. `five_dim_audit` 之外的其余小项：token 用 `!=` 而非 `compare_digest`、taskboard 前缀式放行
+2. 其余小项：token 用 `!=` 而非 `compare_digest`、taskboard 前缀式放行
    （新增 GET 默认免鉴权，实测 `/api/roster` 200）、一条缺 `ts` 的会话让 `/api/sessions` 500、
    看板把 `cancelled` 计入"完成"、一致率按"有效票"算（1 票有效即 100%）、
    健康度与列表两套条数口径。
 
 > 这三套是**发布套件**，不是本产品（见根 README「仓库结构」）。
-> 上面第 1、3 条是**运维盲区**：探针在"服务活着但存储坏了"时报绿、轮转坏了也不报——
-> 它们不影响功能，但会让"夜间无人值守"这个前提失效，建议优先处置。
+> 剩下的两条都是**体检工具自身的读数问题**（误报/漏报），不影响服务运行；
+> 运维盲区（探针报绿、轮转失效）已在 2026-10-31 修掉。

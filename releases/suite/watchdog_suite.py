@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -73,6 +74,49 @@ def alive(url: str) -> bool:
     except Exception:
         return False
 
+
+# 各服务认哪个环境变量里的令牌（与 app 读的同一个名字）
+TOKEN_ENV = {
+    "lobster": "LOBSTER_TOKEN",
+    "taskboard": "TASKBOARD_TOKEN",
+    "triage": "TRIAGE_TOKEN",
+}
+
+
+def _headers_for(service: str) -> dict[str, str]:
+    """数据接口的请求头（2026-10-31 修）：配了令牌就带上。
+
+    旧版探针从不带令牌，于是带 token 的部署里 `/api/tasks` 恒 401 ⇒
+    "超时任务告警"这条路径静默不触发，巡检日志看不出任何异常。
+    """
+    token = (_ENV_FILE.get(TOKEN_ENV.get(service, "")) or os.getenv(TOKEN_ENV.get(service, ""), "")).strip()
+    return {"X-API-Key": token} if token else {}
+
+
+def health_issue(url: str, service: str = "") -> str | None:
+    """健康判据：HTTP 200 **且** 请求体自报 ok **且** 存储没坏。
+
+    实测缺陷（2026-10-31）：把 `orders.db` / `sessions.db` 写成垃圾字节，服务仍回
+    200 + `status:"ok"`，只把 `storage` 记成 `error: DatabaseError` —— 看门狗只看
+    200，于是"进程活着"被当成"服务可用"，永远不会告警。
+    """
+    try:
+        req = urllib.request.Request(url, headers=_headers_for(service))
+        with urllib.request.urlopen(req, timeout=8) as r:
+            if r.status != 200:
+                return f"HTTP {r.status}"
+            body = json.loads(r.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
+        return f"HTTP {e.code}"
+    except Exception as e:  # noqa: BLE001 - 探针永不抛
+        return f"不可达：{type(e).__name__}"
+    if str(body.get("status") or "") != "ok":
+        return f"status={body.get('status')!r}"
+    storage = str(body.get("storage") or "")
+    if storage.startswith("error"):
+        return f"存储不可用（{storage}）"
+    return None
+
 def log(rec: dict) -> None:
     LOG.parent.mkdir(parents=True, exist_ok=True)
     with open(LOG, "a", encoding="utf-8") as f:
@@ -110,7 +154,8 @@ def _check_stale_tasks() -> None:
     """M2.2：任务台账 pending/处理中超 24h → 落提醒通知（每次巡检最多提醒一次/任务）。"""
     try:
         import urllib.request as _u
-        with _u.urlopen("http://127.0.0.1:8792/api/tasks?limit=200", timeout=5) as r:
+        req = _u.Request("http://127.0.0.1:8792/api/tasks?limit=200", headers=_headers_for("taskboard"))
+        with _u.urlopen(req, timeout=5) as r:
             data = json.loads(r.read().decode("utf-8"))
         now = time.time()
         marker = ROOT / "suite" / ".stale_notified.json"
@@ -141,28 +186,49 @@ def _check_stale_tasks() -> None:
         print(f"[watchdog] stale-task check failed: {e}")
 
 def _rotate_ledgers() -> None:
-    """G-05：巡检时顺带做台账轮转检查（超 1MB 轮转，保留 3 代）。"""
+    """G-05：巡检时顺带做台账轮转检查（超 1MB 轮转，保留 3 代）。
+
+    2026-10-31 修：轮转脚本现在返回结构化报告，**失败必须告警**。
+    旧版把异常 print 一行就算了，而 Windows 上服务正开着台账文件时 `replace` 必抛
+    PermissionError ⇒ 台账实际上从未轮转过，巡检日志里却看不出异常。
+    """
     try:
         rot = ROOT / "suite" / "rotate_ledger.py"
         ns: dict = {}
         exec(compile(rot.read_text(encoding="utf-8"), str(rot), "exec"), ns)
-        ns["rotate"]()
-    except Exception as exc:
+        report = ns["rotate"]()
+        errors = report.get("errors") or []
+        if errors:
+            msg = f"台账轮转失败 {len(errors)} 份（文件被占用？）：{'; '.join(errors[:3])}"
+            log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "service": "rotate",
+                 "action": "rotate_error", "detail": errors, "alert": True})
+            _notify_center("watchdog", msg)
+    except Exception as exc:  # noqa: BLE001 - 巡检不能因为轮转坏掉就整体崩
         print(f"[watchdog] rotate check failed: {exc}")
+        _notify_center("watchdog", f"台账轮转脚本自身跑不起来：{type(exc).__name__}: {exc}")
 
 def patrol() -> list[str]:
     actions = []
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
     child_env = {**_ENV_FILE, **os.environ}  # 系统 > .env（M3.3：TOKEN 等配置透传给服务）
     for svc in SERVICES:
-        if alive(svc["url"]):
+        issue = health_issue(svc["url"], svc["name"])
+        if issue is None:
             continue
-        subprocess.Popen(svc["cmd"], cwd=svc["cwd"], env=child_env,
-                         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        actions.append(f"{svc['name']}: DOWN → 拉起 (port from {svc['url']})")
-        log({"ts": ts, "service": svc["name"], "action": "restart", "alert": True})
-        notify("watchdog", f"服务 {svc['name']} 掉线，已自动拉起")
+        if not alive(svc["url"]):
+            # 完全不可达 → 拉起（这是看门狗的本职）
+            subprocess.Popen(svc["cmd"], cwd=svc["cwd"], env=child_env,
+                             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            actions.append(f"{svc['name']}: DOWN → 拉起 (port from {svc['url']})")
+            log({"ts": ts, "service": svc["name"], "action": "restart", "alert": True})
+            notify("watchdog", f"服务 {svc['name']} 掉线，已自动拉起")
+            continue
+        # 进程活着但自报不健康（典型：存储坏了）→ **只告警不重启**：
+        # 重启修不好一个坏掉的库，只会把现场重启掉并陷入拉起循环。
+        actions.append(f"{svc['name']}: 活着但不健康（{issue}）→ 仅告警")
+        log({"ts": ts, "service": svc["name"], "action": "unhealthy", "detail": issue, "alert": True})
+        _notify_center("watchdog", f"服务 {svc['name']} 活着但不健康：{issue}（未重启：重启修不好存储）")
     if actions:
         log({"ts": ts, "action": "patrol", "detail": actions, "alert": bool(actions)})
     _rotate_ledgers()  # G-05：巡检顺带做台账轮转检查

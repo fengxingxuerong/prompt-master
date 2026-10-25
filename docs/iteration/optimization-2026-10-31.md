@@ -169,7 +169,7 @@ linux CI 的 locale 是 UTF-8，永远不会暴露它。
 
 | 门禁 | 结果 |
 |---|---|
-| `pytest tests/ -q` | **2133 passed / 1 skipped / 0 failed**（基线 1983 → 新增 150 条） |
+| `pytest tests/ -q` | **2140 passed / 1 skipped / 0 failed**（基线 1983 → 新增 157 条） |
 | `ruff check`（CI 同口径范围） | All checks passed |
 | `ruff format --check` | 全绿 |
 | `mypy pm/ extras/ run.py run_server.py eval_prompts.py` | Success（101 files） |
@@ -497,6 +497,29 @@ BOM 分支直接 `raw.decode(...)`，只有无 BOM 分支做了 `\r\n → \n`。
 ### 5.17 现在仍然没修的
 
 - 无（本产品侧）。`releases/` 的三条已知项在 §5.15，属所有者决定。
+
+### 5.18 第八轮：运维盲区（探针报绿 / 轮转静默失效）
+
+上一轮把"已知未修"里最重的两条功能缺陷修完后，剩下两条**不影响功能、但会让
+"夜间无人值守"这个前提失效**的运维盲区。这一轮收掉：
+
+| 缺陷 | 后果 | 修法 |
+|---|---|---|
+| watchdog / monitor 只看 HTTP 200 | 把 `orders.db` / `sessions.db` 写成垃圾字节，服务仍回 200 + `status:"ok"`（只把 `storage` 记成 `error: DatabaseError`）⇒ 探针报"活着"。**"进程活着"被当成"服务可用"** | 判据升级：200 **且** `status=="ok"` **且** `storage` 不以 `error` 开头。进程活着但自报不健康 → **只告警不重启**（重启修不好一个坏掉的库，只会把现场重启掉并陷入拉起循环） |
+| 探针自己不带令牌 | 带 token 的部署里 `/api/tasks` 恒 401 ⇒ "超时任务告警"这条路径静默不触发 | 按服务的 `*_TOKEN` 环境变量带 `X-API-Key`；401 在告警里点名"探针未带令牌？" |
+| `rotate_ledger.py` 三处 | ① 路径写死成 `D:\projects\prompt-master\logs\...`，换机器指向空并**当成功**；② 只轮一份台账，三套服务的 `data/*.jsonl`（天天在长的那些）完全不在范围；③ Windows 上文件被占用时 `replace` 抛 PermissionError 被 watchdog 的 print 吞掉 ⇒ 台账**从未轮转**而日志看不出 | 根路径按 `__file__` 现算；范围 = `logs/*.jsonl` + `releases/*/data/*.jsonl`；`rotate()` 返回 `{scanned, rotated, skipped, errors}`，失败进 `errors` 并由 watchdog 落告警 |
+| `monitor_suite.py` 文档说会检测"口径漂移" | 代码里从来没比较过（只记录计数）——**承诺存在、实现不存在** | 删掉那句承诺，改为如实说"只记录不比较"（固定数字当基线会天天误报） |
+
+守卫 `tests/test_suite_operational_scripts.py`（7 条）：轮转范围覆盖 `releases/*/data/`、
+占用文件时 `errors` 非空且 `rotated` 不许谎报、健康判定表、**watchdog 与 monitor 对同一批
+输入必须给同一个答案**（本仓老教训：同概念两套实现必然漂），以及"根路径不许写死"。
+做过变异验证：把 `monitor_suite` 的 `storage` 判据改成恒空 → 两条断言当场红。
+
+### 5.19 现在仍然没修的
+
+- 本产品侧：无。
+- `releases/` 侧：只剩**体检工具自身的读数问题**（`five_dim_audit` 固定一条误报、
+  `smoke_suite` 自称三服务却不含 triage），不影响服务运行，已列在 `docs/suite/README.md`。
 
 ## 六、本轮自己造成的一处事故（如实记）
 
