@@ -33,10 +33,6 @@ WEIGHTS: dict[str, float] = {
 }
 
 
-def _env_str(name: str, default: str) -> str:
-    return os.environ.get(name, default)
-
-
 def _env_float(name: str, default: float, *, positive_only: bool = False) -> float:
     """容错读浮点：空值/非法值回退默认，不让一个手抖的 .env 炸掉整条链（A2 同源问题）。"""
     raw = (os.getenv(name) or "").strip()

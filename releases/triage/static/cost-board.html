@@ -73,11 +73,11 @@ fetch("/api/usage-board").then(r=>r.json()).then(d=>{
   document.getElementById("root").innerHTML=html;
   startLive();
 }).catch(e=>{document.getElementById("root").innerHTML='<div class="note">加载失败：'+e.message+'（需经会审台服务 :8793 访问本页）</div>'});
-</script>
-</body>
-</html>
 
-
+// startLive 必须在本段 <script> 内（2026-10-31 修）：它此前被写在文档结束标签**之后**，
+// 浏览器只会把它当文件末尾的散落文本，`startLive()` 于是抛 ReferenceError，
+// 被上面那个 .catch 接住 ⇒ 整块看板变成"加载失败：startLive is not defined"，
+// 而把责任归到"需经会审台访问"上（归因也是错的）。打开即 100% 复现。
 function startLive(){
   const pts=[];const MAX=60;
   async function tick(){
@@ -95,3 +95,6 @@ function startLive(){
   }
   tick();setInterval(tick,5000);
 }
+</script>
+</body>
+</html>

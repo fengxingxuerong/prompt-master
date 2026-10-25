@@ -571,7 +571,11 @@ async def session_events(sid: str):
 
 @app.get("/api/notifications")
 def api_notifications(limit: int = 50):
-    return {"count": 0, "items": list_notifications(DATA, limit=limit)}
+    # `count` 必须是**实际条数**（2026-10-31 修）：这里此前硬编码 0，
+    # 实测 3 条告警时 items=3 而 count=0 —— 前端按 count 判空/显示角标，
+    # 于是通知中心永远是"没有告警"，而告警就躺在 items 里。
+    items = list_notifications(DATA, limit=limit)
+    return {"count": len(items), "items": items}
 
 
 @app.get("/api/notify-config")

@@ -48,6 +48,13 @@ h1{font-size:22px;font-weight:650;margin-bottom:4px}
 </div>
 <script>
 const CATS={billing:"账单",technical:"技术",logistics:"物流",complaint:"投诉",other:"其他"};
+// 转义（2026-10-31 修存储型 XSS）：`subject` 与 `feedback.comment` 来自**用户提交的工单**，
+// LLM 的 verdict 也是不可信文本；旧版全部裸拼 innerHTML，一条
+// `<img src=x onerror=alert(1)>` 的工单主题就能让运营者打开历史页即执行。
+// JSON.stringify 的结果同样要转义——它保留尖括号。
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 fetch("/api/sessions").then(r=>r.json()).then(d=>{
   const el=document.getElementById("list");
   if(!d.count){el.textContent="暂无会话";return}
@@ -55,26 +62,26 @@ fetch("/api/sessions").then(r=>r.json()).then(d=>{
   d.sessions.forEach(s=>{
     const div=document.createElement("div");
     div.className="sess";
-    div.innerHTML=`<div class="t">${s.subject||s.session_id}</div><div class="m">${s.session_id} · ${s.status}</div>`;
+    div.innerHTML=`<div class="t">${esc(s.subject||s.session_id)}</div><div class="m">${esc(s.session_id)} · ${esc(s.status)}</div>`;
     div.onclick=()=>{document.querySelectorAll(".sess").forEach(x=>x.classList.remove("active"));div.classList.add("active");loadDetail(s.session_id)};
     el.appendChild(div);
   });
 });
 function loadDetail(sid){
-  fetch("/api/sessions/"+sid).then(r=>r.json()).then(s=>{
+  fetch("/api/sessions/"+encodeURIComponent(sid)).then(r=>r.json()).then(s=>{
     const el=document.getElementById("detail");
     el.className="";
     const c=s.consensus||{};
-    let h=`<div class="dl">会话 ${s.session_id} · ${s.ts}<br>工单：${(s.ticket&&s.ticket.subject)||""}<br>共识：${c.category?CATS[c.category]||c.category:"—"} / ${c.severity||"—"}（${c.votes||"-"} 票，一致率 ${c.agreement!=null?Math.round(c.agreement*100):0}%）<br>建议动作：${c.action||"—"}</div>`;
+    let h=`<div class="dl">会话 ${esc(s.session_id)} · ${esc(s.ts)}<br>工单：${esc((s.ticket&&s.ticket.subject)||"")}<br>共识：${esc(c.category?CATS[c.category]||c.category:"—")} / ${esc(c.severity||"—")}（${esc(c.votes||"-")} 票，一致率 ${c.agreement!=null?Math.round(c.agreement*100):0}%）<br>建议动作：${esc(c.action||"—")}</div>`;
     h+="<h3 style='font-size:13px;color:var(--mut);margin:14px 0 8px'>评委逐票</h3>";
     (s.verdicts||[]).forEach(v=>{
       const vd=v.verdict;
-      h+=`<div class="verdict"><div class="head"><span>${v.seat} · ${v.model}</span><span>${(v.latency_ms/1000).toFixed(1)}s · ${v.late?'late':(vd?'有效':'失败')}</span></div>`;
-      h+=vd?`<div class="json">${JSON.stringify(vd,null,1)}</div>`
-          :`<div class="bad">${v.parse_error||v.error||"无研判"}</div>`;
+      h+=`<div class="verdict"><div class="head"><span>${esc(v.seat)} · ${esc(v.model)}</span><span>${esc((Number(v.latency_ms||0)/1000).toFixed(1))}s · ${v.late?'late':(vd?'有效':'失败')}</span></div>`;
+      h+=vd?`<div class="json">${esc(JSON.stringify(vd,null,1))}</div>`
+          :`<div class="bad">${esc(v.parse_error||v.error||"无研判")}</div>`;
       h+="</div>";
     });
-    if(s.feedback)h+=`<div class="dl">人工反馈：${s.feedback.rating} 星 · ${s.feedback.comment||""}（${s.feedback.ts}）</div>`;
+    if(s.feedback)h+=`<div class="dl">人工反馈：${esc(s.feedback.rating)} 星 · ${esc(s.feedback.comment||"")}（${esc(s.feedback.ts)}）</div>`;
     el.innerHTML=h;
   });
 }

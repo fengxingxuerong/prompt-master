@@ -102,6 +102,13 @@
 
 <script>
 let LABELS = {};
+// 转义（2026-10-31 修存储型 XSS）：`name` / `deliver_date` 等字段的写入方是**公开的**
+// POST /api/orders（name 只限长度），未设 token 时任何人可写；旧版把它们裸拼进 innerHTML，
+// 于是 `<img src=x onerror=alert(1)>` 原样落盘、运营者一开台账页就执行。
+// exec 场景下"只限长度"不是防线，转义才是。
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.className = "toast show"; setTimeout(() => t.className = "toast", 3200); }
 async function load() {
   const st = document.getElementById("statusFilter").value;
@@ -118,15 +125,15 @@ async function load() {
       delivered: [["dead_compensation", "死虾赔付"]],
     }[o.status] || [];
     const ops = nexts.map(([s, label]) =>
-      `<button class="${s === "refunded" || s === "dead_compensation" || s === "out_of_stock" ? "warn" : ""}" onclick="transit('${o.order_id}','${s}')">${label}</button>`).join("");
+      `<button class="${s === "refunded" || s === "dead_compensation" || s === "out_of_stock" ? "warn" : ""}" onclick="transit('${esc(o.order_id)}','${s}')">${esc(label)}</button>`).join("");
     return `<tr>
-      <td class="mono">${o.order_id}<br><span style="color:var(--faint)">${o.created_at.slice(5, 16)}</span></td>
-      <td>${o.name}<br><span class="mono" style="color:var(--faint)">${o.phone.slice(0, 3)}****${o.phone.slice(7)}</span></td>
-      <td>${o.spec_label}<br><span class="mono" style="color:var(--teal)">grade ${o.spec}</span></td>
-      <td class="mono">×${o.qty}</td>
-      <td class="mono" style="color:var(--orange)">¥${o.amount_cny}</td>
-      <td class="mono">${o.deliver_date || "—"}</td>
-      <td><span class="badge b-${o.status}">${LABELS[o.status] || o.status}</span></td>
+      <td class="mono">${esc(o.order_id)}<br><span style="color:var(--faint)">${esc((o.created_at || "").slice(5, 16))}</span></td>
+      <td>${esc(o.name)}<br><span class="mono" style="color:var(--faint)">${esc((o.phone || "").slice(0, 3))}****${esc((o.phone || "").slice(7))}</span></td>
+      <td>${esc(o.spec_label)}<br><span class="mono" style="color:var(--teal)">grade ${esc(o.spec)}</span></td>
+      <td class="mono">×${esc(o.qty)}</td>
+      <td class="mono" style="color:var(--orange)">¥${esc(o.amount_cny)}</td>
+      <td class="mono">${esc(o.deliver_date || "—")}</td>
+      <td><span class="badge b-${esc(o.status)}">${esc(LABELS[o.status] || o.status)}</span></td>
       <td class="ops">${ops || '<span style="color:var(--faint)">终态</span>'}</td>
     </tr>`;
   }).join("");

@@ -102,6 +102,12 @@ const $ = s => document.querySelector(s);
 function toast(msg, err) { const d = document.createElement("div"); d.className = "t"; if (err) d.style.borderColor = "var(--orange)"; d.textContent = msg; $(".toast-holder").appendChild(d); setTimeout(() => d.remove(), 3600); }
 function hdr(ct) { return ct ? { "Content-Type": "application/json; charset=utf-8" } : {}; }
 
+// 转义（2026-10-31 修存储型 XSS）：`title` / `assignee` 来自**用户提交的任务**，
+// 旧版裸拼进 innerHTML ⇒ 一条 `<img src=x onerror=alert(1)>` 的标题就能让运营者开看板即执行。
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 async function loadBoard() {
   const [b, t] = await Promise.all([
     fetch("/api/board").then(r => r.json()),
@@ -121,11 +127,11 @@ async function loadBoard() {
     const od = r.due < b.today;
     const ops = { pending: [["in_progress", "开工"], ["cancelled", "取消"]], in_progress: [["review", "提复核"], ["blocked", "阻塞"]], review: [["done", "通过"]], blocked: [["in_progress", "解除阻塞"]] }[r.status] || [];
     return `<tr class="${od ? "overdue" : ""}">
-      <td class="mono">${r.task_id}</td><td>${r.title}</td><td>${r.assignee}</td>
-      <td class="mono ${r.priority.toLowerCase()}">${r.priority}</td><td class="mono due">${r.due}</td>
-      <td><span class="badge b-${r.status}">${b.status_labels[r.status]}</span></td>
-      <td class="ops">${ops.map(([s, l]) => `<button onclick="transit('${r.task_id}','${s}')">${l}</button>`).join("")}
-        <button onclick="editTask('${r.task_id}')">编辑</button>\n        <button class="undo" onclick="undo('${r.task_id}')">撤销</button></td></tr>`;
+      <td class="mono">${esc(r.task_id)}</td><td>${esc(r.title)}</td><td>${esc(r.assignee)}</td>
+      <td class="mono ${esc((r.priority || "").toLowerCase())}">${esc(r.priority)}</td><td class="mono due">${esc(r.due)}</td>
+      <td><span class="badge b-${esc(r.status)}">${esc(b.status_labels[r.status])}</span></td>
+      <td class="ops">${ops.map(([s, l]) => `<button onclick="transit('${esc(r.task_id)}','${s}')">${esc(l)}</button>`).join("")}
+        <button onclick="editTask('${esc(r.task_id)}')">编辑</button>\n        <button class="undo" onclick="undo('${esc(r.task_id)}')">撤销</button></td></tr>`;
   }).join("") || '<tr><td colspan="7" style="text-align:center;color:var(--faint);padding:30px">暂无未完成任务</td></tr>';
   // 花名册填充（一次性）
   if (!$("#t-assignee").options.length) {

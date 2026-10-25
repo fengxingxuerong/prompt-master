@@ -76,3 +76,40 @@ PY = D:\projects\prompt-master\.venv\Scripts\python.exe
   是搬代码时漏了尾巴。当时无任何自动测试覆盖 SSE，所以跨三个版本没人发现。
   回归与修复见 `tests/test_modelhub_stream_contract.py`；同轮把 modelhub 覆盖率
   从 33.5% 补到 58.6% 并加了 CI 分项线。**对外承诺过的能力，优先补的是测试而不是文档。**
+
+## 2026-10-31：一次只读语义审计的结论（三服务）
+
+三套服务此前**只被 CI 跑测试、从未做过语义审计**。审计方式：TestClient 进程内 + 临时数据目录
+（不写 `releases/*/data/`），零出网。
+
+### 已修（本轮）
+
+| 缺陷 | 后果 | 修法 |
+|---|---|---|
+| `cost-board.html` 的 `startLive` 写在文档结束标签**之后** | 浏览器把它当散落文本 ⇒ `startLive()` 抛 ReferenceError 被 `.catch` 接住 ⇒ 整块成本看板变成"加载失败：startLive is not defined（需经会审台访问）"，归因还是错的。打开即 100% 复现 | 函数搬进同一段 `<script>`；加"文档结束标签之后不许有残留"的守卫 |
+| 台账页 / 历史页 / 看板页把**用户可写字段**裸拼 `innerHTML` | `name`（公开 POST /api/orders）、`subject`、`feedback.comment`、任务 `title` 都是用户写入的 ⇒ `<img src=x onerror=alert(1)>` 原样落盘，运营者一开页就执行（存储型 XSS） | 三页各加 `esc()` 并逐个字段接上；守卫钉"裸插值形态" |
+| `/api/notifications` 的 `count` 硬编码 0 | 实测 3 条告警时 `items=3` 而 `count=0` ⇒ 前端按 count 判空，通知中心永远"没有告警" | `count = len(items)` |
+
+### 已知但**未修**（每条都实测过，按危害排序）
+
+1. **跨进程丢数据**：`lobster/app.py` 与 `taskboard/app.py` 的读-改-写只靠**进程内**
+   `threading.Lock`，而落盘是全量 `DELETE` + re-INSERT。实测两个模块实例各持一把锁
+   （≈ 两个进程）并行新增 2 条，最后只剩 1 条，接口全回 200；taskboard 的 `seq` 也在锁内
+   自增，两进程会算出同一个 `TASK-…-001` 被 `INSERT OR REPLACE` 静默合并。
+   **修法有范式**：`triage/app.py` 已经是"同一事务内读改写、只 INSERT 新行"。
+   没在本轮动是因为它要重写三套服务的存储路径，属于"改事实源"级别的决定。
+2. **开 token 后三套页面取不到数**：页面 JS 从不发 `X-API-Key`（页面能取到 token 的途径
+   本身就没有）。实测设 token 后 `/api/orders`、`/api/board`、`/api/sessions` 全 401，
+   而页面把 401 画成"暂无订单 / 暂无数据"——**用空集冒充没数据**。
+   正确修法是给页面一条拿令牌的途径（或让 401 明确说"需要令牌"），需要产品决定。
+3. **watchdog / monitor 只看 HTTP 200**：把 `orders.db` / `sessions.db` 写成垃圾字节，
+   服务仍回 200 + `status:"ok"`（只把 `storage` 记成 error），探针照样报"活着"；
+   而带 token 的部署里探针自己又不带令牌 ⇒ 恒 401，超时告警静默不触发。
+4. 其余小项：一致率按"有效票"算（1 票有效即 100%）、健康度与列表两套条数口径、
+   撤销连按两次只回滚一步却每次报成功、`PATCH due` 绕过格式校验（逾期恒 0）、
+   token 用 `!=` 而非 `compare_digest`、taskboard 前缀式放行（新增 GET 默认免鉴权）、
+   一条缺 `ts` 的会话让 `/api/sessions` 500、`five_dim_audit` 固定一条误报、
+   `rotate_ledger` 硬编码路径且异常被吞。
+
+> 这三套是**发布套件**，不是本产品（见根 README「仓库结构」）。上面第 1、2 条已实测复现，
+> 处置权在所有者：要么按 triage 的范式重写存储、要么在文档里明确"单进程部署"是前提。

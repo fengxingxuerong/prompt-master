@@ -169,7 +169,7 @@ linux CI 的 locale 是 UTF-8，永远不会暴露它。
 
 | 门禁 | 结果 |
 |---|---|
-| `pytest tests/ -q` | **2131 passed / 1 skipped / 0 failed**（基线 1983 → 新增 148 条） |
+| `pytest tests/ -q` | **2133 passed / 1 skipped / 0 failed**（基线 1983 → 新增 150 条） |
 | `ruff check`（CI 同口径范围） | All checks passed |
 | `ruff format --check` | 全绿 |
 | `mypy pm/ extras/ run.py run_server.py eval_prompts.py` | Success（101 files） |
@@ -455,9 +455,48 @@ BOM 分支直接 `raw.decode(...)`，只有无 BOM 分支做了 `\r\n → \n`。
 全 `TemplateNotFound`）；面板所有 innerHTML 汇聚点都过 `esc()`/`n()`；桌面端没有跨线程 Tk 调用；
 关窗/取消会 terminate 子进程并复位句柄，未见资源泄漏。
 
-### 5.14 现在仍然没修的
+### 5.15 第六轮：`releases/` 三套发布服务（从未做过语义审计）
 
-- 无。（判定链上的两个口径选择已在 §5.11/§5.12 说明，属所有者决定，不是缺陷。）
+`releases/` 里的 lobster（:8791）/ taskboard（:8792）/ triage（:8793）**只被 CI 跑测试、
+从没被语义审计过**。六轮里最后这一路扫了它们，17 条发现，本轮修了三条：
+
+| 缺陷 | 后果 | 修法 |
+|---|---|---|
+| `cost-board.html` 的 `startLive` 写在文档结束标签**之后** | 浏览器把它当散落文本 ⇒ `startLive()` 抛 ReferenceError 被 `.catch` 接住 ⇒ 整块成本看板变成"加载失败：startLive is not defined（需经会审台访问）"，**归因还是错的**。打开即 100% 复现 | 函数搬进同一段 `<script>`；守卫钉"结束标签之后不许有残留" |
+| 台账页/历史页/看板页把**用户可写字段**裸拼 `innerHTML` | `name`（公开 POST /api/orders）、工单 `subject`、`feedback.comment`、任务 `title` 都是用户写入的 ⇒ `<img src=x onerror=alert(1)>` 原样落盘，运营者一开页就执行（**存储型 XSS**） | 三页各加 `esc()` 并逐字段接上；守卫钉"裸插值形态"（对 lobster 做过变异验证：去掉一处 `esc(` 当场红） |
+| `/api/notifications` 的 `count` 硬编码 0 | 实测 3 条告警时 `items=3` 而 `count=0` ⇒ 前端按 count 判空，通知中心永远"没有告警" | `count = len(items)` |
+
+**已知但未修**（都实测复现过，写进 `docs/suite/README.md` 的审计小节）：
+
+1. **跨进程丢数据**：lobster/taskboard 的读-改-写只靠**进程内** `threading.Lock`，
+   落盘却是全量 `DELETE` + re-INSERT。两个实例并行新增 2 条实测只剩 1 条、接口全回 200；
+   taskboard 的 `seq` 也在锁内自增，两进程会算出同一个 `TASK-…-001` 被 `INSERT OR REPLACE`
+   静默合并。**修法有范式**（triage 已经是"同事务读改写、只 INSERT 新行"），
+   但它要重写三套服务的存储路径 —— 属"改事实源"级决定，留给所有者。
+2. **开 token 后三套页面取不到数**：页面 JS 从不发 `X-API-Key`（也没有拿到它的途径），
+   401 又被画成"暂无订单 / 暂无数据" —— **用空集冒充没数据**。正确修法要么给页面一条
+   拿令牌的途径，要么让 401 明说"需要令牌"，是产品决定。
+3. watchdog/monitor 只看 HTTP 200（把 DB 写成垃圾字节仍报 ok），且自身探针在 token 部署下恒 401。
+
+### 5.16 顺手做的一条元守卫：模块级常量必须有读取点
+
+本仓踩过两次"写了没接线"的死承诺（`_MAX_EVENTS`、`_PER_FIELD_RE`），所以把这类判据做成测试：
+`tests/test_dead_constants.py` 扫 `pm/`、`extras/`、`scripts/` 的**模块级全大写常量**，
+要求全仓（含 tests/docs）至少有一处引用。
+
+- 只覆盖常量、不覆盖私有函数：dunder 与 pydantic 校验器都是隐式调用，按名字扫会一片假阳；
+- 而"常量写了没读"几乎总是真缺陷，误报率 0；
+- 起手就抓到两条并删掉：`extras/desktop.py::ACCENT_SOFT`（上一轮桌面改版留下的孤儿色值）、
+  `pm/schemas.py::_env_str`（唯一一个没人用的 env 助手）；
+- **做过变异验证**：加一个 `ACCENT_SOFT_RESURRECTED` 常量，闸当场红。
+
+> 第一次变异没生效——PowerShell 把 `` `r`n `` 当字面量插进文件，源码坏掉后被判据的
+> `except SyntaxError: continue` 跳过了。这提醒我：**"跳过解析失败的文件"是这类守卫的天生漏洞**，
+> 所以变异验证必须真的改出一个语法合法的死常量（改成用编辑工具重做后才红）。
+
+### 5.17 现在仍然没修的
+
+- 无（本产品侧）。`releases/` 的三条已知项在 §5.15，属所有者决定。
 
 ## 六、本轮自己造成的一处事故（如实记）
 
