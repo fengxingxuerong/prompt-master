@@ -1,4 +1,4 @@
-# PromptMaster
+﻿# PromptMaster
 
 **[中文](README.md) · [Releases](https://github.com/fengxingxuerong/prompt-master/releases)**
 
@@ -19,12 +19,14 @@
 | Your situation | Use | Cost |
 |---|---|---|
 | You already have a draft, want obvious defects first | `run.py check --prompt-file x.md` | **zero calls, offline** |
-| Block only *newly introduced* defects in **your own repo's** CI | `run.py diff --base-ref origin/main x.md` (or `run.py gate`) | **zero calls** |
+| Block only *newly introduced* defects in **your own repo's** CI | `run.py diff --base-ref origin/main x.md` | **zero calls** |
 | Know the call budget before spending | `run.py --dry-run --task "…"` | **zero calls** |
 | First real run — check the endpoint is alive | `run.py --preflight` | a few calls |
 | Run the full loop in a terminal | `run.py --task "…"` (interactive: quotes first, asks y/N) | billed |
 | Long run without holding a terminal | `python run_server.py` + `run.py submit --task "…"`, then `run.py wait <run_id>` | billed |
 | Let another agent drive it | MCP: `python -m pm.mcp_server` (stdio) | both |
+| Use it as a skill inside a coding agent (Claude Code / Codex / Cursor…) | `npx skills add https://github.com/fengxingxuerong/prompt-master --skill prompt-master`, or `/plugin marketplace add fengxingxuerong/prompt-master` then `/plugin install prompt-master@prompt-master-tools` | read-only checks by default |
+| Gate every PR on *newly introduced* defects only | GitHub Action: `uses: fengxingxuerong/prompt-master@main` + `with: paths: prompts/*.md` | **zero calls** |
 | Not a command-line person | `run.py panel` (browser) / `run.py desktop` (native, optional extra) | generation billed |
 
 ## 30-second quickstart
@@ -120,7 +122,7 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 
 | Item | Value |
 |---|---|
-| Tests | **2,141 collected**, no API key, no live network |
+| Tests | **2,156 collected**, no API key, no live network |
 | Coverage | gated at floor 92 on `pm/` and floor 93 on `pm/modelhub/*`; measured values drift per round — the only maintained table lives in `docs/operations.md` (this README no longer copies snapshots) |
 | CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
 | Interfaces | CLI (13 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |

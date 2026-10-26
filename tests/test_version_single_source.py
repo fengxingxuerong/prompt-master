@@ -8,6 +8,11 @@
 
 ModelHub 网关是**故意**不同源的（它跟 releases/ 那条网关验收线走），
 所以它的版本也收成单个常量、三处引用同一个名字，而不是三份 `"1.1.0"` 字面量。
+
+**第三份拷贝（2026-10-26 登记）**：`.claude-plugin/plugin.json` 的 `version`——
+插件市场（Claude Code）在加载期读的是静态 JSON，没法"从这里取"，所以那一处只能写死。
+它于是成为本模块要管的对象：值必须等于事实源，且**登记在这里**（而不是散在别处的用例里），
+否则下一个发版的人不会知道他也欠这个文件一次改动。
 """
 
 from __future__ import annotations
@@ -84,6 +89,11 @@ def test_no_new_hardcoded_version_literals() -> None:
 
     白名单只有两处：`pm/__init__.py`（事实源本身）与 `GATEWAY_VERSION = "..."`
     （网关那条独立发布线的常量定义行）。
+
+    ⚠️ 扫描范围**不含** `.claude-plugin/plugin.json` —— 那份 JSON 是加载期静态读取的，
+    没法"从事实源取"，所以它必须写死，由下面那条
+    `test_plugin_manifest_version_is_registered_against_the_source` 单独管（值 == 事实源）。
+    把范围写在这里，是为了让"为什么它没被这条闸抓到"可读，而不是看起来像漏网。
     """
     import re
 
@@ -102,3 +112,19 @@ def test_no_new_hardcoded_version_literals() -> None:
                 continue
             offenders.append(f"{path.relative_to(ROOT)}:{no}: {line.strip()}")
     assert not offenders, f"写死的版本号（应改为引用常量）：{offenders}"
+
+
+def test_plugin_manifest_version_is_registered_against_the_source() -> None:
+    """插件清单的 `version` 是**第三份拷贝**，必须有守卫，否则下次发版必漂。
+
+    为什么它只能写死：Claude Code 的插件市场在加载期读静态 JSON，不会去 import Python 包
+    （对照两份在用的真清单：iFixAi / Cursor 的 `.claude-plugin/plugin.json` 都带 version）。
+    ⇒ 它就是本模块要管的"拷贝"：值 == 事实源。发版时忘了改这里，这条会红。
+    """
+    import json
+
+    manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == pm.__version__, (
+        f"插件清单写 {manifest['version']}，事实源是 {pm.__version__}：发版时两边都要动"
+    )
+    assert manifest["name"] == "prompt-master", "插件名变了，README 里的安装命令会一起失效"

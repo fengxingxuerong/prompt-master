@@ -113,7 +113,15 @@ def extract_templates(source: str) -> dict[str, str]:
     try:
         tree = ast.parse(source)
     except SyntaxError as e:
-        raise GateError(f"源码无法解析（{e.msg}，第 {e.lineno} 行）") from e
+        # 报错要把"真正的原因 + 出路"说全：2026-10-26 实测，把一份 markdown 提示词喂给 `gate`
+        # （`--path prompts/x.md`）会在这一行报"源码无法解析（invalid character '。'）"，
+        # 而上游 gatecmd 又会前缀一句"这是门禁自己坏了" —— 用户读到的结论是"工具坏了"，
+        # 真相是"gate 只吃 Python 模板，markdown 要用 diff --base-ref"。所以这里直接写出出路。
+        raise GateError(
+            f"源码无法解析（{e.msg}，第 {e.lineno} 行）：`gate` 的对象是 Python 源码里的"
+            "「全大写 = 字符串常量」模板（本仓默认 `pm/prompts.py`）；"
+            "markdown / 纯文本提示词请改用 `diff --base-ref <ref> <你的.md>`"
+        ) from e
 
     out: dict[str, str] = {}
     for node in tree.body:

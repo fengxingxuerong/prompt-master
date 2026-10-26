@@ -723,6 +723,12 @@ def test_documented_mcp_tool_count_matches_the_live_registry() -> None:
         "docs/agent-skill.md": re.search(
             r"推荐，(\d+) 个工具", (root / "docs" / "agent-skill.md").read_text(encoding="utf-8")
         ),
+        # 2026-10-26 起技能包也对外报"几个工具"（skills/prompt-master/SKILL.md）：
+        # 它是发到技能市场的那一份，写错数就是当着外部用户的面说错。
+        "skills/prompt-master/SKILL.md": re.search(
+            r"推荐，(\d+) 个工具",
+            (root / "skills" / "prompt-master" / "SKILL.md").read_text(encoding="utf-8"),
+        ),
         # 面板底栏也是"注册了几个"的抄件：工具数一变，界面就会当面说错。
         "pm/web/_panel.py": re.search(
             r"MCP (\d+) 工具", (root / "pm" / "web" / "_panel.py").read_text(encoding="utf-8")

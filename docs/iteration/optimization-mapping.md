@@ -93,3 +93,32 @@ AI 代判落在校验 8.0-8.9 段可请所有者改判 ⇒ **零算力共 5 条*
 本轮调研**不含任何代码改动**（PD-3 是确认等价物已存在，不是新实施），也不产生任何效果结论。
 唯一状态变更是 PD-5：两条外部风险（linshenkx 无证照/无评估层）在 2026-09-24 → 10-13 之间**已被外部解决**，
 本表的旧判断已就地更新，避免下一个人照旧结论做决策。
+
+---
+
+## 第五轮（2026-10-26）：本周热门项目坐标刷新 —— 空位还在，入口不在
+
+> 竞品调研见 `research-reports/prompt-optimization-competitors-2026-10-26/report.md`
+> （GitHub API 当日实测：14 家基线坐标 + 7 组关键词/topic 搜索 + `created:` 新建仓 + Trending 周榜 + 11 份竞品 README 原文；
+> Δ 基线 = 第四轮的 10-13 读数）。P1=记录待做，P2=暂缓/前置未满足，❌=不采纳并写理由，🔭=只监控。
+
+| 优化项 | 对应竞品做法 | 优先级 | 实施方式 | 状态 |
+|---|---|---|---|---|
+| **PE-1 把 CLI 包成可安装的技能/插件 + 发 PyPI + 补 Action** | iFixAi（plugin + skill 双分发，34.5k★）、prompt-architect（Claude Code 插件/npm/zip）、cloudflare/security-audit-skill（`npx skills add`）、本周 Trending 前 15 里 6 条是技能/插件市场 | **P1（当前第一短板）** | 仓内放 `skills/prompt-master/SKILL.md`（触发词=体检提示词/PromptMaster/门禁）+ marketplace 清单，把 `check`/`diff`/`gate` 这三条**零调用**能力当第一张脸；发 PyPI 用**已存在**的 `scripts/release_pypi.py`；Action 走 `uses: <repo>@ref`。**与 PD-4 的否决不冲突**：PD-4 否的是 Vercel/CF 这类 JS 云部署，技能包与 Python 无关 | ✅ **本地侧已实施（2026-10-26，Round 44）**：技能正文 `skills/prompt-master/SKILL.md`（含"默认只读、计费要点头"的运行模式，抄 Cloudflare 技能的 operating modes 那条理由）、插件清单 `.claude-plugin/{plugin,marketplace}.json`（`source: "./"`，**一份正文喂两个渠道**，不复制）、Action `action.yml` + `scripts/action-prompt-gate.sh`（composite；只调 `diff --base-ref`，计费入口一律不进 CI）。守卫 13 条 `tests/test_skill_package.py`（含"自动探测基线""**候选全等于 HEAD 必须退 2**""全零 SHA = 首次推送"三条），并把 SKILL.md 纳入既有的 MCP 工具数抄件表（全量 2155 passed / 1 skipped / 0 failed）。同轮检修另修掉：守卫只扫 `action.yml` 不扫脚本的洞、`gate` 被 README 写成 `diff` 等价物的错指向（实测喂 markdown 退 2）、以及禁用词扫描把"声明不做"的注释读成违规的假阳性。**PyPI**：`scripts/release_pypi.py --check` 本机 RC=0、产物校验通过（sha256 入账）——`--upload` 要 owner 机器上的 `PYPI_TOKEN` 与 `v2.3.0` tag，⏳ 未做。**Action**：本机 bash 端到端已跑（回归退 1 / 干净退 0 / 新增文件跳过 / 空 paths 与坏 ref 退 2），但**未在真 GitHub Runner 上跑过**，⏳ 未验。缺口实测记录（本轮开工前）：0 个 `SKILL.md`/`marketplace.json`/`plugin.json`、PyPI 404、本仓 GitHub 0★ |
+| **PE-2 把"未决/不可采信"做成结构字段** | cloudflare/security-audit-skill：裁决三态 `confirmed`/`needs_validation`/`rejected` + `report-schema.json` + 零依赖校验脚本，且 `needs_validation` **必须带确切未决事实且不许给程度** | P1 | 给 `--json` 契约加裁决枚举（未决项必须带"确切未决事实"），配校验脚本。**不破坏**单对象 stdout 与退出码四态 | ⏳ 未做（现状：`不可采信/不可估` 只写在报告散文里） |
+| **PE-3 补"何时停"的显式判据** | Q00/ouroboros：歧义 ≤0.2 才准写码、相似度 ≥0.95 才收敛；三级闸 机械($0)→语义→多模型共识 | P1（只抄停止判据） | 把"机械层→语义层→共识层"与"Δ 稳定到什么程度才停/什么时候升级评委"写成产品契约 + 少量断言。**明确不抄级联省钱**：PC-6 已实测否决（20% 调用、均分只动 0.03） | ⏳ 未做 |
+| **PE-4 锚点补料改不确定性采样 + 随机审计切片** | sutro-sh/jev-align：挑模型不确定的样本请人标（含随机审计样本）→ 标注 → 报 certainty 变化；训练分再高也不自动采纳 | P1 | 在既有 `scripts/build_owner_rejudge_queue.py` 上加"评委间分歧/阈值邻域"取样 + 一条**固定随机切片**（防锚点集全是难题而偏斜）；回填仍走既有可审计路径。**不抄 GEPA 优化**（N13 维持不采纳） | ⏳ 未做（PC-4 的堵点仍是缺 owner 亲判锚点） |
+| **PE-5 给规则层体检公开一张可靠性表** | Tencent/AI-Infra-Guard `aig-skill-scan` 公开 F1/精确率/召回/FPR 并挂 SkillTrustBench T01–T09；hol-guard `plugin-scanner` 公开信任分权重与基线、报告支持 SARIF | P2 | 在版本化语料上量 `check`/`gate` 各规则的精确率/误报率/覆盖率，随文档落档。本仓**只对评委做了这件事，对自己规则没做** | ⏳ 未做（零调用、零出网） |
+| **PE-6 注入装束挂公开分类学** | AI-Infra-Guard 的 T01–T09 分类、promptfoo 插件清单 | P2 | 给 `pm/injection_pack.py` 的 10 种装束做"分类学覆盖表"，让缺口可数而不是靠断言 | ⏳ 未做（PD-1 已把装束 1→10 种） |
+| **PE-7 对外口径收窄（已在旧报告就地更正）** | truera/trulens「judges are graded against human annotations, out of the box」+ 公开数字；GEPA/Nubank 公开 κ 0.00→0.745 | P1（纯文档） | 一律用"竞品在**它们的固定基准卷子**上给评委打分；本产品量在**用户自己的锚点**上，样本不足时拒绝给结论"；10-13 报告 §四 的旧措辞已就地加更正块 | ✅ 已就地更正（10-13 报告 §四 顶部） |
+| 🔭 监控条目更新 | ① linshenkx 39,241★（13 天 +1,506，全赛道最快）——**评估层两周未做深**，仍是 UI 级分析/对比/评估驱动重写；② GEPA 7,148★ 仍是"you provide an evaluator"，若补上无 ground truth 解法会正面冲击空位；③ **新**：iFixAi 34.5k★（跨厂商评委 + 61 项检查 + `--min-score` 进 CI，**无校准**）、TruLens（按人工标注给评委打分）、AI-Infra-Guard（技能扫描 F1 表）；④ **新**：hol-guard 的插件信任打分是否会吃掉"技能/插件门禁"位 | 🔭 监控 | 下一观察点：这三家谁先把"评委/审计的可信度"量化到能碰 `calibrate` | 🔭 持续 |
+| ❌ 维持不采纳 | DSPy 式程序编译、自动最优提示词搜索（N13）、Vercel/CF 部署矩阵（PD-4） | — | 与第四轮一致：评委判别力未收敛时做搜索 = 优化它读不出的那一维。**PE-1 不属此列**（技能包不是云部署） | ❌ |
+| 📉 旧坐标的坏消息 | microsoft/PromptWizard 4,022★（**恰好停摆整一年**）、zou-group/textgrad 3,770★（停摆 ~15 个月）、meta-llama/prompt-ops **1,027★（−10，负增长）**、openai/evals 停半年 | — | 叙事：自动优化赛道冷却时，**活下来的是生态接入与人用价值**，不是单点算法 | 📉 记录 |
+
+### 本轮的诚实边界
+
+本轮**零代码改动、零真端点调用**，不改任何 Δ/达标读数；PE-1~PE-6 全在"入口与口径"层。
+本轮唯一已落地动作是 PE-7（把旧报告里已部分过期的措辞就地更正，防下一个人照旧结论做决策）。
+取证限制也照实写进报告 §六：匿名 API 限额在抓第 8 家仓库时耗尽，余下 6 家改走 `/search` 的 `repo:` 限定符；
+`Arize-ai/phoenix` 的搜索调用被 403 拦下，其读数取自同日 `topic:llm-evaluation` 搜索结果；
+功能对照全部是 README/文件树级，**没有跑过任何竞品的代码**，"它没有 X"这类否定判断是关键词检索的结论，不是穷举。

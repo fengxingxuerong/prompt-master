@@ -1,4 +1,4 @@
-# PromptMaster
+﻿# PromptMaster
 
 **中文** · [English](README.en.md) · [Releases](https://github.com/fengxingxuerong/prompt-master/releases)
 
@@ -18,12 +18,14 @@
 | 你的处境 | 用它 | 花钱吗 |
 |---|---|---|
 | 手上已有一版提示词，只想先看有没有硬伤 | `run.py check --prompt-file x.md` | **零调用、零出网** |
-| 想在**自己仓库**的 CI 里只拦"本次新引入"的坑 | `run.py diff --base-ref origin/main x.md`（或 `run.py gate`） | **零调用** |
+| 想在**自己仓库**的 CI 里只拦"本次新引入"的坑 | `run.py diff --base-ref origin/main x.md` | **零调用** |
 | 先知道"跑一轮大概多少次调用" | `run.py --dry-run --task "让 AI 分析销售数据"` | **零调用** |
 | 第一次真跑，先确认端点活着 | `run.py --preflight` | 少量调用 |
 | 人在终端，跑完整闭环 | `run.py --task "让 AI 分析销售数据"`（交互终端下会**先报价、要一句 y/N**） | 计费 |
 | 长任务不想占终端 | `python run_server.py` + `run.py submit --task "让 AI 分析销售数据"`，再 `run.py wait <run_id>` | 计费 |
 | 让别的 Agent 调它 | MCP：`python -m pm.mcp_server`（stdio） | 零调用与计费都有 |
+| 在编码 Agent 里当技能用（Claude Code / Codex / Cursor…） | `npx skills add https://github.com/fengxingxuerong/prompt-master --skill prompt-master`，或 `/plugin marketplace add fengxingxuerong/prompt-master` 再 `/plugin install prompt-master@prompt-master-tools` | 默认只做零调用体检 |
+| 让每个 PR 自动只拦"新引入"的坑 | GitHub Action：`uses: fengxingxuerong/prompt-master@main` + `with: paths: prompts/*.md` | **零调用** |
 | 不想碰命令行 | `run.py panel`（浏览器小窗）/ `run.py desktop`（原生窗，可选附件） | 生成计费 |
 
 ## 30 秒跑通
@@ -101,7 +103,7 @@ python run.py calibrate --aggregate     # 零调用，纯账本重算
 | 原稿改进 | 加 `--prompt-file 我的提示词.md` | 只对**你已有的那一版**做最小改动（保留术语与字段名）；Δ 读作「比你自己的版本好多少」 |
 | 静态体检 | `run.py check`（`--prompt-file` / `--cases-file`） | **零调用、零出网**：量一版提示词，或数一份用例集有几票真能否决 |
 | 版本差分 | `run.py diff A B` / `--base-ref origin/main x.md` | **零调用**：改了什么、修好几条、新引入几条；适合放进你自己的 CI |
-| 改动门禁 | `run.py gate` | **零调用**：只拦本次**新引入**的规则失败模式（判增量不判绝对值） |
+| 改动门禁 | `run.py gate` | **零调用**：只拦本次**新引入**的规则失败模式（判增量不判绝对值）。⚠️ 对象是 Python 模块里的「全大写 = 字符串常量」提示词模板（默认 `pm/prompts.py`）；**markdown 提示词文件走 `diff --base-ref`**（实测：把 `.md` 喂给 `gate` 会退 2 报"源码无法解析"） |
 | 事实断言 | `--cases-file cases.json --assert-mode rule` | 你给的 `expected` 有一票否决权；`custom:<名>` 可挂你自己的断言函数 |
 | 资产与校准 | `run.py library` / `history` / `calibrate` | 达标成品检索与导出 · Δ 显著性 · 评委可信度 |
 | 图形入口 | `run.py panel` / `run.py desktop` | 浏览器小窗 / 原生窗口（桌面端是**可选附件**，不随 `pip install .` 安装） |
@@ -121,6 +123,20 @@ python run.py diff --base-ref origin/main prompts/我的提示词.md
 
 退出码 `1` = 这个 PR 相对 main **新引入**了规则问题（修好不判失败）；`0` = 没有变坏。
 `check` 管单时点，`diff --base-ref` 管增量 —— 两者都零调用、可逐次提交跑。
+
+**不想写命令就用现成的 Action**（零调用；`fetch-depth` 要给足，否则 `base-ref` 解析不到）：
+
+```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }
+- uses: fengxingxuerong/prompt-master@main
+  with:
+    paths: prompts/*.md
+    base-ref: origin/main   # 留空则按 origin/HEAD → origin/main → origin/master → HEAD~1 自动找
+```
+
+这个 step 靠**退出码 1** 失败来当门禁。⚠️ 基线里没有的新增文件**没有比较对象**，
+它会跳过并打印"不计入通过" —— 指望新提示词也过闸时，别把跳过读成通过。
 
 <details>
 <summary><b>已知边界（按会不会骗到你排序）—— 阅读前先知道这些</b></summary>
@@ -145,7 +161,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；2141 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；2156 条，无 Key、禁止真实出网）
 extras/             可选附件（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 case_templates/     可直接喂 --cases-file 的领域用例集
 releases/           三服务套件与历史发布快照（不是本产品）

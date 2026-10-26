@@ -1,0 +1,22 @@
+{
+  "name": "prompt-master-tools",
+  "description": "PromptMaster：零调用先给提示词做体检、差分与 CI 门禁；要花钱的那一步（生成 → 用例 → 评估 → 修订）必须由你明确点头，并且连「量具本身可信吗」一并报出来。",
+  "owner": {
+    "name": "fengxingxuerong",
+    "url": "https://github.com/fengxingxuerong/prompt-master"
+  },
+  "plugins": [
+    {
+      "name": "prompt-master",
+      "source": "./",
+      "description": "体检一版已有提示词、只拦本次新引入的坑、或跑完整优化闭环。默认零调用、零出网、不需要 API Key；计费闭环先 --dry-run 报调用数。评委校准的读数为「不可采信」时会明说，不假装达标等于有效果。",
+      "category": "testing",
+      "tags": [
+        "prompt-engineering",
+        "evaluation",
+        "ci",
+        "agent-skill"
+      ]
+    }
+  ]
+}

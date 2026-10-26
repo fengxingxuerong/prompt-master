@@ -3,6 +3,13 @@
 > 本文件是给**智能体（Agent）**看的接入契约。你的标准学习入口：本节 + `run.py --help`
 > （装包后是 `prompt-master --help`，同一套实现）。
 > 人类用户看 docs/agent-cli-guide.md（原 README「三之二」）。
+>
+> **能不能"装成技能"**：能。仓库根下 `skills/prompt-master/SKILL.md` 就是本文的**可安装形态**
+> （Claude Code / Codex / Cursor 等按目录发现技能：`npx skills add <本仓 URL> --skill prompt-master`，
+> 或 `/plugin marketplace add fengxingxuerong/prompt-master` → `/plugin install prompt-master@prompt-master-tools`）。
+> 那份的**默认也是零调用体检**，计费闭环要用户明确点头；两份之间不许分叉：工具数由
+> `tests/test_mcp_server.py` 同时钉住（本文件与 SKILL.md 都在抄件表里），
+> 技能自身的形状（frontmatter / 插件清单 / Action）由 `tests/test_skill_package.py` 钉住。
 
 ## 这个工具是什么
 

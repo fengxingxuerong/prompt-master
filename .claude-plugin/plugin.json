@@ -1,0 +1,22 @@
+{
+  "name": "prompt-master",
+  "displayName": "PromptMaster",
+  "version": "2.3.0",
+  "description": "把一句话需求变成被测过、被评过、被证伪过一轮的提示词：零调用的体检/差分/门禁 + 带基线与盲评的计费优化闭环，并如实报出「量具本身可信吗」。",
+  "author": {
+    "name": "fengxingxuerong",
+    "url": "https://github.com/fengxingxuerong"
+  },
+  "homepage": "https://github.com/fengxingxuerong/prompt-master#readme",
+  "repository": "https://github.com/fengxingxuerong/prompt-master",
+  "license": "MIT",
+  "keywords": [
+    "prompt-engineering",
+    "prompt-optimization",
+    "evaluation",
+    "llm-as-a-judge",
+    "ci-gate",
+    "agent-skill"
+  ],
+  "skills": "./skills/"
+}

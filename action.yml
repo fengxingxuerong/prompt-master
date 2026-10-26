@@ -1,0 +1,51 @@
+name: "PromptMaster 提示词门禁"
+description: "零调用、零出网的提示词增量门禁：只拦本次新引入的规则问题（有新引入 → 退出码 1）。装依赖那一步需要网络；门禁本身不调模型、不出网、不需要 API Key。"
+author: "fengxingxuerong"
+
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  paths:
+    description: "要体检的提示词文件：空格或换行分隔，支持 shell 通配（如 prompts/*.md）"
+    required: true
+  base-ref:
+    description: "git 基线引用（如 origin/main，或 ${{ github.event.pull_request.base.sha }}）；留空则按 origin/HEAD → origin/main → origin/master → HEAD~1 自动找"
+    required: false
+    default: ""
+  python-version:
+    description: "Python 版本（本产品要求 ≥3.11）"
+    required: false
+    default: "3.11"
+
+outputs:
+  checked:
+    description: "实际体检（与基线比较过）的文件数"
+    value: ${{ steps.gate.outputs.checked }}
+  skipped:
+    description: "跳过的文件数（新增文件或路径不存在）——跳过的文件不计入通过"
+    value: ${{ steps.gate.outputs.skipped }}
+  regressed:
+    description: "新引入了规则问题的文件数（>0 时本 Action 失败）"
+    value: ${{ steps.gate.outputs.regressed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: "装 Python"
+      uses: "actions/setup-python@v5"
+      with:
+        python-version: "${{ inputs.python-version }}"
+
+    - name: "装 PromptMaster（要网络；门禁本身零调用、零出网）"
+      shell: "bash"
+      run: python -m pip install --quiet --disable-pip-version-check "${{ github.action_path }}"
+
+    - name: "跑增量门禁"
+      id: "gate"
+      shell: "bash"
+      env:
+        PM_PATHS: "${{ inputs.paths }}"
+        PM_BASE_REF: "${{ inputs.base-ref }}"
+      run: bash "${{ github.action_path }}/scripts/action-prompt-gate.sh"

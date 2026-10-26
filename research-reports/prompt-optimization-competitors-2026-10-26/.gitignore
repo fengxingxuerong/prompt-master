@@ -1,0 +1,10 @@
+# 原始抓取产物**不进库**（2026-10-26 首次这么做，理由是音量）：
+#   data/         23 个 GitHub API 原样 JSON，10.2 MB；
+#   raw/trending-weekly*.xml  GitHub 周榜 RSS 全量（第三方镜像），1.2 MB。
+# 它们**可复现**且 URL 写死在 report.md §六（fetch.ps1 / fetch2.ps1 一条命令重抓），
+# 而用到的每一条已经被落成可引用的形式：report.md（结论与出处）+ data-summary.txt（790 行汇总）。
+# 留下的 raw/ 是**小而不可省**的证据：技能/插件清单的形状原文（我照着它写的 manifest）、
+# Action 执行体的独立冒烟脚本与日志、竞品 SKILL.md 的写法样本。
+data/
+raw/trending-weekly.xml
+raw/trending-weekly-python.xml

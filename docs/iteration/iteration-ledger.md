@@ -2518,3 +2518,93 @@ library、gate、diff、mermaid、MCP 14 工具、假后端整图 32 调用到 p
   退出码均 0。这是此前唯一没验过的大面。
 - 至此项目能力验证覆盖面：**合同面 + 机制面 + 工具面（9 子命令）+ 服务面（异步链）+ 端点面**全部走通；
   **效果面**仍是续五/续六的诚实判定（任务相关，暂无新 passed record）。全程未烧额度（本轮全假后端）。
+
+## Round 44（2026-10-26，PromptMaster 本产品）—— 分发入口（PE-1）：技能包 + 插件清单 + GitHub Action
+
+**本轮判据**：第五轮竞品对照（`research-reports/prompt-optimization-competitors-2026-10-26/report.md`）点名的头号短板是
+"**能力在、入口不在**"——本周 GitHub Trending 前 15 里 6 条是技能/插件市场条目、本周新建破千星的项目几乎全是技能，
+而本仓当时 0 个 `SKILL.md`/`marketplace.json`/`plugin.json`、PyPI 404、GitHub 0★。
+本轮**只补入口**：不动评分协议、不跑真端点、不产生任何"提示词变好了"的结论。
+
+### 做了什么（按产物）
+
+1. **技能正文** `skills/prompt-master/SKILL.md`：frontmatter（`name` == 目录名、description 带触发词）、
+   三种用法表（零调用体检 / 增量门禁 / 计费闭环）、**「加载本技能不授权花钱」**的运行模式、
+   退出码四态、MCP 工具表指向、诚实边界（AUC 的 CI 覆盖 0.5 ⇒ Δ 只在基线有效时才有意义）。
+   这条安全声明为什么必须是判据：它是"默认零调用"的实现，丢了不会让任何测试变红 ——
+   只会让 Agent 顺手跑一轮 45~102 次调用的闭环。做法上抄 Cloudflare 技能的 operating modes（同一个理由）。
+2. **插件清单** `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`：`source: "./"` ⇒
+   技能正文**只有一份**（Claude Code 插件与 `npx skills add` 两条渠道共用），从根上排除"两份正文各自漂"。
+   清单形状抄自两份**在用**的清单（iFixAi / Cursor 的 `.claude-plugin/*.json`，原文存 `research-reports/.../raw/`）。
+   新增的插件版本号是**第三份版本拷贝**（本仓已有产品版本与网关版本两个源）⇒ 加守卫钉住 == `pm.__version__`。
+3. **GitHub Action** `action.yml` + `scripts/action-prompt-gate.sh`：composite；装 Python → 装本仓 →
+   逐文件跑 `diff --base-ref … --no-diff --json`；**基线里没有的新增文件跳过并明说"不计入通过"**；
+   空 `paths` / 解析不了的 `base-ref` 退 2；输出 `checked`/`skipped`/`regressed`。
+   逻辑放 `.sh` 而不是 yml 的多行 `run`，就是为了满足"**不许发布没跑过的接线**"这条规矩（Round 34 曾为此拒绝过 Action）——
+   脚本能在本机 bash 下真跑，yml 不能。
+4. **文档**：`README.md` / `README.en.md` 的入口表各加两行（技能/插件、Action）；`docs/agent-skill.md` 加一节
+   "能不能装成技能"并指向 `skills/prompt-master/SKILL.md`（工具数仍由既有抄件守卫同时钉住两份）。
+
+### 验收读数（本机实测，2026-10-26）
+
+- 全量：`pytest tests -q` ⇒ **2155 passed / 1 skipped / 0 failed（rc=0）**；唯一那条 skip 是既有的
+  "jsdom 未装"（与本轮无关）。收集总数 2141 → **2156**（+11 分发件守卫 ＋4 检修用例，见下）。
+- **先红后绿的一条**：全量第一跑时 `test_every_text_mode_subprocess_pins_utf8` 当场红 ——
+  本轮新写的 `_posix()` 里那个 `subprocess.run(..., text=True)` 忘了 `encoding=`。
+  这正是那条闸存在的理由（中文 Windows 上会静默退化成 GBK、断言永远为假），本轮就地补上，未改判据。
+- `pytest tests/test_skill_package.py` ⇒ **13 passed / 0 skipped**（含 bash 端到端六条路径）。
+- bash 端到端（真 git 仓库 + 真 CLI + 真 `$GITHUB_OUTPUT`）：工作区造假回归 ⇒ **rc=1**、`regressed=1`、
+  JSON 里点名 `suppressive_rule`；与基线一致 ⇒ **rc=0**；新增文件 ⇒ **rc=0 且 `skipped=1`**（并打印"不计入通过"）；
+  空 `paths` / `origin/nope` ⇒ **rc=2** 且给人话。取证脚本与日志存 `research-reports/.../raw/smoke-action-gate.{sh,log}`。
+- 抄件守卫：`test_packaging` / `test_check_command` / `test_mcp_server` / `test_ci_gate_matrix` /
+  `test_precommit_gate_set` / `test_skill_package` 六文件 **97 passed**（用例数抄件 4 处 **2141 → 2156** 已同步；
+  SKILL.md 已进 MCP 工具数抄件表）。
+- 静态：`ruff check` 与 `ruff format --check`（CI 同路径：`pm/ tests/ extras/ tests_extras/ run.py run_server.py examples/ eval_prompts.py`）、
+  `mypy pm/ extras/ run.py run_server.py eval_prompts.py` 全绿。
+- PyPI 路径：`scripts/release_pypi.py --check` ⇒ **RC=0、产物校验通过**（wheel 522,956 B / sdist 1,052,788 B，sha256 已记）。
+
+### 未做 / 未验（明说）
+
+- **PyPI 未上传**：`--upload` 要 owner 机器上的 `PYPI_TOKEN` 与 `v2.3.0` tag（版本不可撤回，不该由我代按）。
+- **Action 未在真 GitHub Runner 上跑过**：本机 bash（Git for Windows 5.3）端到端已跑通，runner 侧未验 ⇒
+  不把"CI 里能用"写成已验证。
+- **技能市场未真正发布**：清单已就位，"被市场索引/被用户装上"是外部动作，本轮不可自证。
+- 顺带记一条与本轮无关、但**会到期**的账：`python -m build` 警告 `project.license` 用 TOML 表写法
+  **在 2027-02-18 后不再被 setuptools 支持**（本轮未改，留痕给发版的人）。
+
+### 检修（同日复审：按"哪条守卫可以被绕过 / 哪句话是错的"去查，不重跑已绿的用例）
+
+找到 **5 处真缺陷**，全部已修，并各补了钉住它的用例（+4 条，其中一条是"改了报错口径"）：
+
+1. **守卫自己的洞（最该记的一条）**：`test_action_only_calls_zero_call_subcommands` 只扫
+   `action.yml` 的 `run:`，而那里只有一行 `bash …/action-prompt-gate.sh` —— 真正决定跑什么的是脚本正文。
+   ⇒ 往 `action-prompt-gate.sh` 里加一句 `$PM_CLI --task …`，**没有任何用例会红**，"零调用"当时只是一句注释。
+   修：两处都扫；并用正则取出脚本**实际调用**的子命令集合，要求它 ⊆ 零调用白名单（`check/diff/gate/doctor/history/calibrate/library`）。
+2. **基线可能"比对自己"⇒ 假绿**：执行体的自动探测候选表是 `origin/HEAD → origin/main → origin/master → HEAD~1`，
+   **没有"跳过等于 HEAD 的候选"这条规矩**。而 `pm/promptgate.py::resolve_base` 在 **2026-10-02** 记过同款真实缺陷
+   （单提交仓库里 `master` 能解析且就是 HEAD ⇒ diff 恒为"没有改动" ⇒ 门禁静默通过，"长得像一次成功的检查"）。
+   修：候选表与规矩都对齐 `gate`（`origin/main → origin/master → main → master → HEAD~1`，跳过 ==HEAD，
+   显式给 HEAD 仍放行）；另按 `gate` 的 rc=3 口径补 **全零 SHA = 新分支首次推送**（放行 + 横幅 + 明写"未做判定"，
+   且那批文件计 `skipped` 不计 `checked`）。
+   ⚠️ **我第一版写的那条"自动探测"用例，正是拿"HEAD == origin/main"当成功路径** —— 它会把这个假绿锁死
+   （用例能锁死缺陷，不只是发现缺陷）。已改成"HEAD 严格晚于 origin/main"，并把"候选全等于 HEAD 必须退 2"单独立一条。
+3. **文档把人指向错命令**：`gate` 的对象是 Python 模块里的「全大写 = 字符串常量」模板（默认 `pm/prompts.py`），
+   而 README 入口表写着 `diff --base-ref …`（或 `run.py gate`）—— 实测 `run.py gate --path prompts/p.md` ⇒
+   **rc=2「源码无法解析（invalid character '。'）」**，再被 gatecmd 前缀一句"这是门禁自己坏了"，
+   用户读到的结论是"工具坏了"。修：README 中/英入口表去掉那个"或"、能力表给 `gate` 标注对象与出路；
+   SKILL.md 同步；并把 `extract_templates` 的报错改成**带出路**（"markdown 请改用 `diff --base-ref`"）+ 1 条用例。
+4. **守卫的假阳性**：禁用词扫描把执行体头部注释里"不做的事（有意）：不跑计费闭环（没有 `--task` / `submit`）"
+   读成了违规。修：只扫**会执行的行**（去掉整行注释）—— 注释恰恰是这套判断的说明书，不该删。
+5. **小项两处**：① 克隆出来的仓库不带提交身份 ⇒ 用例 `git commit` rc=128 假红（补 `_configure_identity`）；
+   ② 三条安装命令补 `--skill prompt-master`（对齐 Cloudflare 那份在用技能的写法）。
+   另把"插件清单版本拷贝"的断言从技能模块**迁进** `tests/test_version_single_source.py`（版本纪律只该有一个家），
+   并在 `test_no_new_hardcoded_version_literals` 的 docstring 里写明扫描范围为何不含那份 JSON。
+
+**检修后的复验**：全量 **2155 passed / 1 skipped / 0 failed**；`ruff` / `format --check` / `mypy --strict` 全绿；
+独立冒烟（不经 pytest）五条路径复跑：回归 rc=1、干净 rc=0、新增文件 rc=0、空 paths rc=2、坏 ref rc=2 —— **与修前一致**（没把修好的东西改坏）。
+
+### 诚实边界
+
+本轮不改评分协议、不跑真端点，因此**不产生任何效果结论**；13 条守卫钉的是**分发件的形状**
+（frontmatter 合法 / 市场条目闭合 / 版本同源 / Action 只调零调用子命令且输出对得上），不是产品能力。
+"装了技能就能用好"这句话本轮**没有证据**，只有"装得上、形状对、门禁拦得住真回归"这三件。

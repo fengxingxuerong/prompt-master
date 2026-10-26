@@ -779,3 +779,28 @@ def test_render_text_surfaces_names_of_new_and_removed_templates(tmp_path):
     assert "OLD_SYS" in joined_notes, "删除的模板没被点名"
     assert "NEW_SYS" in out and "OLD_SYS" in out, "点名的信息没有渲染到人读输出里"
     assert "没有基线可比" in out
+
+
+# --------------------------------------------------------------------------
+# 2026-10-26 检修：把 markdown 喂给 gate 时，报错必须指出出路
+# --------------------------------------------------------------------------
+def test_gate_on_a_markdown_target_names_the_way_out(tmp_path):
+    """`gate` 只吃 Python 模板；喂 markdown 时必须说清"该换哪条命令"。
+
+    起因（本轮实测，不是推测）：`run.py gate --path prompts/p.md`（一份正常的 markdown 提示词）
+    走到 `extract_templates` 的 `ast.parse` 就炸，报的是
+    `源码无法解析（invalid character '。' (U+3002)，第 1 行）`，而 gatecmd 又会前缀一句
+    "这是门禁自己坏了，不是「提示词有回归」" —— 用户读到的结论是**工具坏了**，
+    真相是**用错命令**。README 的入口表当时也把 `gate` 写成了 `diff --base-ref` 的等价物，
+    于是这条错路是被文档指过去的。⇒ 报错里必须带 `diff --base-ref` 这个出路。
+    """
+    target = tmp_path / "prompts"
+    target.mkdir()
+    (target / "p.md").write_text(CLEAN_BODY + "\n", encoding="utf-8")
+
+    with pytest.raises(GateError) as ei:
+        extract_templates((target / "p.md").read_text(encoding="utf-8"))
+    msg = str(ei.value)
+    assert "源码无法解析" in msg, "先保住「解析失败」这个事实，别把 SyntaxError 吞成别的"
+    assert "diff --base-ref" in msg, "报错必须给出路：markdown 提示词该用 diff --base-ref"
+    assert "pm/prompts.py" in msg, "顺带说清 gate 的对象是什么，免得下一个人再试一遍 md"

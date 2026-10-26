@@ -1,0 +1,790 @@
+﻿====================================================================================================
+A. 单仓坐标实测（基线 14 家 + 本仓）
+====================================================================================================
+  39241    +1,506  linshenkx/prompt-optimizer         NOASSERTION    push=2026-10-26 created=2025-02-12 issues=4
+         An AI prompt optimizer for writing better prompts and getting better A
+  38790      +189  stanfordnlp/dspy                   MIT            push=2026-10-25 created=2023-01-09 issues=830
+         DSPy: The framework for programming—not prompting—language models
+  36486      +785  langfuse/langfuse                  NOASSERTION    push=2026-10-26 created=2023-05-18 issues=1149
+         🪢 Open source agent evals & observability: Trace, evaluate, and improv
+  26429      +492  promptfoo/promptfoo                MIT            push=2026-10-26 created=2023-04-28 issues=860
+         Test your prompts, agents, and RAGs. Red teaming/pentesting/vulnerabil
+  22925      +395  comet-ml/opik                      Apache-2.0     push=2026-10-26 created=2023-05-10 issues=181
+         Debug, evaluate, and monitor your LLM applications, RAG systems, and a
+  19654       +63  openai/evals                       NOASSERTION    push=2026-04-14 created=2023-01-23 issues=350
+         Evals is a framework for evaluating LLMs and LLM systems, and an open-
+  19104      +334  confident-ai/deepeval              Apache-2.0     push=2026-10-23 created=2023-08-10 issues=782
+         The LLM Evaluation Framework
+   7148      +193  gepa-ai/gepa                       MIT            push=2026-10-22 created=2025-08-05 issues=136
+         Optimize prompts, code, and more with AI-powered Reflective Optimizati
+
+====================================================================================================
+B. 关键词搜索：prompt/eval 空间前列（star 降序，仅列前 25）
+====================================================================================================
+
+--- s1-prompt-optimization.json  (total_count=3735) ---
+   524753  sindresorhus/awesome                     push=2026-09-02 created=2014-07-11 lic=CC0-1.0
+           😎 Awesome lists about all kinds of interesting topics [NOTE: Pull requests are temporarily disabled until I ha
+   492187  public-apis/public-apis                  push=2026-10-24 created=2016-03-20 lic=MIT
+           A collective list of free APIs
+   330474  awesome-selfhosted/awesome-selfhosted    push=2026-10-22 created=2015-06-01 lic=NOASSERTION
+           A list of Free Software network services and web applications which can be hosted on your own servers
+   330299  vinta/awesome-python                     push=2026-10-26 created=2014-06-27 lic=NOASSERTION
+           The definitive list that answers "I want to do X in Python, which tool should I use?"
+   288977  affaan-m/ECC                             push=2026-10-26 created=2026-01-18 lic=MIT
+           The agent harness performance optimization system. Skills, instincts, memory, security, and research-first dev
+   194982  ultraworkers/claw-code                   push=2026-10-23 created=2026-03-31 lic=MIT
+           An agent-managed museum exhibit, built in Rust with Gajae-Code / LazyCodex — developed and maintained with no 
+   190381  avelino/awesome-go                       push=2026-10-23 created=2014-07-06 lic=MIT
+           A curated list of awesome Go frameworks, libraries and software
+   168167  huggingface/transformers                 push=2026-10-26 created=2018-10-29 lic=Apache-2.0
+           🤗 Transformers: the model-definition framework for state-of-the-art machine learning models in text, vision, a
+   165144  AUTOMATIC1111/stable-diffusion-webui     push=2026-03-02 created=2022-08-22 lic=AGPL-3.0
+           Stable Diffusion web UI
+   164047  msitarzewski/agency-agents               push=2026-10-25 created=2025-10-13 lic=MIT
+           A complete AI agency at your fingertips - From frontend wizards to Reddit community ninjas, from whimsy inject
+   148692  farion1231/cc-switch                     push=2026-10-26 created=2025-08-04 lic=MIT
+           A cross-platform desktop All-in-One assistant for Claude Code, Codex, OpenCode, OpenClaw, Grok Build & Hermes 
+   143070  Shubhamsaboo/awesome-llm-apps            push=2026-10-22 created=2024-04-29 lic=Apache-2.0
+           100+ AI Agents, Agent Skills and RAG Apps - Free and Open Source.
+   143005  Comfy-Org/ComfyUI                        push=2026-10-25 created=2023-01-17 lic=GPL-3.0
+           The most powerful and modular diffusion model GUI, api and backend with a graph/nodes interface. The fastest l
+   140047  ripienaar/free-for-dev                   push=2026-10-24 created=2015-03-18 lic=None
+           A list of SaaS, PaaS and IaaS offerings that have free tiers of interest to devops and infradev
+   123535  VoltAgent/awesome-design-md              push=2026-10-14 created=2026-03-31 lic=MIT
+           A collection of DESIGN.md files analysis by popular brand design systems. Drop one into your project and let c
+   119142  browser-use/browser-use                  push=2026-10-24 created=2024-10-31 lic=MIT
+           Open-source Python library for AI browser agents, plus Browser Use Cloud: stealth browsers and a hosted agent 
+   117041  jaywcjlove/awesome-mac                   push=2026-10-26 created=2016-07-17 lic=CC0-1.0
+            This project is dedicated to collecting high-quality macOS software and organizing them systematically by di
+   115092  JuliusBrussee/caveman                    push=2026-10-25 created=2026-04-04 lic=Apache-2.0
+           🪨 why use many token when few token do trick. Viral skill + proxy for coding agents that cuts 65% of tokens by
+   110556  addyosmani/agent-skills                  push=2026-10-13 created=2026-02-15 lic=MIT
+           Production-grade engineering skills for AI coding agents.
+   110133  fatedier/frp                             push=2026-10-23 created=2015-12-21 lic=Apache-2.0
+           A fast reverse proxy to help you expose a local server behind a NAT or firewall to the internet.
+   108388  google-gemini/gemini-cli                 push=2026-10-26 created=2025-04-17 lic=Apache-2.0
+           An open-source AI agent that brings the power of Gemini directly into your terminal.
+   104601  deepseek-ai/DeepSeek-V3                  push=2025-08-28 created=2024-12-26 lic=MIT
+           
+   103169  thedotmack/claude-mem                    push=2026-10-25 created=2025-08-31 lic=Apache-2.0
+           Persistent Context Across Sessions for Every Agent –  Captures everything your agent does during sessions, com
+    99618  ruvnet/RuView                            push=2026-10-26 created=2025-06-07 lic=MIT
+           π RuView turns commodity WiFi signals into real-time spatial intelligence, vital sign monitoring, and presence
+    98583  karpathy/autoresearch                    push=2026-03-26 created=2026-03-06 lic=None
+           AI agents running research on single-GPU nanochat training automatically
+
+--- s2-prompt-engineering.json  (total_count=69) ---
+    79528  dair-ai/Prompt-Engineering-Guide         push=2026-03-11 created=2022-12-16 lic=MIT
+           🐙 Guides, papers, lessons, notebooks and resources for prompt engineering, context engineering, RAG, and AI Ag
+    70334  code-yeongyu/oh-my-openagent             push=2026-10-26 created=2025-12-03 lic=NOASSERTION
+           OmO: Just type "mass ulw" keyword with your prompt. Now you are the master of graph engineering.
+    64221  gsd-build/get-shit-done                  push=2026-05-31 created=2025-12-14 lic=MIT
+           A light-weight and powerful meta-prompting, context engineering and spec-driven development system for Claude 
+    38750  anthropics/prompt-eng-interactive-tutorial push=2026-08-28 created=2024-04-02 lic=None
+           Anthropic's Interactive Prompt Engineering Tutorial
+    21610  liyupi/ai-guide                          push=2026-10-22 created=2025-02-13 lic=NOASSERTION
+           程序员鱼皮的 AI 资源大全 + Vibe Coding 零基础教程，分享 OpenClaw 保姆级教程、大模型玩法（DeepSeek / GPT / Gemini / Claude / GLM）、最新 AI 资讯、Pr
+    11629  cobusgreyling/loop-engineering           push=2026-10-26 created=2026-06-09 lic=MIT
+           Practical patterns, starters & CLI tools for loop engineering with AI coding agents. Design systems that promp
+    10368  ZeroLu/awesome-nanobanana-pro            push=2026-10-26 created=2025-11-10 lic=MIT
+           🚀 An awesome list of curated Nano Banana pro prompts and examples. Your go-to resource for mastering prompt en
+     9585  brexhq/prompt-engineering                push=2023-10-23 created=2023-04-21 lic=MIT
+           Tips and tricks for working with Large Language Models like OpenAI's GPT-4.
+     9264  jasontang-ai/Context-Engineering         push=2026-02-27 created=2025-06-29 lic=MIT
+           "Context engineering is the delicate art and science of filling the context window with just the right informa
+     9134  ai-boost/awesome-prompts                 push=2026-10-25 created=2024-01-19 lic=GPL-3.0
+           Curated list of chatgpt prompts from the top-rated GPTs in the GPTs Store. Prompt Engineering, prompt attack &
+     7915  NirDiamant/Prompt_Engineering            push=2026-10-24 created=2024-10-10 lic=NOASSERTION
+           22 prompt engineering techniques with hands-on Jupyter Notebook tutorials, from fundamental concepts to advanc
+     7762  gsd-build/gsd-2                          push=2026-05-22 created=2026-03-11 lic=MIT
+           A powerful meta-prompting, context engineering and spec-driven development system that enables agents to work 
+     6404  promptslab/Awesome-Prompt-Engineering    push=2026-10-25 created=2023-02-09 lic=Apache-2.0
+           This repository contains a hand-curated resources for Prompt Engineering with a focus on Generative Pre-traine
+     5774  microsoft/promptbase                     push=2024-06-04 created=2023-12-12 lic=MIT
+           All things prompt engineering
+     5302  thinkingjimmy/Learning-Prompt            push=2023-09-17 created=2023-03-06 lic=NOASSERTION
+           Free prompt engineering online course. ChatGPT and Midjourney tutorials are now included!
+     4740  trigaten/Learn_Prompting                 push=2025-01-14 created=2022-10-25 lic=NOASSERTION
+           Prompt Engineering, Generative AI, and LLM Guide by Learn Prompting | Join our discord for the largest Prompt 
+     4643  promptslab/Promptify                     push=2026-03-27 created=2022-12-12 lic=Apache-2.0
+           Prompt Engineering | Prompt Versioning | Use GPT or other prompt based models to get structured output. Join o
+     3967  Codium-ai/AlphaCodium                    push=2024-11-25 created=2024-01-14 lic=AGPL-3.0
+           Official implementation for the paper: "Code Generation with AlphaCodium: From Prompt Engineering to Flow Engi
+     3330  Meirtz/Awesome-Context-Engineering       push=2026-05-28 created=2025-07-02 lic=MIT
+            🔥 Comprehensive survey on Context Engineering: from prompt engineering to production-grade AI systems. hundre
+     2951  yaojingang/yao-open-prompts              push=2026-10-08 created=2026-05-06 lic=NOASSERTION
+           Practical bilingual AI prompt library for prompt engineering, work, learning, content, marketing, and everyday
+     2718  LearnPrompt/LearnPrompt                  push=2026-10-19 created=2023-04-23 lic=NOASSERTION
+           永久免费开源的 AIGC 课程, 目前已支持Claude Code，Codex，Hermes，OpenClaw，Obsidian，Prompt Engineering, ChatGPT, Midjourney, Runw
+     2389  prompt-engineering/click-prompt          push=2023-04-07 created=2023-03-03 lic=MIT
+           ClickPrompt - Streamline your prompt design, with ClickPrompt, you can easily view, share, and run these promp
+     2265  Wirasm/prp                               push=2026-10-02 created=2025-06-21 lic=MIT
+           Prompts, workflows and more for agentic engineering 
+     2248  EgoAlpha/prompt-in-context-learning      push=2026-10-26 created=2023-03-08 lic=MIT
+           Awesome resources for in-context learning and prompt engineering: Mastery of the LLMs such as ChatGPT, GPT-3, 
+     2136  YiVal/YiVal                              push=2024-04-22 created=2023-07-15 lic=Apache-2.0
+           Your Automatic Prompt Engineering Assistant for GenAI Applications
+
+--- s3-llm-evaluation.json  (total_count=3042) ---
+   492187  public-apis/public-apis                  push=2026-10-24 created=2016-03-20 lic=MIT
+           A collective list of free APIs
+   330474  awesome-selfhosted/awesome-selfhosted    push=2026-10-22 created=2015-06-01 lic=NOASSERTION
+           A list of Free Software network services and web applications which can be hosted on your own servers
+   330299  vinta/awesome-python                     push=2026-10-26 created=2014-06-27 lic=NOASSERTION
+           The definitive list that answers "I want to do X in Python, which tool should I use?"
+   288977  affaan-m/ECC                             push=2026-10-26 created=2026-01-18 lic=MIT
+           The agent harness performance optimization system. Skills, instincts, memory, security, and research-first dev
+   190381  avelino/awesome-go                       push=2026-10-23 created=2014-07-06 lic=MIT
+           A curated list of awesome Go frameworks, libraries and software
+   184781  ollama/ollama                            push=2026-10-26 created=2023-06-26 lic=MIT
+           Get up and running with Kimi, GLM, MiniMax, DeepSeek, gpt-oss, Qwen, Gemma and other models.
+   164047  msitarzewski/agency-agents               push=2026-10-25 created=2025-10-13 lic=MIT
+           A complete AI agency at your fingertips - From frontend wizards to Reddit community ninjas, from whimsy inject
+   148467  langchain-ai/langchain                   push=2026-10-25 created=2022-10-17 lic=MIT
+           The agent engineering platform.
+   143070  Shubhamsaboo/awesome-llm-apps            push=2026-10-22 created=2024-04-29 lic=Apache-2.0
+           100+ AI Agents, Agent Skills and RAG Apps - Free and Open Source.
+   140047  ripienaar/free-for-dev                   push=2026-10-24 created=2015-03-18 lic=None
+           A list of SaaS, PaaS and IaaS offerings that have free tiers of interest to devops and infradev
+   137738  garrytan/gstack                          push=2026-10-26 created=2026-03-11 lic=MIT
+           Use Garry Tan's exact Claude Code setup: 23 opinionated tools that serve as CEO, Designer, Eng Manager, Releas
+   114848  TauricResearch/TradingAgents             push=2026-10-16 created=2024-12-28 lic=Apache-2.0
+           TradingAgents: Multi-Agents LLM Financial Trading Framework
+   107286  rasbt/LLMs-from-scratch                  push=2026-10-02 created=2023-07-23 lic=NOASSERTION
+           Implement a ChatGPT-like LLM in PyTorch from scratch, step by step
+   104601  deepseek-ai/DeepSeek-V3                  push=2025-08-28 created=2024-12-26 lic=MIT
+           
+    99618  ruvnet/RuView                            push=2026-10-26 created=2025-06-07 lic=MIT
+           π RuView turns commodity WiFi signals into real-time spatial intelligence, vital sign monitoring, and presence
+    98583  karpathy/autoresearch                    push=2026-03-26 created=2026-03-06 lic=None
+           AI agents running research on single-GPU nanochat training automatically
+    96873  punkpeye/awesome-mcp-servers             push=2026-10-23 created=2024-11-30 lic=MIT
+           A collection of MCP servers.
+    92867  infiniflow/ragflow                       push=2026-10-26 created=2023-12-12 lic=Apache-2.0
+           RAGFlow is a leading open-source Retrieval-Augmented Generation (RAG) engine that fuses cutting-edge RAG with 
+    91957  deepseek-ai/DeepSeek-R1                  push=2025-06-27 created=2025-01-20 lic=MIT
+           
+    91665  PaddlePaddle/PaddleOCR                   push=2026-09-16 created=2020-05-08 lic=Apache-2.0
+           Turn any PDF or image document into structured data for your AI. A powerful, lightweight OCR toolkit that brid
+    91564  modelcontextprotocol/servers             push=2026-10-25 created=2024-11-19 lic=NOASSERTION
+           Model Context Protocol Servers
+    90722  MunGell/awesome-for-beginners            push=2026-10-01 created=2015-10-24 lic=None
+           A list of awesome beginners-friendly projects.
+    84699  mlabonne/llm-course                      push=2026-02-05 created=2023-06-17 lic=Apache-2.0
+           Course to get into Large Language Models (LLMs) with roadmaps and Colab notebooks.
+    84425  bytedance/deer-flow                      push=2026-10-26 created=2025-05-07 lic=MIT
+           An open-source long-horizon SuperAgent harness that researches, codes, and creates. With the help of sandboxes
+    84150  fighting41love/funNLP                    push=2024-05-10 created=2018-08-21 lic=None
+           中英文敏感词、语言检测、中外手机/电话归属地/运营商查询、名字推断性别、手机号抽取、身份证抽取、邮箱抽取、中日文人名库、中文缩写库、拆字词典、词汇情感值、停用词、反动词表、暴恐词表、繁简体转换、英文模拟中文发音、汪峰歌词
+
+--- s4-evals-benchmark.json  (total_count=9) ---
+    19654  openai/evals                             push=2026-04-14 created=2023-01-23 lic=NOASSERTION
+           Evals is a framework for evaluating LLMs and LLM systems, and an open-source registry of benchmarks.
+     3589  modelscope/evalscope                     push=2026-10-26 created=2023-12-07 lic=Apache-2.0
+           A streamlined and customizable framework for efficient large model (LLM, VLM, AIGC) evaluation and performance
+     1011  benchflow-ai/awesome-evals               push=2026-10-25 created=2026-06-24 lic=NOASSERTION
+           A curated, non-BS library of the best resources for building and evaluating AI agents — papers, blogs, talks, 
+      705  robocurve/inspect-robots                 push=2026-10-26 created=2026-06-26 lic=MIT
+           Open source evals for physical AI. Run any LLM/VLA on any arm/humanoid against any real/sim benchmark.
+      659  onejune2018/Awesome-LLM-Eval             push=2025-11-24 created=2023-04-26 lic=MIT
+           Awesome-LLM-Eval: a curated list of tools, datasets/benchmark, demos, leaderboard, papers, docs and models, ma
+      432  abacaj/code-eval                         push=2023-09-12 created=2023-07-01 lic=MIT
+           Run evaluation on LLMs using human-eval benchmark
+      412  TheDesignFounder/DreamLayer-Eval         push=2026-09-09 created=2025-06-22 lic=GPL-3.0
+           DreamLayer Eval: open-source benchmarking for image and video diffusion models. Automate prompts, seeds, and m
+      407  OpenLMLab/LEval                          push=2024-07-09 created=2023-07-12 lic=GPL-3.0
+           [ACL'24 Outstanding] Data and code for L-Eval, a comprehensive long context language models evaluation benchma
+      304  ktwu01/benchmark-radar                   push=2026-10-26 created=2026-07-27 lic=MIT
+           Track 33,707+ AI benchmark, eval, dataset, and data-quality records from 40 public sources, with linked eviden
+
+====================================================================================================
+C. 近一月新建（created>2026-09-26, stars>30）
+====================================================================================================
+total_count=7030
+   72926  storytold/photocraft                       created=2026-09-30 push=2026-10-26
+          PhotoCraft: An open-source, photo editor written by scratch in pure Rust
+   35970  Gathin23/cleanyourtv                       created=2026-10-17 push=2026-10-26
+          Debloat any Android or Google TV over Wi-Fi and get an Apple TV-style home.
+   22565  deepseek-ai/DeepInfer                      created=2026-10-16 push=2026-10-25
+          DeepInfer: High-performance, large-scale inference framework for DeepSeek models
+   20698  wheresryan22/anatomy                       created=2026-10-08 push=2026-10-18
+          An agent skill for creating detailed, interactive isometric illustrations of real-world machines and complex s
+   19749  google-research/harness2                   created=2026-10-06 push=2026-10-14
+          
+   17874  storytold/pdfcraft                         created=2026-09-30 push=2026-10-26
+          PdfCraft: An open-source PDF reader and editor written by scratch in pure Rust
+   16304  storytold/filmcraft                        created=2026-09-30 push=2026-10-26
+          FilmCraft: An open-source, nonlinear video editor written by scratch in pure Rust
+   16078  storytold/wordcraft                        created=2026-10-07 push=2026-10-26
+          An open-source, clean-room reimplementation of Microsoft Word in pure Rust
+   15511  openai/math                                created=2026-10-06 push=2026-10-12
+          
+   14665  storytold/lightcraft                       created=2026-09-30 push=2026-10-26
+          LightCraft: An open-source non-destructive photo editor written by scratch in pure Rust
+   12421  KnifeLemon/Filee                           created=2026-09-29 push=2026-10-26
+          Free, open-source file converter. Convert 263 formats offline by drag & drop — images, PDF, Word, Excel, Power
+   11172  yihui-dev/awesome-opus5-5-videos           created=2026-09-27 push=2026-10-13
+          A growing collection of viral videos made with Claude Opus 5.5 and the prompts behind them. Watch each origina
+   10691  storytold/vectorcraft                      created=2026-09-30 push=2026-10-26
+          VectorCraft: An open-source, vector art tool written by scratch in pure Rust
+   10529  tangency-labs/solidcraft                   created=2026-10-07 push=2026-10-26
+          SolidCraft: an open-source parametric 3D CAD application built in pure Rust. Desktop, web, and automation thro
+    8963  rehan-remade/universal-modder              created=2026-09-30 push=2026-10-26
+          Point Claude at any game. Skills, tools and the fal MCP that let Claude Code mod almost any PC game you own: r
+    8617  KKKKhazix/AIHOT                            created=2026-09-28 push=2026-10-24
+          一个自己找热点、自己写日报的网站框架。把信源和精选标准换成你的，它就是你的行业热点站。
+    7904  storytold/effectcraft                      created=2026-10-01 push=2026-10-26
+          EffectCraft: An open-source motion graphics and compositing tool written by scratch in pure Rust
+    7356  Zagitta/gpu-unlock                         created=2026-10-18 push=2026-10-24
+          Unlock FP/BF16 instruction issue rate on Nvidia 3000's cards to their professional equivalents
+    6824  storytold/cadcraft                         created=2026-10-07 push=2026-10-26
+          CADCraft: computer-aided design and drafting — an open-source, clean-room AutoCAD-style app in pure Rust
+    6530  storytold/gridcraft                        created=2026-10-07 push=2026-10-26
+          GridCraft: an open-source, clean-room spreadsheet (Microsoft Excel-style) in pure Rust. By ArtCraft.
+    6461  Louis-CFM/coucou                           created=2026-09-27 push=2026-10-23
+          A tiny friend in your Mac's notch and on your iPhone that keeps an eye on your AI coding agents: Claude Code, 
+    6012  CopilotKit/OpenDots                        created=2026-09-29 push=2026-10-22
+          Your always-on AI coworkers that move between text, calls, and Slack.
+    5798  ARahim3/DigUp                              created=2026-10-08 push=2026-10-22
+          Search your computer by what's in your files: photos, PDFs, documents, recordings, videos and code. On-device 
+    5537  ly05010419/MacNativeGames                  created=2026-10-17 push=2026-10-26
+          Play your own Tears of the Kingdom and Breath of the Wild natively on Apple silicon Mac, iPhone and iPad. Not 
+    5519  Jakeschincariol/replica-skill              created=2026-10-03 push=2026-10-03
+          Eleven free Claude skills that clone any app: reverse-engineer it, rebuild it, test it for bugs, then fix what
+    5477  shader-effects-inc/shaders                 created=2026-09-29 push=2026-10-21
+          WebGPU components for React, Vue, Svelte, Solid, JS & Framer
+    5272  pengchujin/aerial-tv                       created=2026-10-20 push=2026-10-26
+          给国产电视的一块干净桌面：参照 tvOS 设计的开源 Android TV 桌面，没有广告，开机自动接管。A tvOS-style launcher for Xiaomi, TCL and other China-mar
+    5256  omlahore/RemoveMacAI                       created=2026-09-29 push=2026-10-25
+          Debloat macOS: turn off Apple Intelligence, analytics, ads and pop-ups. A native app and CLI, and every change
+    5211  alchaincyf/huashu-art-motion               created=2026-10-06 push=2026-10-16
+          艺术动画skill：35种艺术风格、9种解说语法，用代码让画动起来。
+    4790  storytold/designcraft                      created=2026-10-01 push=2026-10-26
+          DesignCraft: An open-source page and layout design editor written by scratch in pure Rust
+    4652  simbasjungles/free-my-tv                   created=2026-10-19 push=2026-10-25
+          A fast, ad-free home screen for Google TV, LG webOS and Samsung Tizen. One button to undo.
+    4649  zhongerxin/iPhone-use                      created=2026-10-06 push=2026-10-22
+          让 Codex 通过 USB 操作真实 iPhone：引导安装、App 自动化、实时屏幕与截图回退。
+    4647  jhaizhou-ops/d2r-mobile                    created=2026-10-12 push=2026-10-23
+          Open-source compatibility layer for Diablo II: Resurrected with the Reign of the Warlock expansion. Runs your 
+    4531  seedds/nxnative                            created=2026-10-13 push=2026-10-26
+          Switch games running natively on iPhone, iPad and Mac: an NSP folder becomes an unsigned IPA (NSO rewriter, Ho
+    4453  QingYunA/answer-me-with-html               created=2026-10-02 push=2026-10-26
+          Answer me with HTML — an agent skill that answers hard questions with a one-page HTML you can actually read. 让
+    4323  T-Auto/dsh-ops                             created=2026-10-08 push=2026-10-25
+          A toolkit for low-level operations in DSH, designed to reduce token usage and task execution time / DSH 底层操作工具
+    4273  storytold/deckcraft                        created=2026-10-07 push=2026-10-26
+          Presentations and slide shows: an open-source, clean-room reimplementation of Microsoft PowerPoint in pure Rus
+    4073  storytold/craft-launcher                   created=2026-10-09 push=2026-10-26
+          The Craft App Launcher
+    3963  nykooi1/vibe-wise                          created=2026-09-29 push=2026-10-09
+          A Claude Code / Codex plugin that helps you learn how to build while AI writes the code.
+    3962  Fei2411/DS-Bot                             created=2026-10-07 push=2026-10-25
+          A team of long-lived bots for DeepSeek Harness, with main bots, bot-to-bot messages and group chats.
+    3900  onehumanbeing/esp32-iphone-agent           created=2026-10-11 push=2026-10-22
+          Let an AI model use a real iPhone with a $7 ESP32: AirPlay eyes, USB HID hands, any OpenAI-compatible vision m
+    3889  HeyPuter/everything                        created=2026-10-13 push=2026-10-26
+          We're rebuilding and open-sourcing the world’s software from scratch.
+    3831  xiaoyang111222/cn-math-taxonomy            created=2026-10-18 push=2026-10-26
+          数学（小学到高中）、英语（三年级到高中）、初中物理的知识图谱：1644 个知识点、2403 条先修边、6723 道题，对齐课标，附自适应前置诊断。
+    3765  storytold/soundcraft                       created=2026-10-07 push=2026-10-26
+          An open-source, clean-room reimplementation of Avid Pro Tools in pure Rust
+    3748  nullmoth/nvidia-macos-driver               created=2026-10-07 push=2026-10-25
+          Metal driver for NVIDIA GeForce cards on macOS Sequoia
+    3730  Arekejoker/qwen21-nsfw-pose-skill          created=2026-10-13 push=2026-10-20
+          Qwen-Image 2.1 NSFW/姿势出图 skill：作者级提示词配方 + NSFW LoRA + 136 姿势 VNCCS 人偶控制；适用 Claude Code / Codex / Cursor / Open
+    3665  Folkbench/folkbench                        created=2026-10-02 push=2026-10-25
+          AI API 中转站评测排行与切换工具：实测可用率、延迟与价格 · Open-source AI API relay benchmark, rankings & switcher for Claude Code / Co
+    3624  deadinside28/bloodborne_pc                 created=2026-10-01 push=2026-10-19
+          
+    3558  obsidianmd/pele                            created=2026-10-05 push=2026-10-24
+          Renders Mermaid diagrams faster than you'd run from a volcano! 🌋 
+    3494  BlueHeisenberg/SCSKiller                   created=2026-09-29 push=2026-10-22
+          Kill shader compilation stutter before you play. Compiles your games' shaders into the GPU driver's cache ahea
+    3490  storytold/figcraft                         created=2026-10-09 push=2026-10-26
+          FigCraft: interface design and prototyping; an open-source, clean-room reimplementation of collaborative desig
+    3065  t4t5/owly                                  created=2026-10-08 push=2026-10-24
+          airdrop for non-apple devices
+    3055  liseami/CCBaga                             created=2026-10-11 push=2026-10-25
+          
+    2994  JustAResearcher/gpu-unlock-ada             created=2026-10-23 push=2026-10-26
+          GPU tensor unlock source for RTX 4090 and experimental RTX 4070 Ti SUPER; firmware generated locally
+    2955  lucasmarkes/hairline                       created=2026-10-01 push=2026-10-14
+          Isometric line figures that answer the pointer. For React and for anything with a DOM.
+    2889  KingKongRobotics/jumper                    created=2026-09-28 push=2026-10-19
+          🦀 Jumper — an crab robot.
+    2862  openfilm/openfilm                          created=2026-10-04 push=2026-10-26
+          The open source AI video agent: turns any coding agent into a video agent, with an editor to change anything i
+    2860  wy51ai/floorplan-3d                        created=2026-09-29 push=2026-10-02
+          
+    2813  Leonxlnx/earshot                           created=2026-10-15 push=2026-10-22
+          Ears for coding agents: let AI hear, review and make sound. CPU-only, open source.
+    2624  aicodeking/leanrea                         created=2026-10-17 push=2026-10-19
+          One 8 KB skill that replaces REA (Reverse Engineer Anything): plain CLI tools, no MCP. Benchmarked: 38% faster
+
+====================================================================================================
+D. 本周新建（created>2026-10-19, stars>5）
+====================================================================================================
+total_count=3683
+    5273  pengchujin/aerial-tv                       created=2026-10-20 push=2026-10-26
+          给国产电视的一块干净桌面：参照 tvOS 设计的开源 Android TV 桌面，没有广告，开机自动接管。A tvOS-style launcher for Xiaomi, TCL and other China-mar
+    2994  JustAResearcher/gpu-unlock-ada             created=2026-10-23 push=2026-10-26
+          GPU tensor unlock source for RTX 4090 and experimental RTX 4070 Ti SUPER; firmware generated locally
+    1962  xevrion/hatchzip                           created=2026-10-21 push=2026-10-25
+          HatchZip is a free, open-source archive extractor for Windows, macOS and Linux that extracts ZIP, 7z, RAR, tar
+    1957  wesbos/3d-model-anything                   created=2026-10-21 push=2026-10-22
+          Capture iPhone LiDAR and photos, reconstruct editable Three.js rooms, and explore them in a browser.
+    1799  ikow/php2shell-poc                         created=2026-10-21 push=2026-10-22
+          CVE-2026-109618/109619 — 5 RCE chains + detection rules (Suricata, Sigma, ModSecurity). PHP session.upload_pro
+    1709  Jakeschincariol/day-trader-skill           created=2026-10-20 push=2026-10-20
+          11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, an
+    1490  oosexgang/hackios-xnu-kernel               created=2026-10-22 push=2026-10-26
+          
+    1443  9bie/php2shell-bypass-aslr-exp             created=2026-10-21 push=2026-10-23
+          A php2shell exploit that requires no modifications to the official version, and does not require display_error
+    1403  openai/php2shell-checker                   created=2026-10-21 push=2026-10-22
+          
+    1269  colinhacks/reylo                           created=2026-10-21 push=2026-10-25
+          Import .sql files into TypeScript with full type inference and zero codegen.
+    1057  rddmwmddr/android-ad-cleaner               created=2026-10-24 push=2026-10-25
+          关掉国产安卓手机系统里的广告、热搜、资讯推荐和营销推送。不 root，可还原，支持 AI 智能体一键执行。
+    1010  eness/php2shell-CVE-2026-109618-CVE-2026-109619-PoC created=2026-10-21 push=2026-10-22
+          Proof-of-Concept (PoC) exploit for php2shell (CVE-2026-109618 / CVE-2026-109619), demonstrating remote code ex
+     992  eagle-hq/EAGLE-4                           created=2026-10-20 push=2026-10-24
+          Official Inference Code of EAGLE-4
+     950  Snapintosh/Snapintosh                      created=2026-10-22 push=2026-10-25
+          EL2 hypervisor and toolchain that boots macOS on the ASUS A16 (Snapdragon X2 Elite), with an Adreno Metal/IOGP
+     908  assetnote/php2shell-scanner                created=2026-10-22 push=2026-10-24
+          High fidelity scanner for php2shell (CVE-2026-109618 and CVE-2026-109619)
+     860  designfuchen/word-atlas                    created=2026-10-25 push=2026-10-26
+          词光 · 一词一画，点亮雅思 — 7,298 IELTS words, each with an original illustration, UK/US audio, 14,596 example sentences 
+     844  morganlinton/BeautifulRust                 created=2026-10-23 push=2026-10-26
+          A Claude Code plugin that teaches Claude to write idiomatic, robust Rust
+     838  lyramakesmusic/neuron-explorer             created=2026-10-21 push=2026-10-24
+          Steering-first neuron explorer for Qwen3.5-4B: push every MLP neuron, keep every rollout, browse the results
+     661  NVIDIA/flare-local-inference               created=2026-10-20 push=2026-10-26
+          
+     626  udhaykumarbala/cleanyourtv-app             created=2026-10-21 push=2026-10-25
+          A community-built phone app for Clean Your TV: clean up an Android TV from your phone. No laptop, no coding ag
+     625  dominikmartn/harp                          created=2026-10-20 push=2026-10-21
+          Run many Claude Code and Codex agents side by side, in one sidebar that tells you which one needs you. An unof
+     624  nthnclrk/CleanFrame                        created=2026-10-20 push=2026-10-20
+          A personal home screen for Samsung The Frame. A starting point to fork and adapt.
+     611  mizorewww/gdirect                          created=2026-10-25 push=2026-10-26
+          Rust Google Drive direct downloader using pinned libaria2
+     604  torrentplayer/torrentplayer                created=2026-10-20 push=2026-10-24
+          Stream any torrent, video or audio, and skip to any moment in about a second. Free, open-source desktop app fo
+     556  zita-ch/supermimic_vibed                   created=2026-10-21 push=2026-10-21
+          vibe coded supermimic within 1h, LAFAN passed within 1.5 gpuh training
+     552  DenisSergeevitch/ex-ussr-kinship-research  created=2026-10-25 push=2026-10-25
+          Evidence-first genealogy skill for AI agents (Codex, Claude Code): church books, civil, military, deportation 
+     547  enesozturk/dimensional-drawing             created=2026-10-23 push=2026-10-24
+          
+     513  raymondchins/Bridgeplay                    created=2026-10-20 push=2026-10-26
+          Free fork of NotProton: Windows Steam games in Mac Steam, on CodeWeavers' Wine and Apple's Game Porting Toolki
+     494  rossark0/rossark-motion-skill              created=2026-10-22 push=2026-10-22
+          Turn any SVG into a professional 60 fps animation. A Claude Code skill that brings anything drawn to life: liv
+     487  lesnolie/Tigris                            created=2026-10-20 push=2026-10-26
+          Tigris — tvOS 27 style launcher for Android TV: Liquid Glass dock, Top Shelf, glass Control Center, photo scre
+     487  Alejandros17487/ai-jailbreaks              created=2026-10-21 push=2026-10-21
+          AI jailbreaks: 35 paste-ready AI jailbreak prompts for 25+ frontier and open-weight models - system prompts, A
+     482  LNPANDY/NX2Apple                           created=2026-10-20 push=2026-10-25
+          Play your own Switch games on iPhone/iPad — one-click macOS app, no terminal. | 把 Switch 游戏装进 iPhone：图形界面一键构建，
+     453  unclebob/ub-mode                           created=2026-10-25 push=2026-10-25
+          
+     440  WoYun520/dsh-purge                         created=2026-10-21 push=2026-10-21
+          DeepSeek Harness 破甲 (mirror of mmparko/dsh-purge) — 全量镜像：全部分支/100 个 tag/完整提交历史。原作者署名见 README。
+     429  impacifist/Windows-GPU-UNLOCK              created=2026-10-20 push=2026-10-25
+          Windows GPU UNLOCK: RTX3090 UEFI port, Korean no-reset Windows boot guide, verified source and benchmark evide
+     425  songjianyang/xss-audit                     created=2026-10-24 push=2026-10-24
+          Static XSS audit skill with 14 layers of checks for React, TypeScript, and JavaScript projects.
+     425  Release-DLSS-5-Swapper/.github             created=2026-10-24 push=2026-10-25
+          DLSS 5 Swapper is a graphics configuration utility intended to help PC gamers manage supported rendering compo
+     409  surendrapandar/minilytics                  created=2026-10-23 push=2026-10-25
+          Opensource Revenue-first analytics for indie hackers & solo founders 
+     408  SmokeProduction/DLSS5-Unlocker             created=2026-10-22 push=2026-10-26
+          Unlock and manage DLSS 5 on any NVIDIA or AMD graphics card. The ultimate one-click frame generation tool.
+     407  wangrongding/tv-fresh                      created=2026-10-24 push=2026-10-25
+          tv-fresh 电视焕新：小米电视(MIUI TV)去广告/清理预装/换桌面/装代理与影视仓的 Agent Skill——免root可逆，含固件逆向实录与一键脚本
+     398  mirkobrombin/raven                         created=2026-10-24 push=2026-10-25
+          A Windows your apps recognize.
+     390  jss8649/quiet-tizen                        created=2026-10-20 push=2026-10-20
+          Native Quiet Home launcher, reversible cleanup tools, and an agent-readable guide for the Samsung U8000F runni
+     383  routerhubSI/glm-5.3-abliterated            created=2026-10-24 push=2026-10-24
+          GLM 5.3 abliterated or uncensored API access with RouterHub. Browse 35 jailbreak prompt links, compare GLM mod
+     383  oosexgang/hackios-xnu-userland             created=2026-10-22 push=2026-10-25
+          
+     377  actionow-ai/vvv                            created=2026-10-22 push=2026-10-25
+          Build a video template once, reuse it across coding agents. Editable Remotion templates and an Agent Skill for
+     365  routerhubSI/uncensored-ai-api              created=2026-10-24 push=2026-10-24
+          Uncensored AI API and models — one key for Claude, GPT, Gemini, Grok, DeepSeek, GLM and Qwen, with uncensored 
+     361  mrdoob/slop-newyork                        created=2026-10-20 push=2026-10-26
+          
+     357  misshexa66/OunceCake                       created=2026-10-25 push=2026-10-25
+          Tool to dump unencrypted romFS and exeFS for Switch 2 games
+     353  zengshuangzi/mcd-money-saver               created=2026-10-22 push=2026-10-23
+          基于麦当劳MCP的智能省钱助手
+     305  david-silvalab1993i0/Roblox-Aimbot-Smooth-Tracking-Auto-Aim-Script-2026 created=2026-10-22 push=2026-10-22
+          High-performance Roblox aimbot with adaptive smooth tracking and precise auto aim. Fully configurable, works w
+     300  atbfun/ATBGamePort                         created=2026-10-21 push=2026-10-22
+          Transplant all the games to the web platform
+     299  agharsallah/esp-labs-web                   created=2026-10-21 push=2026-10-26
+          The ESP32-S3 bench guide as a React app: live pinout, lessons with interactive simulators, a code reader for t
+     297  NCSC-NL/php2shell                          created=2026-10-21 push=2026-10-26
+          Operational information regarding the 2026 php2shell vulnerabilities  
+     294  JMS1717/ming-voice                         created=2026-10-21 push=2026-10-26
+          Low-latency local speech-to-speech voice assistant with Ming-3.0-audio-tiny on AMD and Nvidia GPUs. Easy setup
+     289  quanhoangindex/ascii-reveal                created=2026-10-21 push=2026-10-24
+          
+     270  qianshuixia/shrimpreel                     created=2026-10-20 push=2026-10-25
+          Open-source template for "one photo → AI video that follows a viral template" SaaS sites, one site per trendin
+     266  helloianneo/ian-xhs-carousel               created=2026-10-21 push=2026-10-21
+          把文章、案例或笔记排成 3:4 小红书图文 | 1080×1440 | 20 个母版 | 浅色 / 深色 | Claude Code Skill
+     266  lovisdotio/motion2code                     created=2026-10-20 push=2026-10-20
+          Skills for coding agents: rebuild a motion design video as looping SVG + GSAP code, checked frame by frame aga
+     265  h563k/chat-keeper                          created=2026-10-20 push=2026-10-21
+          chat-keeper专注于提供Claude镜像站 提供了1:1还原官网的体验，国内直连可用
+     259  appariciojunior/video-editor-skills        created=2026-10-23 push=2026-10-23
+          Skills that teach Claude Code to be a first-pass video editor in DaVinci Resolve: transcript cuts, vlog pacing
+
+====================================================================================================
+E. 本周有推送的高星 llm 仓（pushed>2026-10-19, stars>2000）
+====================================================================================================
+total_count=438
+   385842  morluto/rea                              push=2026-10-25
+          Reverse engineer anything with agents, from app behavior down to native binaries.
+   288977  affaan-m/ECC                             push=2026-10-26
+          The agent harness performance optimization system. Skills, instincts, memory, security, and research-first dev
+   257111  NousResearch/hermes-agent                push=2026-10-26
+          The agent that grows with you
+   195386  firecrawl/firecrawl                      push=2026-10-26
+          Supercharge your AI agents with data from the web and beyond. Building the library for superintelligence. 🔥
+   187750  Significant-Gravitas/AutoGPT             push=2026-10-26
+          AutoGPT is the vision of accessible AI for everyone, to use and to build on. Our mission is to provide the too
+   184781  ollama/ollama                            push=2026-10-26
+          Get up and running with Kimi, GLM, MiniMax, DeepSeek, gpt-oss, Qwen, Gemma and other models.
+   174577  f/prompts.chat                           push=2026-10-26
+          f.k.a. Awesome ChatGPT Prompts. Share, discover, and collect prompts from the community. Free and open source 
+   168167  huggingface/transformers                 push=2026-10-26
+          🤗 Transformers: the model-definition framework for state-of-the-art machine learning models in text, vision, a
+   159544  langgenius/dify                          push=2026-10-26
+          Build Agentic workflows, RAG pipelines, with rich AI model and tool support on one collaborative workspace. De
+   156766  open-webui/open-webui                    push=2026-10-25
+          User-friendly AI Interface (Supports Ollama, OpenAI API, ...)
+   148467  langchain-ai/langchain                   push=2026-10-25
+          The agent engineering platform.
+   135428  Graphify-Labs/graphify                   push=2026-10-23
+          Turn any codebase, with its docs, SQL schemas, configs, and PDFs, into a queryable knowledge graph. A /graphif
+   135172  harry0703/MoneyPrinterTurbo              push=2026-10-25
+          利用 AI 大模型和自动化工作流，根据主题或关键词一键生成高清短视频。Generate HD short videos from a topic or keyword with an automated AI workf
+   119142  browser-use/browser-use                  push=2026-10-24
+          Open-source Python library for AI browser agents, plus Browser Use Cloud: stealth browsers and a hosted agent 
+   115092  JuliusBrussee/caveman                    push=2026-10-25
+          🪨 why use many token when few token do trick. Viral skill + proxy for coding agents that cuts 65% of tokens by
+   107363  paperclipai/paperclip                    push=2026-10-26
+          The open-source app everyone uses to manage agents at work
+    95524  vllm-project/vllm                        push=2026-10-26
+          A high-throughput and memory-efficient inference and serving engine for LLMs
+    91857  OpenHands/OpenHands                      push=2026-10-25
+          🙌 OpenHands: AI-Driven Development
+    89311  tt-a1i/archify                           push=2026-10-26
+          Turn any idea, plan, or codebase into a beautiful interactive diagram. An agent skill for Claude Code, Codex, 
+    86274  unclecode/crawl4ai                       push=2026-10-22
+          Open-source web crawler and scraper for LLMs and AI agents: any website into clean, LLM-ready Markdown. Run it
+    84560  rtk-ai/rtk                               push=2026-10-25
+          CLI proxy that reduces LLM token consumption by 60-90% on common dev commands. Single Rust binary, zero depend
+    84425  bytedance/deer-flow                      push=2026-10-26
+          An open-source long-horizon SuperAgent harness that researches, codes, and creates. With the help of sandboxes
+    78568  unslothai/unsloth                        push=2026-10-26
+          Local UI to run and train LLMs and diffusion models. Supports GGUF, MLX, Qwen3.8, DeepSeek-V4.1, MiniMax-H3, G
+    77833  headroomlabs-ai/headroom                 push=2026-10-24
+          Compress tool outputs, logs, files, and RAG chunks before they reach the LLM. 20% fewer tokens for coding agen
+    75732  hiyouga/LlamaFactory                     push=2026-10-21
+          Unified Efficient Fine-Tuning of 100+ LLMs & VLMs (ACL 2024)
+    73900  rohitg00/ai-engineering-from-scratch     push=2026-10-23
+          Learn AI Engineering! Learn it. Build it. Ship it for others.
+    70217  asgeirtj/system_prompts_leaks            push=2026-10-25
+          Documented system prompts from Anthropic - Claude Fable 5.1, Opus 5.5, Claude Design, Claude Code. OpenAI - Ch
+    67816  mem0ai/mem0                              push=2026-10-23
+          The Memory Layer for AI Agents - Drop-in memory infrastructure for AI agents and apps. Context that persists. 
+    67564  Mintplex-Labs/anything-llm               push=2026-10-25
+          Stop renting your intelligence. Own it with AnythingLLM. Everything you need for a powerful local-first agent 
+    67064  ZhuLinsen/daily_stock_analysis           push=2026-10-25
+          LLM 驱动的多市场股票智能分析系统：多源行情、实时新闻、决策看板与自动推送，支持零成本定时运行。  LLM-powered multi-market stock analysis system with multi-s
+    63689  upstash/context7                         push=2026-10-23
+          Context7 Platform -- Up-to-date docs for AI agents
+    63179  sansan0/TrendRadar                       push=2026-10-20
+          ⭐AI-driven public opinion & trend monitor with multi-platform aggregation, RSS, and smart alerts.🎯 告别信息过载，你的 A
+    62039  BerriAI/litellm                          push=2026-10-26
+          The fastest, litest AI Gateway. Rust core with Python SDK. Call 100+ LLM APIs in OpenAI (or native) format wit
+    59737  MemPalace/mempalace                      push=2026-10-25
+          The best-benchmarked open-source AI memory system. And it's free.
+    56553  hesreallyhim/awesome-claude-code         push=2026-10-26
+          A hand-picked collection of the finest of resources for the most awesome of agents, Claude Code, the undispute
+    52665  run-llama/llama_index                    push=2026-10-23
+          LlamaIndex is the document processing platform for AI
+    49960  mudler/LocalAI                           push=2026-10-25
+          LocalAI is the open-source AI engine. Run any model - LLMs, vision, voice, image, video - on any hardware. No 
+    48281  jeecgboot/JeecgBoot                      push=2026-10-24
+          【低代码v2.0，一句话即可生成整个系统】企业级AI低代码平台，一键生成前后端代码甚至整个系统。 AI Skills 一句话画流程、设计表单、生成报表、大屏。内置 AI应用平台涵盖：AI聊天、知识库、流程编排、MCP插件
+    47588  zhayujie/CowAgent                        push=2026-10-25
+          Open-source personal AI assistant & Agent Harness. Plans tasks, runs tools and skills, self-evolves with memor
+    47100  paperless-ngx/paperless-ngx              push=2026-10-26
+          A community-supported supercharged document management system: scan, index and archive all your documents
+
+====================================================================================================
+F. topic / 专项搜索
+====================================================================================================
+
+--- s5-judge.json (total_count=305) ---
+   107286  rasbt/LLMs-from-scratch                  push=2026-10-02 created=2023-07-23
+          Implement a ChatGPT-like LLM in PyTorch from scratch, step by step
+    48279  GitHubDaily/GitHubDaily                  push=2025-12-31 created=2018-12-30
+          坚持分享 GitHub 上高质量、有趣实用的开源技术教程、开发者工具、编程网站、技术资讯。A list cool, interesting projects of GitHub.
+    40441  PostHog/posthog                          push=2026-10-26 created=2020-01-23
+          :hedgehog: PostHog is the leading platform for building self-driving products. Our developer tools – AI observ
+    39552  lm-sys/FastChat                          push=2026-05-01 created=2023-03-19
+          An open platform for training, serving, and evaluating large language models. Release repo for Vicuna and Chat
+    36486  langfuse/langfuse                        push=2026-10-26 created=2023-05-18
+          🪢 Open source agent evals & observability: Trace, evaluate, and improve LLM applications with one open platfor
+    36363  VoltAgent/awesome-agent-skills           push=2026-10-25 created=2025-10-28
+          A curated collection of 1000+ agent skills from official dev teams and the community, compatible with Claude C
+    30003  NirDiamant/RAG_Techniques                push=2026-10-22 created=2024-07-13
+          This repository showcases various advanced techniques for Retrieval-Augmented Generation (RAG) systems. Each t
+    29459  systemdesign42/system-design-academy     push=2026-10-25 created=2024-02-15
+          If you want to become good at AI engineering & system design, join this newsletter 👇
+    22925  comet-ml/opik                            push=2026-10-26 created=2023-05-10
+          Debug, evaluate, and monitor your LLM applications, RAG systems, and agentic workflows with comprehensive trac
+    19104  confident-ai/deepeval                    push=2026-10-23 created=2023-08-10
+          The LLM Evaluation Framework
+    18216  muratcankoylan/Agent-Skills-for-Context-Engineering push=2026-10-12 created=2025-12-21
+          A comprehensive collection of Agent Skills for context engineering, multi-agent architectures, and production 
+    12676  langchain-ai/open_deep_research          push=2026-08-10 created=2024-11-20
+          
+    11267  adongwanai/AgentGuide                    push=2026-09-15 created=2025-11-03
+          https://adongwanai.github.io/AgentGuide | AI Agent开发指南 | LangGraph实战 | 高级RAG | 转行大模型 | 大模型面试 | 算法工程师 | 面试题库 | 
+     9414  oumi-ai/oumi                             push=2026-10-23 created=2024-05-07
+          Easily fine-tune (SFT/RL), evaluate, and deploy Qwen, Gemma, or any open agentic LLM/VLM!
+     9139  We5ter/Scanners-Box                      push=2026-10-16 created=2016-12-24
+          The Ultimate Open-Source Security Arsenal for Hackers, Enterprises, and AI Agents——面向极客、企业与 AI 智能体的全域开源网络安全工具矩
+     9134  ai-boost/awesome-prompts                 push=2026-10-25 created=2024-01-19
+          Curated list of chatgpt prompts from the top-rated GPTs in the GPTs Store. Prompt Engineering, prompt attack &
+     8882  dair-ai/ML-Papers-Explained              push=2025-06-30 created=2023-01-12
+          Explanation to key concepts in ML
+     8605  SuanmoSuanyangTechnology/MemoryBear      push=2026-10-26 created=2025-09-19
+          MemoryBear Equip AI with human-like memory capability
+
+--- s9-topic-prompt-opt.json (total_count=34) ---
+    39241  linshenkx/prompt-optimizer               push=2026-10-26 created=2025-02-12
+          An AI prompt optimizer for writing better prompts and getting better AI results.
+     3770  zou-group/textgrad                       push=2025-07-25 created=2024-06-11
+          TextGrad: Automatic ''Differentiation'' via Text -- using large language models to backpropagate textual gradi
+      762  microsoft/Trace                          push=2026-06-17 created=2024-06-14
+          End-to-end Generative Optimization for AI Agents
+      675  teilomillet/gollm                        push=2026-03-21 created=2024-07-18
+          Unified Go interface for Language Model (LLM) providers. Simplifies LLM integration with flexible prompt manag
+      420  jxzhangjhu/Awesome-LLM-Prompt-Optimization push=2026-10-20 created=2023-10-26
+          Awesome-LLM-Prompt-Optimization: a curated list of advanced prompt optimization and tuning methods in Large La
+      415  zgcagi/Harness-RSI                       push=2026-10-23 created=2026-10-01
+          Harness self-evolution: update targets, theory, evaluation, and reported evidence. Bilingual reading list and 
+      388  OnlyTerp/openclaw-optimization-guide     push=2026-07-01 created=2026-03-13
+          Make your OpenClaw AI agent faster, smarter, and cheaper. Speed optimization, memory architecture, context man
+      339  vibe-log/vibe-log-cli                    push=2026-04-19 created=2025-08-15
+          A CLI tool for logging and analyzing Claude Code and Cursor ai-driven coding session.
+      325  ckelsoe/prompt-architect                 push=2026-07-24 created=2025-11-24
+          Agent skill for analyzing and improving prompts using 31 frameworks across 7 intent categories. Works with Cla
+      311  sutro-sh/jev-align                       push=2026-10-03 created=2026-09-19
+          Build calibrated AI Functions from human feedback using Jev and GEPA.
+      300  shobrook/promptimal                      push=2025-01-05 created=2024-11-11
+          A very fast, very minimal prompt optimizer
+      214  XBigRoad/prompt-optimizer-studio         push=2026-04-04 created=2026-03-09
+          可同时输入多个初版提示词，开启多轮自动优化，连续得到高分后得到最终结果。
+      198  Birfy/agentdescent                       push=2026-10-26 created=2026-07-24
+          Gradient descent, but the parameters are agents — a parallel, asynchronous framework for self-evolving agents 
+      182  shinpr/mcp-image                         push=2026-10-22 created=2025-08-27
+          MCP server for AI image generation and editing with automatic prompt optimization and quality presets. Support
+      157  gepromptet/promptolution                 push=2026-09-24 created=2024-07-21
+          A unified, modular framework for prompt optimization
+      152  Alisa0808/vibe-creating-skill            push=2026-06-17 created=2026-06-16
+          Open-source, bilingual AI video-prompt skill — rewrite ideas into model-ready text-to-video prompts. A portabl
+      132  AtlasOmnia/hermes-tool-router            push=2026-10-20 created=2026-05-28
+          Deterministic, fail-open tool routing for Hermes Agent with an optional local-model fallback.
+      128  edvardgrishin27/nativeprompt             push=2026-10-19 created=2026-07-30
+          Переписывает промпт под правила модели, где вы работаете (Claude Opus 5.5, Fable 5.1, GPT-6 Astra/Sol/Luna, Co
+
+--- s10-topic-llm-eval.json (total_count=69) ---
+    36486  langfuse/langfuse                        push=2026-10-26 created=2023-05-18
+          🪢 Open source agent evals & observability: Trace, evaluate, and improve LLM applications with one open platfor
+    34502  ifixai-ai/iFixAi                         push=2026-10-24 created=2026-04-27
+          Independent Auditing of AI Agents. Run by human or the agent itself, to answer the most crucial question in th
+    28534  mlflow/mlflow                            push=2026-10-26 created=2018-06-05
+          The open source AI engineering platform for agents, LLMs, and ML models. MLflow enables teams of all sizes to 
+    26429  promptfoo/promptfoo                      push=2026-10-26 created=2023-04-28
+          Test your prompts, agents, and RAGs. Red teaming/pentesting/vulnerability scanning for AI. Compare performance
+    22925  comet-ml/opik                            push=2026-10-26 created=2023-05-10
+          Debug, evaluate, and monitor your LLM applications, RAG systems, and agentic workflows with comprehensive trac
+    19104  confident-ai/deepeval                    push=2026-10-23 created=2023-08-10
+          The LLM Evaluation Framework
+    12004  Arize-ai/phoenix                         push=2026-10-25 created=2022-11-09
+          AI Observability & Evaluation
+     9699  NVIDIA/garak                             push=2026-10-23 created=2023-05-10
+          the LLM vulnerability scanner
+     9414  oumi-ai/oumi                             push=2026-10-23 created=2024-05-07
+          Easily fine-tune (SFT/RL), evaluate, and deploy Qwen, Gemma, or any open agentic LLM/VLM!
+     7091  Tencent/AI-Infra-Guard                   push=2026-10-26 created=2024-12-25
+          A full-stack AI Red Teaming platform securing AI ecosystems via Agent Scan, Skills Scan, MCP scan, AI Infra sc
+     6491  jeinlee1991/chinese-llm-benchmark        push=2026-10-21 created=2023-06-04
+          非线智能 NoneLinear - ReLE评测：中文AI大模型能力评测（持续更新）：目前已囊括374个大模型，覆盖chatgpt、gpt-5.4、谷歌gemini-3.1-pro、Claude-4.6、文心ERNIE-
+     6275  Q00/ouroboros                            push=2026-10-25 created=2026-01-14
+          Agent OS: the agent gets smarter on its own. We just hold the line: Interview-gated, staged evaluation, budget
+     6238  Helicone/helicone                        push=2026-10-24 created=2023-01-31
+          🧊 Open source LLM observability platform. One line of code to monitor, evaluate, and experiment. YC W23 🍓
+     5923  Giskard-AI/giskard-oss                   push=2026-10-26 created=2022-03-06
+          🐢 Open-Source Evaluation & Testing library for LLM Agents
+     5398  PacktPublishing/LLM-Engineers-Handbook   push=2026-04-22 created=2024-04-09
+          The LLM's practical guide: From the fundamentals to deploying advanced LLM and RAG apps to AWS using LLMOps be
+     4463  EvolvingLMMs-Lab/lmms-eval               push=2026-10-22 created=2024-03-07
+          One-for-All Multimodal Evaluation Toolkit Across Text, Image, Video, and Audio Tasks
+     3775  hemansnation/AI-Engineer-Headquarters    push=2026-10-14 created=2022-03-29
+          A collection of scientific methods, processes, algorithms, and systems to build stories & models.
+     3611  truera/trulens                           push=2026-10-25 created=2020-11-02
+          Evaluation and Tracking for LLM Experiments and AI Agents
+
+--- s11-context-engineering.json (total_count=3116) ---
+   524753  sindresorhus/awesome                     push=2026-09-02 created=2014-07-11
+          😎 Awesome lists about all kinds of interesting topics [NOTE: Pull requests are temporarily disabled until I ha
+   492187  public-apis/public-apis                  push=2026-10-24 created=2016-03-20
+          A collective list of free APIs
+   385843  morluto/rea                              push=2026-10-25 created=2026-04-14
+          Reverse engineer anything with agents, from app behavior down to native binaries.
+   363389  jwasham/coding-interview-university      push=2025-08-28 created=2016-06-06
+          A complete computer science study plan to become a software engineer.
+   330474  awesome-selfhosted/awesome-selfhosted    push=2026-10-22 created=2015-06-01
+          A list of Free Software network services and web applications which can be hosted on your own servers
+   330300  vinta/awesome-python                     push=2026-10-26 created=2014-06-27
+          The definitive list that answers "I want to do X in Python, which tool should I use?"
+   305149  obra/superpowers                         push=2026-10-23 created=2025-10-09
+          An agentic skills framework & software development methodology that works.
+   303380  mattpocock/skills                        push=2026-10-22 created=2026-02-03
+          Skills for Real Engineers. Straight from my .agents directory.
+   288977  affaan-m/ECC                             push=2026-10-26 created=2026-01-18
+          The agent harness performance optimization system. Skills, instincts, memory, security, and research-first dev
+   210359  ossu/computer-science                    push=2026-07-14 created=2014-05-04
+          🎓 Path to a free self-taught education in Computer Science!
+   190381  avelino/awesome-go                       push=2026-10-23 created=2014-07-06
+          A curated list of awesome Go frameworks, libraries and software
+   164047  msitarzewski/agency-agents               push=2026-10-25 created=2025-10-13
+          A complete AI agency at your fingertips - From frontend wizards to Reddit community ninjas, from whimsy inject
+   148692  farion1231/cc-switch                     push=2026-10-26 created=2025-08-04
+          A cross-platform desktop All-in-One assistant for Claude Code, Codex, OpenCode, OpenClaw, Grok Build & Hermes 
+   140047  ripienaar/free-for-dev                   push=2026-10-24 created=2015-03-18
+          A list of SaaS, PaaS and IaaS offerings that have free tiers of interest to devops and infradev
+   137739  garrytan/gstack                          push=2026-10-26 created=2026-03-11
+          Use Garry Tan's exact Claude Code setup: 23 opinionated tools that serve as CEO, Designer, Eng Manager, Releas
+   117041  jaywcjlove/awesome-mac                   push=2026-10-26 created=2016-07-17
+           This project is dedicated to collecting high-quality macOS software and organizing them systematically by di
+   110556  addyosmani/agent-skills                  push=2026-10-13 created=2026-02-15
+          Production-grade engineering skills for AI coding agents.
+   103169  thedotmack/claude-mem                    push=2026-10-25 created=2025-08-31
+          Persistent Context Across Sessions for Every Agent –  Captures everything your agent does during sessions, com
+
+--- s12-agent-skills.json (total_count=5435) ---
+   330300  vinta/awesome-python                     push=2026-10-26 created=2014-06-27
+          The definitive list that answers "I want to do X in Python, which tool should I use?"
+   305149  obra/superpowers                         push=2026-10-23 created=2025-10-09
+          An agentic skills framework & software development methodology that works.
+   303380  mattpocock/skills                        push=2026-10-22 created=2026-02-03
+          Skills for Real Engineers. Straight from my .agents directory.
+   288977  affaan-m/ECC                             push=2026-10-26 created=2026-01-18
+          The agent harness performance optimization system. Skills, instincts, memory, security, and research-first dev
+   190381  avelino/awesome-go                       push=2026-10-23 created=2014-07-06
+          A curated list of awesome Go frameworks, libraries and software
+   183806  anthropics/skills                        push=2026-10-09 created=2025-09-22
+          Public repository for Agent Skills
+   164047  msitarzewski/agency-agents               push=2026-10-25 created=2025-10-13
+          A complete AI agency at your fingertips - From frontend wizards to Reddit community ninjas, from whimsy inject
+   148692  farion1231/cc-switch                     push=2026-10-26 created=2025-08-04
+          A cross-platform desktop All-in-One assistant for Claude Code, Codex, OpenCode, OpenClaw, Grok Build & Hermes 
+   143070  Shubhamsaboo/awesome-llm-apps            push=2026-10-22 created=2024-04-29
+          100+ AI Agents, Agent Skills and RAG Apps - Free and Open Source.
+   140454  nextlevelbuilder/ui-ux-pro-max-skill     push=2026-10-23 created=2025-11-30
+          An AI skill that provides design intelligence for building professional UI/UX across multiple platforms.
+   137739  garrytan/gstack                          push=2026-10-26 created=2026-03-11
+          Use Garry Tan's exact Claude Code setup: 23 opinionated tools that serve as CEO, Designer, Eng Manager, Releas
+   135429  Graphify-Labs/graphify                   push=2026-10-23 created=2026-04-03
+          Turn any codebase, with its docs, SQL schemas, configs, and PDFs, into a queryable knowledge graph. A /graphif
+   110556  addyosmani/agent-skills                  push=2026-10-13 created=2026-02-15
+          Production-grade engineering skills for AI coding agents.
+   107364  paperclipai/paperclip                    push=2026-10-26 created=2026-03-02
+          The open-source app everyone uses to manage agents at work
+   103994  nexu-io/open-design                      push=2026-10-26 created=2026-04-28
+          The 1st Collaborative AI Design Agent Workspace. Local-first and open source. Create motion, prototypes, websi
+   102590  Panniantong/Agent-Reach                  push=2026-10-25 created=2026-02-24
+          Give your AI agent eyes to see the entire internet. Read & search Twitter, Reddit, YouTube, GitHub, Bilibili, 
+   102575  Leonxlnx/taste-skill                     push=2026-10-26 created=2026-02-19
+          Agent skills that give coding agents taste: art direction, reference images and a browser check instead of gen
+    96873  punkpeye/awesome-mcp-servers             push=2026-10-23 created=2024-11-30
+          A collection of MCP servers.
+
+--- s13-prompt-cli-agent.json (total_count=49) ---
+    25559  toon-format/toon                         push=2026-10-09 created=2025-10-22
+          🎒 Token-Oriented Object Notation (TOON) – compact, human-readable serialization of JSON data for LLM prompts. 
+    11629  cobusgreyling/loop-engineering           push=2026-10-26 created=2026-06-09
+          Practical patterns, starters & CLI tools for loop engineering with AI coding agents. Design systems that promp
+     7738  mufeedvh/code2prompt                     push=2026-10-16 created=2024-03-09
+          A CLI tool to convert your codebase into a single LLM prompt with source tree, prompt templating, and token co
+     5879  wuyoscar/GPT-Image2-Skill                push=2026-09-30 created=2026-04-22
+          GPT Image 2/2.5 prompt gallery, image prompt library, agentic skill, and CLI for OpenAI image generation/editi
+     2987  pharmapsychotic/clip-interrogator        push=2024-05-15 created=2022-08-09
+          Image to prompt with BLIP and CLIP
+     2389  prompt-engineering/click-prompt          push=2023-04-07 created=2023-03-03
+          ClickPrompt - Streamline your prompt design, with ClickPrompt, you can easily view, share, and run these promp
+     1662  patrickchugh/terravision                 push=2026-10-23 created=2022-03-13
+          Cloud architecture diagrams in both directions: AI prompt or JSON to diagram, diagram to Terraform via MCP ser
+     1339  timojl/clipseg                           push=2024-01-05 created=2021-11-22
+          This repository contains the code of the CVPR 2022 paper "Image Segmentation Using Text and Image Prompts".
+     1184  c4spar/cliffy                            push=2026-09-18 created=2020-03-09
+          A TypeScript-first, runtime-agnostic command-line toolkit for Deno, Node.js and Bun: featuring a command frame
+     1072  apify/mcpc                               push=2026-10-21 created=2025-12-09
+          The most compatible MCP CLI client. Supports: tools, resources, prompts, completions, async tasks, skills, std
+      963  kardolus/chatgpt-cli                     push=2026-09-30 created=2023-05-01
+          ChatGPT CLI is a powerful, multi-provider command-line interface for working with modern LLMs. It supports Ope
+      950  ferrislucas/promptr                      push=2026-04-24 created=2023-03-24
+          Promptr is a CLI tool that applies plain language instructions to the filesystem. Instructions can utilize a l
+      920  Mininglamp-OSS/octo-cli                  push=2026-10-26 created=2026-05-11
+          Metadata-driven CLI for AI Agent Bots — 48 operations across 7 domains, structured JSON envelope I/O, zero int
+      909  mayuelala/FollowYourClick                push=2025-09-17 created=2024-03-13
+          [AAAI 2025] Follow-Your-Click: This repo is the official implementation of "Follow-Your-Click: Open-domain Reg
+      832  jonigl/mcp-client-for-ollama             push=2026-10-13 created=2025-04-23
+          Harness the power of local LLMs with this TUI MCP Client for Ollama. Featuring all core MCP primitives (tools,
+      832  AgnosticUI/agnosticui                    push=2026-10-26 created=2020-09-07
+          AgnosticUI Local (v2) is a CLI-based UI component library that copies components directly into your project. W
+      813  CHATS-lab/verbalized-sampling            push=2026-01-03 created=2025-05-20
+          Verbalized Sampling, a training-free prompting strategy to mitigate mode collapse in LLMs by requesting respon
+      799  zhengli97/Awesome-Prompt-Adapter-Learning-for-VLMs-CLIP push=2026-07-17 created=2024-03-15
+          A curated list of awesome prompt/adapter learning methods for vision-language models like CLIP.
+
+--- s14-prompt-lint.json (total_count=10) ---
+      996  hashgraph-online/hol-guard               push=2026-10-26 created=2026-03-28
+          Open-source antivirus for AI agents: block risky tools, secret access, prompt injection, malicious packages, M
+      760  karanb192/awesome-claude-code-mods       push=2026-10-26 created=2026-09-15
+          5,000+ Claude Code mods, with what each one can access before you install it. Context and usage meters, prompt
+      711  Nanako0129/pilotfish                     push=2026-10-09 created=2026-07-08
+          Multi-model orchestration layer for Claude Code — the frontier model plans, cheaper models execute, verificati
+      388  hamzafer/claude-code-mods                push=2026-10-23 created=2026-10-02
+          Claude Code mods: plugins built on hooks that add live lines above the prompt, guards, panes and games. Contex
+      190  255308153/CtxGuard                       push=2026-10-14 created=2026-09-14
+          面向 AI Agent 的高并发、低延迟上下文治理与 Prompt Cache 守护网关 (Tree-sitter AST / Tool Delta / 50%~80% Token 削减)
+      187  ibm-granite/granite-guardian             push=2026-10-16 created=2024-10-11
+          The Granite Guardian models are designed to detect risks in prompts and responses.
+      180  seojoonkim/prompt-guard                  push=2026-04-22 created=2026-01-29
+          Advanced prompt injection defense system for AI agents. Multi-language detection, severity scoring, and securi
+      127  leepokai/jev-guard                       push=2026-10-02 created=2026-09-17
+          Auto mode for every coding agent, built on Jev: risk-scores every tool call with session context (deny / ask /
+      124  OraclesTech/guardian-sdk                 push=2026-10-22 created=2026-02-25
+          Ethicore Engine® is an AI safety, ethics, and compliance platform. This repo consists of the open-source compo
+      103  numbergroup/AgentGuard                   push=2026-03-06 created=2026-03-06
+          A+ Grade AI Agent Security Framework - Military-grade protection against prompt injection, command injection, 
+
+rate_limit: {"limit": 60, "remaining": 0, "reset": 1792993964, "used": 60}

@@ -79,6 +79,12 @@
 
 ## 四、对照后的净结论：prompt-master 的优缺点
 
+> **2026-10-26 就地更正（第五轮调研）**：下面第 1 条的措辞「没有任何一个被检竞品有对等产品化实现」**已部分过期**。
+> `truera/trulens` 的 README 明写 "TruLens judges are graded against human annotations, out of the box" 并给公开基准数字
+> （95% / 0.81 F1），`gepa-ai/gepa` 的生产案例（Nubank）公开了 LLM-as-a-judge 提示词优化把 Cohen's κ 从 0.00 抬到 0.745。
+> 仍成立且要写清楚的部分：**它们量在各自的固定基准卷子上；本产品量在用户自己的任务锚点上，并在样本不足时拒绝给结论。**
+> 证据见 `research-reports/prompt-optimization-competitors-2026-10-26/report.md` §3.4。
+
 **相对优势（开源圈对照后仍独特）**：
 1. **量具自证链**：评委校准（锚点 MAE/bias/AUC/κ + 95% CI + 可估性门槛 + 跨轮分代）没有任何一个被检竞品有对等产品化实现。
 2. **诚实性作为功能**：README 主动印「AUC 0.623 CI 覆盖 0.5、调阈值净增益 +0.000」——竞品 README 全是"best/better/90x"；它自己的负结论照发。

@@ -1,0 +1,561 @@
+running egg_info
+writing prompt_master.egg-info\PKG-INFO
+writing dependency_links to prompt_master.egg-info\dependency_links.txt
+writing entry points to prompt_master.egg-info\entry_points.txt
+writing requirements to prompt_master.egg-info\requires.txt
+writing top-level names to prompt_master.egg-info\top_level.txt
+reading manifest file 'prompt_master.egg-info\SOURCES.txt'
+adding license file 'LICENSE'
+writing manifest file 'prompt_master.egg-info\SOURCES.txt'
+running sdist
+running egg_info
+writing prompt_master.egg-info\PKG-INFO
+writing dependency_links to prompt_master.egg-info\dependency_links.txt
+writing entry points to prompt_master.egg-info\entry_points.txt
+writing requirements to prompt_master.egg-info\requires.txt
+writing top-level names to prompt_master.egg-info\top_level.txt
+reading manifest file 'prompt_master.egg-info\SOURCES.txt'
+adding license file 'LICENSE'
+writing manifest file 'prompt_master.egg-info\SOURCES.txt'
+running check
+creating prompt_master-2.3.0
+creating prompt_master-2.3.0\case_templates
+creating prompt_master-2.3.0\pm
+creating prompt_master-2.3.0\pm\calibration
+creating prompt_master-2.3.0\pm\cli
+creating prompt_master-2.3.0\pm\llm
+creating prompt_master-2.3.0\pm\modelhub
+creating prompt_master-2.3.0\pm\nodes
+creating prompt_master-2.3.0\pm\web
+creating prompt_master-2.3.0\prompt_master.egg-info
+creating prompt_master-2.3.0\tests
+copying files to prompt_master-2.3.0...
+copying LICENSE -> prompt_master-2.3.0
+copying README.md -> prompt_master-2.3.0
+copying pyproject.toml -> prompt_master-2.3.0
+copying case_templates\openclaw_browser_scrape.json -> prompt_master-2.3.0\case_templates
+copying case_templates\openclaw_cron_briefing.json -> prompt_master-2.3.0\case_templates
+copying case_templates\openclaw_feishu_daily.json -> prompt_master-2.3.0\case_templates
+copying case_templates\sales_analysis.json -> prompt_master-2.3.0\case_templates
+copying case_templates\support_triage.json -> prompt_master-2.3.0\case_templates
+copying pm\__init__.py -> prompt_master-2.3.0\pm
+copying pm\assertions.py -> prompt_master-2.3.0\pm
+copying pm\backend.py -> prompt_master-2.3.0\pm
+copying pm\bootstrap.py -> prompt_master-2.3.0\pm
+copying pm\cache.py -> prompt_master-2.3.0\pm
+copying pm\casesaudit.py -> prompt_master-2.3.0\pm
+copying pm\cliforward.py -> prompt_master-2.3.0\pm
+copying pm\cost.py -> prompt_master-2.3.0\pm
+copying pm\desktop.py -> prompt_master-2.3.0\pm
+copying pm\doctor.py -> prompt_master-2.3.0\pm
+copying pm\graph.py -> prompt_master-2.3.0\pm
+copying pm\injection_pack.py -> prompt_master-2.3.0\pm
+copying pm\keycheck.py -> prompt_master-2.3.0\pm
+copying pm\mcp_server.py -> prompt_master-2.3.0\pm
+copying pm\memory.py -> prompt_master-2.3.0\pm
+copying pm\netguard.py -> prompt_master-2.3.0\pm
+copying pm\panel.py -> prompt_master-2.3.0\pm
+copying pm\paths.py -> prompt_master-2.3.0\pm
+copying pm\preflight.py -> prompt_master-2.3.0\pm
+copying pm\promptdiff.py -> prompt_master-2.3.0\pm
+copying pm\promptgate.py -> prompt_master-2.3.0\pm
+copying pm\prompts.py -> prompt_master-2.3.0\pm
+copying pm\quality.py -> prompt_master-2.3.0\pm
+copying pm\ratelimit.py -> prompt_master-2.3.0\pm
+copying pm\report.py -> prompt_master-2.3.0\pm
+copying pm\report_helpers.py -> prompt_master-2.3.0\pm
+copying pm\report_sections.py -> prompt_master-2.3.0\pm
+copying pm\scheduler.py -> prompt_master-2.3.0\pm
+copying pm\schemas.py -> prompt_master-2.3.0\pm
+copying pm\scoring.py -> prompt_master-2.3.0\pm
+copying pm\server.py -> prompt_master-2.3.0\pm
+copying pm\skillmd.py -> prompt_master-2.3.0\pm
+copying pm\state.py -> prompt_master-2.3.0\pm
+copying pm\store.py -> prompt_master-2.3.0\pm
+copying pm\testing.py -> prompt_master-2.3.0\pm
+copying pm\textio.py -> prompt_master-2.3.0\pm
+copying pm\calibration\__init__.py -> prompt_master-2.3.0\pm\calibration
+copying pm\calibration\__main__.py -> prompt_master-2.3.0\pm\calibration
+copying pm\calibration\cli.py -> prompt_master-2.3.0\pm\calibration
+copying pm\calibration\history.py -> prompt_master-2.3.0\pm\calibration
+copying pm\calibration\paths.py -> prompt_master-2.3.0\pm\calibration
+copying pm\calibration\render.py -> prompt_master-2.3.0\pm\calibration
+copying pm\calibration\run.py -> prompt_master-2.3.0\pm\calibration
+copying pm\calibration\samples.py -> prompt_master-2.3.0\pm\calibration
+copying pm\calibration\stats.py -> prompt_master-2.3.0\pm\calibration
+copying pm\cli\__init__.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\agent_mode.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\calibrate.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\check.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\console.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\diffcmd.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\doctorcmd.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\gatecmd.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\history.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\library.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\live_lock.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\main.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\panelcmd.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\pipeline.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\selftest.py -> prompt_master-2.3.0\pm\cli
+copying pm\cli\support.py -> prompt_master-2.3.0\pm\cli
+copying pm\llm\__init__.py -> prompt_master-2.3.0\pm\llm
+copying pm\llm\_log.py -> prompt_master-2.3.0\pm\llm
+copying pm\llm\budget.py -> prompt_master-2.3.0\pm\llm
+copying pm\llm\calls.py -> prompt_master-2.3.0\pm\llm
+copying pm\llm\config.py -> prompt_master-2.3.0\pm\llm
+copying pm\llm\ledger.py -> prompt_master-2.3.0\pm\llm
+copying pm\llm\retry.py -> prompt_master-2.3.0\pm\llm
+copying pm\llm\schema.py -> prompt_master-2.3.0\pm\llm
+copying pm\modelhub\__init__.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\agents.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\console.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\filelock.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\ledger.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\notify.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\pool.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\server.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\streaming.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\usage_store.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\modelhub\vkeys.py -> prompt_master-2.3.0\pm\modelhub
+copying pm\nodes\__init__.py -> prompt_master-2.3.0\pm\nodes
+copying pm\nodes\baseline.py -> prompt_master-2.3.0\pm\nodes
+copying pm\nodes\clarify.py -> prompt_master-2.3.0\pm\nodes
+copying pm\nodes\common.py -> prompt_master-2.3.0\pm\nodes
+copying pm\nodes\execute.py -> prompt_master-2.3.0\pm\nodes
+copying pm\nodes\judge.py -> prompt_master-2.3.0\pm\nodes
+copying pm\nodes\optimize.py -> prompt_master-2.3.0\pm\nodes
+copying pm\nodes\profiles.py -> prompt_master-2.3.0\pm\nodes
+copying pm\nodes\report.py -> prompt_master-2.3.0\pm\nodes
+copying pm\nodes\revise.py -> prompt_master-2.3.0\pm\nodes
+copying pm\web\__init__.py -> prompt_master-2.3.0\pm\web
+copying pm\web\_body.py -> prompt_master-2.3.0\pm\web
+copying pm\web\_css.py -> prompt_master-2.3.0\pm\web
+copying pm\web\_js.py -> prompt_master-2.3.0\pm\web
+copying pm\web\_panel.py -> prompt_master-2.3.0\pm\web
+copying prompt_master.egg-info\PKG-INFO -> prompt_master-2.3.0\prompt_master.egg-info
+copying prompt_master.egg-info\SOURCES.txt -> prompt_master-2.3.0\prompt_master.egg-info
+copying prompt_master.egg-info\dependency_links.txt -> prompt_master-2.3.0\prompt_master.egg-info
+copying prompt_master.egg-info\entry_points.txt -> prompt_master-2.3.0\prompt_master.egg-info
+copying prompt_master.egg-info\requires.txt -> prompt_master-2.3.0\prompt_master.egg-info
+copying prompt_master.egg-info\top_level.txt -> prompt_master-2.3.0\prompt_master.egg-info
+copying tests\test_anchor_provenance.py -> prompt_master-2.3.0\tests
+copying tests\test_api.py -> prompt_master-2.3.0\tests
+copying tests\test_arbiter_seat_jitter.py -> prompt_master-2.3.0\tests
+copying tests\test_archive_vs_current_code.py -> prompt_master-2.3.0\tests
+copying tests\test_assertions.py -> prompt_master-2.3.0\tests
+copying tests\test_bootstrap.py -> prompt_master-2.3.0\tests
+copying tests\test_budget_requests_gate.py -> prompt_master-2.3.0\tests
+copying tests\test_c1c2_arm_audit.py -> prompt_master-2.3.0\tests
+copying tests\test_cache_branches.py -> prompt_master-2.3.0\tests
+copying tests\test_cache_concurrency.py -> prompt_master-2.3.0\tests
+copying tests\test_calibrate_drift_rep_row.py -> prompt_master-2.3.0\tests
+copying tests\test_calibrate_judge.py -> prompt_master-2.3.0\tests
+copying tests\test_calibrate_ledger_durability.py -> prompt_master-2.3.0\tests
+copying tests\test_calibration_aggregate.py -> prompt_master-2.3.0\tests
+copying tests\test_calibration_main_entry.py -> prompt_master-2.3.0\tests
+copying tests\test_call_budget.py -> prompt_master-2.3.0\tests
+copying tests\test_case_templates.py -> prompt_master-2.3.0\tests
+copying tests\test_cases_audit.py -> prompt_master-2.3.0\tests
+copying tests\test_cases_file_hint.py -> prompt_master-2.3.0\tests
+copying tests\test_check_command.py -> prompt_master-2.3.0\tests
+copying tests\test_ci_gate_matrix.py -> prompt_master-2.3.0\tests
+copying tests\test_claim_vs_code.py -> prompt_master-2.3.0\tests
+copying tests\test_clarify_rounds.py -> prompt_master-2.3.0\tests
+copying tests\test_cli_agent.py -> prompt_master-2.3.0\tests
+copying tests\test_cli_error_json.py -> prompt_master-2.3.0\tests
+copying tests\test_cli_guards.py -> prompt_master-2.3.0\tests
+copying tests\test_cli_run.py -> prompt_master-2.3.0\tests
+copying tests\test_cli_units.py -> prompt_master-2.3.0\tests
+copying tests\test_collapsed_archive_limits.py -> prompt_master-2.3.0\tests
+copying tests\test_complexity_ratchet.py -> prompt_master-2.3.0\tests
+copying tests\test_conflict_attribution.py -> prompt_master-2.3.0\tests
+copying tests\test_conftest_write_seal.py -> prompt_master-2.3.0\tests
+copying tests\test_console_gbk_entry.py -> prompt_master-2.3.0\tests
+copying tests\test_cost.py -> prompt_master-2.3.0\tests
+copying tests\test_cost_gate.py -> prompt_master-2.3.0\tests
+copying tests\test_coverage_gaps.py -> prompt_master-2.3.0\tests
+copying tests\test_d2_scaling.py -> prompt_master-2.3.0\tests
+copying tests\test_dead_constants.py -> prompt_master-2.3.0\tests
+copying tests\test_diff_base_ref.py -> prompt_master-2.3.0\tests
+copying tests\test_discrimination.py -> prompt_master-2.3.0\tests
+copying tests\test_dns_outside_timeout.py -> prompt_master-2.3.0\tests
+copying tests\test_doctor.py -> prompt_master-2.3.0\tests
+copying tests\test_dual_judge.py -> prompt_master-2.3.0\tests
+copying tests\test_early_stop_sentinel.py -> prompt_master-2.3.0\tests
+copying tests\test_empty_cap_false_positive.py -> prompt_master-2.3.0\tests
+copying tests\test_empty_cap_short_answers.py -> prompt_master-2.3.0\tests
+copying tests\test_empty_cap_wiring.py -> prompt_master-2.3.0\tests
+copying tests\test_empty_deliverable_alert.py -> prompt_master-2.3.0\tests
+copying tests\test_empty_delivery_retry.py -> prompt_master-2.3.0\tests
+copying tests\test_env_discovery.py -> prompt_master-2.3.0\tests
+copying tests\test_env_isolation_meta.py -> prompt_master-2.3.0\tests
+copying tests\test_eval_cache_sample_isolation.py -> prompt_master-2.3.0\tests
+copying tests\test_evaluation_md_structure.py -> prompt_master-2.3.0\tests
+copying tests\test_example_anchor_disclosure.py -> prompt_master-2.3.0\tests
+copying tests\test_expose_gate.py -> prompt_master-2.3.0\tests
+copying tests\test_failed_arm_not_dropped.py -> prompt_master-2.3.0\tests
+copying tests\test_failed_calls_are_recorded.py -> prompt_master-2.3.0\tests
+copying tests\test_failed_sample_not_a_low_score.py -> prompt_master-2.3.0\tests
+copying tests\test_feedback_signal.py -> prompt_master-2.3.0\tests
+copying tests\test_fixes.py -> prompt_master-2.3.0\tests
+copying tests\test_flow.py -> prompt_master-2.3.0\tests
+copying tests\test_guard_mutation.py -> prompt_master-2.3.0\tests
+copying tests\test_harvest_anchors.py -> prompt_master-2.3.0\tests
+copying tests\test_harvest_coverage.py -> prompt_master-2.3.0\tests
+copying tests\test_harvest_label_safety.py -> prompt_master-2.3.0\tests
+copying tests\test_history_generation.py -> prompt_master-2.3.0\tests
+copying tests\test_history_mock_filter.py -> prompt_master-2.3.0\tests
+copying tests\test_history_task_stats.py -> prompt_master-2.3.0\tests
+copying tests\test_hooks_actually_block.py -> prompt_master-2.3.0\tests
+copying tests\test_hygiene_dead_fixture_args.py -> prompt_master-2.3.0\tests
+copying tests\test_injection_gate.py -> prompt_master-2.3.0\tests
+copying tests\test_injection_gate_stickiness.py -> prompt_master-2.3.0\tests
+copying tests\test_injection_survival.py -> prompt_master-2.3.0\tests
+copying tests\test_installed_mode.py -> prompt_master-2.3.0\tests
+copying tests\test_jitter_provenance.py -> prompt_master-2.3.0\tests
+copying tests\test_judge_cache_fingerprint.py -> prompt_master-2.3.0\tests
+copying tests\test_judge_latency_rootcause.py -> prompt_master-2.3.0\tests
+copying tests\test_key_gate.py -> prompt_master-2.3.0\tests
+copying tests\test_ledger_durability.py -> prompt_master-2.3.0\tests
+copying tests\test_ledger_reader_parity.py -> prompt_master-2.3.0\tests
+copying tests\test_ledger_retention_claims.py -> prompt_master-2.3.0\tests
+copying tests\test_limit_not_a_low_score.py -> prompt_master-2.3.0\tests
+copying tests\test_literal_expected.py -> prompt_master-2.3.0\tests
+copying tests\test_live_run_lock.py -> prompt_master-2.3.0\tests
+copying tests\test_llm_branches.py -> prompt_master-2.3.0\tests
+copying tests\test_llm_fallback.py -> prompt_master-2.3.0\tests
+copying tests\test_logging_noise.py -> prompt_master-2.3.0\tests
+copying tests\test_logs_archive.py -> prompt_master-2.3.0\tests
+copying tests\test_logs_usage.py -> prompt_master-2.3.0\tests
+copying tests\test_mcp_server.py -> prompt_master-2.3.0\tests
+copying tests\test_measurement.py -> prompt_master-2.3.0\tests
+copying tests\test_memory.py -> prompt_master-2.3.0\tests
+copying tests\test_mock_coverage.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_admin_routes.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_agents.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_contention_paths.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_http_layer.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_ledger_and_usage.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_pool_and_keys.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_pool_chat.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_pool_config.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_stream_contract.py -> prompt_master-2.3.0\tests
+copying tests\test_modelhub_streaming.py -> prompt_master-2.3.0\tests
+copying tests\test_mutation_isolation.py -> prompt_master-2.3.0\tests
+copying tests\test_no_invented_attribution.py -> prompt_master-2.3.0\tests
+copying tests\test_noise_measurable.py -> prompt_master-2.3.0\tests
+copying tests\test_notify_path.py -> prompt_master-2.3.0\tests
+copying tests\test_owner_rejudge_queue.py -> prompt_master-2.3.0\tests
+copying tests\test_packaging.py -> prompt_master-2.3.0\tests
+copying tests\test_pairwise_coverage_disclosure.py -> prompt_master-2.3.0\tests
+copying tests\test_panel.py -> prompt_master-2.3.0\tests
+copying tests\test_panel_degradation_disclosed.py -> prompt_master-2.3.0\tests
+copying tests\test_paper_identity.py -> prompt_master-2.3.0\tests
+copying tests\test_patrol.py -> prompt_master-2.3.0\tests
+copying tests\test_pipeline_interrupt_safety.py -> prompt_master-2.3.0\tests
+copying tests\test_precommit_gate_set.py -> prompt_master-2.3.0\tests
+copying tests\test_preflight.py -> prompt_master-2.3.0\tests
+copying tests\test_prompt_eval.py -> prompt_master-2.3.0\tests
+copying tests\test_promptdiff.py -> prompt_master-2.3.0\tests
+copying tests\test_promptgate.py -> prompt_master-2.3.0\tests
+copying tests\test_quality.py -> prompt_master-2.3.0\tests
+copying tests\test_ratelimit.py -> prompt_master-2.3.0\tests
+copying tests\test_regression_margin_wiring.py -> prompt_master-2.3.0\tests
+copying tests\test_rejudge_form.py -> prompt_master-2.3.0\tests
+copying tests\test_report.py -> prompt_master-2.3.0\tests
+copying tests\test_report_sections.py -> prompt_master-2.3.0\tests
+copying tests\test_report_shows_failures.py -> prompt_master-2.3.0\tests
+copying tests\test_report_verdict.py -> prompt_master-2.3.0\tests
+copying tests\test_resource_bounds.py -> prompt_master-2.3.0\tests
+copying tests\test_retry_requests_recorded.py -> prompt_master-2.3.0\tests
+copying tests\test_round_report.py -> prompt_master-2.3.0\tests
+copying tests\test_run_aa98d99e66b5_findings.py -> prompt_master-2.3.0\tests
+copying tests\test_sample_report.py -> prompt_master-2.3.0\tests
+copying tests\test_scheduler_drain.py -> prompt_master-2.3.0\tests
+copying tests\test_scoring_ab_compare.py -> prompt_master-2.3.0\tests
+copying tests\test_scoring_checklist.py -> prompt_master-2.3.0\tests
+copying tests\test_scoring_pipeline_wiring.py -> prompt_master-2.3.0\tests
+copying tests\test_seed_prompt.py -> prompt_master-2.3.0\tests
+copying tests\test_skill_package.py -> prompt_master-2.3.0\tests
+copying tests\test_skillmd.py -> prompt_master-2.3.0\tests
+copying tests\test_sse_disconnect_cleanup.py -> prompt_master-2.3.0\tests
+copying tests\test_streaming_edge_branches.py -> prompt_master-2.3.0\tests
+copying tests\test_subprocess_encoding.py -> prompt_master-2.3.0\tests
+copying tests\test_suite_operational_scripts.py -> prompt_master-2.3.0\tests
+copying tests\test_target_output_normalized.py -> prompt_master-2.3.0\tests
+copying tests\test_task_store.py -> prompt_master-2.3.0\tests
+copying tests\test_task_store_parity.py -> prompt_master-2.3.0\tests
+copying tests\test_temp_root_fallback.py -> prompt_master-2.3.0\tests
+copying tests\test_textio.py -> prompt_master-2.3.0\tests
+copying tests\test_usage.py -> prompt_master-2.3.0\tests
+copying tests\test_usage_store_cross_process.py -> prompt_master-2.3.0\tests
+copying tests\test_usage_store_rebuild.py -> prompt_master-2.3.0\tests
+copying tests\test_version_flag.py -> prompt_master-2.3.0\tests
+copying tests\test_version_single_source.py -> prompt_master-2.3.0\tests
+copying tests\test_wasted_delivery_is_disclosed.py -> prompt_master-2.3.0\tests
+copying tests\test_watchdog_env.py -> prompt_master-2.3.0\tests
+copying tests\test_web_console.py -> prompt_master-2.3.0\tests
+copying tests\test_web_console_frontend.py -> prompt_master-2.3.0\tests
+Writing prompt_master-2.3.0\setup.cfg
+Creating tar archive
+removing 'prompt_master-2.3.0' (and everything under it)
+running egg_info
+writing prompt_master.egg-info\PKG-INFO
+writing dependency_links to prompt_master.egg-info\dependency_links.txt
+writing entry points to prompt_master.egg-info\entry_points.txt
+writing requirements to prompt_master.egg-info\requires.txt
+writing top-level names to prompt_master.egg-info\top_level.txt
+reading manifest file 'prompt_master.egg-info\SOURCES.txt'
+adding license file 'LICENSE'
+writing manifest file 'prompt_master.egg-info\SOURCES.txt'
+running bdist_wheel
+running build
+running build_py
+running egg_info
+writing prompt_master.egg-info\PKG-INFO
+writing dependency_links to prompt_master.egg-info\dependency_links.txt
+writing entry points to prompt_master.egg-info\entry_points.txt
+writing requirements to prompt_master.egg-info\requires.txt
+writing top-level names to prompt_master.egg-info\top_level.txt
+reading manifest file 'prompt_master.egg-info\SOURCES.txt'
+adding license file 'LICENSE'
+writing manifest file 'prompt_master.egg-info\SOURCES.txt'
+installing to build\bdist.win-amd64\wheel
+running install
+running install_lib
+creating build\bdist.win-amd64\wheel
+creating build\bdist.win-amd64\wheel\pm
+copying build\lib\pm\assertions.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\backend.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\bootstrap.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\cache.py -> build\bdist.win-amd64\wheel\.\pm
+creating build\bdist.win-amd64\wheel\pm\calibration
+copying build\lib\pm\calibration\cli.py -> build\bdist.win-amd64\wheel\.\pm\calibration
+copying build\lib\pm\calibration\history.py -> build\bdist.win-amd64\wheel\.\pm\calibration
+copying build\lib\pm\calibration\paths.py -> build\bdist.win-amd64\wheel\.\pm\calibration
+copying build\lib\pm\calibration\render.py -> build\bdist.win-amd64\wheel\.\pm\calibration
+copying build\lib\pm\calibration\run.py -> build\bdist.win-amd64\wheel\.\pm\calibration
+copying build\lib\pm\calibration\samples.py -> build\bdist.win-amd64\wheel\.\pm\calibration
+copying build\lib\pm\calibration\stats.py -> build\bdist.win-amd64\wheel\.\pm\calibration
+copying build\lib\pm\calibration\__init__.py -> build\bdist.win-amd64\wheel\.\pm\calibration
+copying build\lib\pm\calibration\__main__.py -> build\bdist.win-amd64\wheel\.\pm\calibration
+copying build\lib\pm\casesaudit.py -> build\bdist.win-amd64\wheel\.\pm
+creating build\bdist.win-amd64\wheel\pm\cli
+copying build\lib\pm\cli\agent_mode.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\calibrate.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\check.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\console.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\diffcmd.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\doctorcmd.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\gatecmd.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\history.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\library.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\live_lock.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\main.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\panelcmd.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\pipeline.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\selftest.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\support.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cli\__init__.py -> build\bdist.win-amd64\wheel\.\pm\cli
+copying build\lib\pm\cliforward.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\cost.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\desktop.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\doctor.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\graph.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\injection_pack.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\keycheck.py -> build\bdist.win-amd64\wheel\.\pm
+creating build\bdist.win-amd64\wheel\pm\llm
+copying build\lib\pm\llm\budget.py -> build\bdist.win-amd64\wheel\.\pm\llm
+copying build\lib\pm\llm\calls.py -> build\bdist.win-amd64\wheel\.\pm\llm
+copying build\lib\pm\llm\config.py -> build\bdist.win-amd64\wheel\.\pm\llm
+copying build\lib\pm\llm\ledger.py -> build\bdist.win-amd64\wheel\.\pm\llm
+copying build\lib\pm\llm\retry.py -> build\bdist.win-amd64\wheel\.\pm\llm
+copying build\lib\pm\llm\schema.py -> build\bdist.win-amd64\wheel\.\pm\llm
+copying build\lib\pm\llm\_log.py -> build\bdist.win-amd64\wheel\.\pm\llm
+copying build\lib\pm\llm\__init__.py -> build\bdist.win-amd64\wheel\.\pm\llm
+copying build\lib\pm\mcp_server.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\memory.py -> build\bdist.win-amd64\wheel\.\pm
+creating build\bdist.win-amd64\wheel\pm\modelhub
+copying build\lib\pm\modelhub\agents.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\console.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\filelock.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\ledger.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\notify.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\pool.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\server.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\streaming.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\usage_store.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\vkeys.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\modelhub\__init__.py -> build\bdist.win-amd64\wheel\.\pm\modelhub
+copying build\lib\pm\netguard.py -> build\bdist.win-amd64\wheel\.\pm
+creating build\bdist.win-amd64\wheel\pm\nodes
+copying build\lib\pm\nodes\baseline.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\nodes\clarify.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\nodes\common.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\nodes\execute.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\nodes\judge.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\nodes\optimize.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\nodes\profiles.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\nodes\report.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\nodes\revise.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\nodes\__init__.py -> build\bdist.win-amd64\wheel\.\pm\nodes
+copying build\lib\pm\panel.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\paths.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\preflight.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\promptdiff.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\promptgate.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\prompts.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\quality.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\ratelimit.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\report.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\report_helpers.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\report_sections.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\scheduler.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\schemas.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\scoring.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\server.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\skillmd.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\state.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\store.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\testing.py -> build\bdist.win-amd64\wheel\.\pm
+copying build\lib\pm\textio.py -> build\bdist.win-amd64\wheel\.\pm
+creating build\bdist.win-amd64\wheel\pm\web
+copying build\lib\pm\web\_body.py -> build\bdist.win-amd64\wheel\.\pm\web
+copying build\lib\pm\web\_css.py -> build\bdist.win-amd64\wheel\.\pm\web
+copying build\lib\pm\web\_js.py -> build\bdist.win-amd64\wheel\.\pm\web
+copying build\lib\pm\web\_panel.py -> build\bdist.win-amd64\wheel\.\pm\web
+copying build\lib\pm\web\__init__.py -> build\bdist.win-amd64\wheel\.\pm\web
+copying build\lib\pm\__init__.py -> build\bdist.win-amd64\wheel\.\pm
+running install_data
+creating build\bdist.win-amd64\wheel\prompt_master-2.3.0.data\data
+creating build\bdist.win-amd64\wheel\prompt_master-2.3.0.data\data\case_templates
+copying case_templates\openclaw_browser_scrape.json -> build\bdist.win-amd64\wheel\prompt_master-2.3.0.data\data\case_templates
+copying case_templates\openclaw_cron_briefing.json -> build\bdist.win-amd64\wheel\prompt_master-2.3.0.data\data\case_templates
+copying case_templates\openclaw_feishu_daily.json -> build\bdist.win-amd64\wheel\prompt_master-2.3.0.data\data\case_templates
+copying case_templates\sales_analysis.json -> build\bdist.win-amd64\wheel\prompt_master-2.3.0.data\data\case_templates
+copying case_templates\support_triage.json -> build\bdist.win-amd64\wheel\prompt_master-2.3.0.data\data\case_templates
+running install_egg_info
+Copying prompt_master.egg-info to build\bdist.win-amd64\wheel\.\prompt_master-2.3.0-py3.12.egg-info
+running install_scripts
+creating build\bdist.win-amd64\wheel\prompt_master-2.3.0.dist-info\WHEEL
+creating 'D:\\projects\\prompt-master\\dist\\.tmp-_u4unryw\\prompt_master-2.3.0-py3-none-any.whl' and adding 'build\\bdist.win-amd64\\wheel' to it
+adding 'pm/__init__.py'
+adding 'pm/assertions.py'
+adding 'pm/backend.py'
+adding 'pm/bootstrap.py'
+adding 'pm/cache.py'
+adding 'pm/casesaudit.py'
+adding 'pm/cliforward.py'
+adding 'pm/cost.py'
+adding 'pm/desktop.py'
+adding 'pm/doctor.py'
+adding 'pm/graph.py'
+adding 'pm/injection_pack.py'
+adding 'pm/keycheck.py'
+adding 'pm/mcp_server.py'
+adding 'pm/memory.py'
+adding 'pm/netguard.py'
+adding 'pm/panel.py'
+adding 'pm/paths.py'
+adding 'pm/preflight.py'
+adding 'pm/promptdiff.py'
+adding 'pm/promptgate.py'
+adding 'pm/prompts.py'
+adding 'pm/quality.py'
+adding 'pm/ratelimit.py'
+adding 'pm/report.py'
+adding 'pm/report_helpers.py'
+adding 'pm/report_sections.py'
+adding 'pm/scheduler.py'
+adding 'pm/schemas.py'
+adding 'pm/scoring.py'
+adding 'pm/server.py'
+adding 'pm/skillmd.py'
+adding 'pm/state.py'
+adding 'pm/store.py'
+adding 'pm/testing.py'
+adding 'pm/textio.py'
+adding 'pm/calibration/__init__.py'
+adding 'pm/calibration/__main__.py'
+adding 'pm/calibration/cli.py'
+adding 'pm/calibration/history.py'
+adding 'pm/calibration/paths.py'
+adding 'pm/calibration/render.py'
+adding 'pm/calibration/run.py'
+adding 'pm/calibration/samples.py'
+adding 'pm/calibration/stats.py'
+adding 'pm/cli/__init__.py'
+adding 'pm/cli/agent_mode.py'
+adding 'pm/cli/calibrate.py'
+adding 'pm/cli/check.py'
+adding 'pm/cli/console.py'
+adding 'pm/cli/diffcmd.py'
+adding 'pm/cli/doctorcmd.py'
+adding 'pm/cli/gatecmd.py'
+adding 'pm/cli/history.py'
+adding 'pm/cli/library.py'
+adding 'pm/cli/live_lock.py'
+adding 'pm/cli/main.py'
+adding 'pm/cli/panelcmd.py'
+adding 'pm/cli/pipeline.py'
+adding 'pm/cli/selftest.py'
+adding 'pm/cli/support.py'
+adding 'pm/llm/__init__.py'
+adding 'pm/llm/_log.py'
+adding 'pm/llm/budget.py'
+adding 'pm/llm/calls.py'
+adding 'pm/llm/config.py'
+adding 'pm/llm/ledger.py'
+adding 'pm/llm/retry.py'
+adding 'pm/llm/schema.py'
+adding 'pm/modelhub/__init__.py'
+adding 'pm/modelhub/agents.py'
+adding 'pm/modelhub/console.py'
+adding 'pm/modelhub/filelock.py'
+adding 'pm/modelhub/ledger.py'
+adding 'pm/modelhub/notify.py'
+adding 'pm/modelhub/pool.py'
+adding 'pm/modelhub/server.py'
+adding 'pm/modelhub/streaming.py'
+adding 'pm/modelhub/usage_store.py'
+adding 'pm/modelhub/vkeys.py'
+adding 'pm/nodes/__init__.py'
+adding 'pm/nodes/baseline.py'
+adding 'pm/nodes/clarify.py'
+adding 'pm/nodes/common.py'
+adding 'pm/nodes/execute.py'
+adding 'pm/nodes/judge.py'
+adding 'pm/nodes/optimize.py'
+adding 'pm/nodes/profiles.py'
+adding 'pm/nodes/report.py'
+adding 'pm/nodes/revise.py'
+adding 'pm/web/__init__.py'
+adding 'pm/web/_body.py'
+adding 'pm/web/_css.py'
+adding 'pm/web/_js.py'
+adding 'pm/web/_panel.py'
+adding 'prompt_master-2.3.0.data/data/case_templates/openclaw_browser_scrape.json'
+adding 'prompt_master-2.3.0.data/data/case_templates/openclaw_cron_briefing.json'
+adding 'prompt_master-2.3.0.data/data/case_templates/openclaw_feishu_daily.json'
+adding 'prompt_master-2.3.0.data/data/case_templates/sales_analysis.json'
+adding 'prompt_master-2.3.0.data/data/case_templates/support_triage.json'
+adding 'prompt_master-2.3.0.dist-info/licenses/LICENSE'
+adding 'prompt_master-2.3.0.dist-info/METADATA'
+adding 'prompt_master-2.3.0.dist-info/WHEEL'
+adding 'prompt_master-2.3.0.dist-info/entry_points.txt'
+adding 'prompt_master-2.3.0.dist-info/top_level.txt'
+adding 'prompt_master-2.3.0.dist-info/RECORD'
+removing build\bdist.win-amd64\wheel
+Successfully built prompt_master-2.3.0.tar.gz and prompt_master-2.3.0-py3-none-any.whl
+Checking D:\projects\prompt-master\dist\prompt_master-2.3.0-py3-none-any.whl: PASSED
+Checking D:\projects\prompt-master\dist\prompt_master-2.3.0.tar.gz: PASSED
+产品版本（唯一事实源）：2.3.0
+⚠️ HEAD 上没有 v2.3.0 tag（--check 允许；--upload 会拒绝）
+⚠️ 工作树不干净（--check 允许；--upload 会拒绝）
+$ D:\projects\prompt-master\.venv\Scripts\python.exe -m build --sdist --wheel --outdir D:\projects\prompt-master\dist
+$ D:\projects\prompt-master\.venv\Scripts\python.exe -m twine check D:\projects\prompt-master\dist\prompt_master-2.3.0-py3-none-any.whl D:\projects\prompt-master\dist\prompt_master-2.3.0.tar.gz
+
+✅ 产物校验通过：
+  prompt_master-2.3.0.tar.gz  1,052,788 bytes  sha256=d41b213f7028a8f6…
+  prompt_master-2.3.0-py3-none-any.whl  522,956 bytes  sha256=a46d2beb863ad111…
