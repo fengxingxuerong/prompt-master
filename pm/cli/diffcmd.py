@@ -27,6 +27,7 @@ from pm.promptdiff import (
     diff_prompts,
     resolve_source,
 )
+from pm.verdict import attach, decide
 
 from .support import _EXIT_PASSED, EXIT_CONFIG, EXIT_UNDELIVERED, setup_logging
 
@@ -243,9 +244,17 @@ def diff_command(argv: list[str]) -> int:
         delta["unified"] = ""
 
     if args.json:
-        payload = {"mode": "prompt_diff", "ok": not delta["regressed"], **delta}
+        payload = {"mode": "prompt_diff", **delta}
         if args.base_ref:
             payload["base_ref"] = args.base_ref
+        # 三态裁决（2026-10-26，PE-2）。`diff` 的"没比成"分支是**空**的，这是核对出来的：
+        # 空文件与空正文在上游 `resolve_source` / `resolve_git_base` 就退 2
+        # （实测：`diff <空文件> <正常文件>` ⇒ rc=2「是空文件，没有可对比的正文」），
+        # 走不到这里。所以这里恒为 confirmed / rejected，`unvalidated` 恒为空数组 ——
+        # 保留键是为了让 JSON 契约在所有零调用命令上**同形**（消费方不用写分支），
+        # 而不是预留一个假想的将来分支。
+        payload["unvalidated"] = []
+        attach(payload, decide(rejected=bool(delta["regressed"]), unvalidated_facts=[]))
         print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
     else:
         print(render_text(delta))

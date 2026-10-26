@@ -30,6 +30,7 @@ from pm.quality import (
     structure_items,
 )
 from pm.textio import TextDecodeError, read_text_auto, warn_if_fallback
+from pm.verdict import attach, decide, unvalidated
 
 from .support import (
     _EXIT_PASSED,
@@ -183,6 +184,64 @@ def _cases_target(p: argparse.ArgumentParser, args: argparse.Namespace) -> dict[
     return audit_cases(cases, max_cases=MAX_SEED_CASES)
 
 
+def _prompt_payload(
+    source: str, findings: list[dict[str, Any]], stats: dict[str, Any]
+) -> dict[str, Any]:
+    """`check --prompt*` 的 JSON 载荷（三态裁决，见 `pm/verdict.py`）。
+
+    这一路**只有一个**可能没核验成的分支：抽查内容为空时早就退 2 了，所以正常情形下
+    要么 confirmed（没命中）要么 rejected（命中）。`unvalidated` 留空数组而不是省略键 ——
+    省键会让消费方写成 `payload["unvalidated"]` 时 KeyError，而"没有未决事实"
+    恰恰是这里最常见的情形，不该考调用方的防御性写法。
+    """
+    payload: dict[str, Any] = {
+        "mode": "prompt_check",
+        "source": source,
+        "findings": findings,
+        **stats,
+        "unvalidated": [],
+    }
+    return attach(payload, decide(rejected=bool(findings), unvalidated_facts=[]))
+
+
+def _cases_payload(
+    source: str | None, findings: list[dict[str, Any]], stats: dict[str, Any]
+) -> dict[str, Any]:
+    """`check --cases-file` 的 JSON 载荷：**此处是三态真正有用的地方**。
+
+    一张考卷可以"结构上没问题"（findings 为空）却**一票否决强判据为 0 条**
+    ——那种考卷挡不住差输出，达标判定将完全由评委印象分决定（`render_cases` 里
+    早就有这句话，但 JSON 出口把它吞了：只给 `ok: true`）。
+    ⇒ 强判据为 0 记 `no_strong_veto`，一张否决票都没有记 `no_veto_capable`。
+    """
+    payload: dict[str, Any] = {
+        "mode": "cases_check",
+        "source": source,
+        "findings": findings,
+        **stats,
+        "unvalidated": [],
+    }
+    if not findings:
+        facts: list[dict[str, str]] = []
+        if not stats.get("veto_strong"):
+            facts.append(
+                unvalidated(
+                    "no_strong_veto",
+                    "这份考卷里一票否决的强判据为 0 条 ⇒ 达标判定将完全由评委印象分决定",
+                )
+            )
+        if not stats.get("veto_capable"):
+            facts.append(
+                unvalidated(
+                    "no_veto_capable",
+                    "这张考卷没有任何一条能一票否决的用例 ⇒ 它挡不住差输出",
+                )
+            )
+        payload["unvalidated"] = facts
+    rejected = bool(findings)
+    return attach(payload, decide(rejected=rejected, unvalidated_facts=payload["unvalidated"]))
+
+
 def check_command(argv: list[str]) -> int:
     """`run.py check` 入口。给 `--cases-file` 时体检的是一份用例集，否则是一份提示词。"""
     p = argparse.ArgumentParser(
@@ -218,13 +277,7 @@ def check_command(argv: list[str]) -> int:
         if args.json:
             print(
                 json.dumps(
-                    {
-                        "mode": "cases_check",
-                        "source": args.cases_file,
-                        "ok": not findings,
-                        "findings": findings,
-                        **stats,
-                    },
+                    _cases_payload(args.cases_file, findings, stats),
                     ensure_ascii=False,
                     indent=2,
                 )
@@ -240,13 +293,7 @@ def check_command(argv: list[str]) -> int:
     if args.json:
         print(
             json.dumps(
-                {
-                    "mode": "prompt_check",
-                    "source": source,
-                    "ok": not findings,
-                    "findings": findings,
-                    **stats,
-                },
+                _prompt_payload(source, findings, stats),
                 ensure_ascii=False,
                 indent=2,
             )

@@ -2623,3 +2623,75 @@ library、gate、diff、mermaid、MCP 14 工具、假后端整图 32 调用到 p
 本轮不改评分协议、不跑真端点，因此**不产生任何效果结论**；13 条守卫钉的是**分发件的形状**
 （frontmatter 合法 / 市场条目闭合 / 版本同源 / Action 只调零调用子命令且输出对得上），不是产品能力。
 "装了技能就能用好"这句话本轮**没有证据**，只有"装得上、形状对、门禁拦得住真回归"这三件。
+
+## Round 45（2026-10-26，PromptMaster 本产品）—— 三态裁决（PE-2）：`ok` 不再把「没比成」说成「没问题」
+
+**本轮判据**：第五轮竞品对照的 PE-2。对照物是 cloudflare/security-audit-skill 的做法 ——
+它把"未决"做成**被 schema 和校验脚本卡住的结构字段**（`needs_validation` 必须带
+`an exact unresolved fact and no severity`），而本仓那时只把"不可采信/不可估"写在报告散文里。
+
+### 先取证：一条静默错误（不是推测）
+
+`gate` 在**没有基线**（新分支首次推送，`github.event.before` 是全零 SHA）时的 JSON：
+
+```json
+{"skipped": true, "skip_reason": "…客观上没有可对比的版本…", "regressed": false, "ok": true}
+```
+
+**一个模板都没比，却报 `ok: true`。** 消费方（Agent / CI 面板 / 别人的脚本）只读 `ok`，
+就会把"没检查"读成"检查通过"。它还是**静默**的：退出码 0、日志无异常 ——
+与本产品"如实说清哪里还不行"这条线直接相反。
+
+同类第二处：`check --cases-file` 对一张**一张否决票都没有**的考卷给 `ok: true`。
+那种考卷挡不住差输出（`render_cases` 早把这句话印给人看了），JSON 出口却把它吞了。
+
+### 做了什么
+
+新增 `pm/verdict.py`：
+
+- 三态 `confirmed` / `needs_validation` / `rejected`，**顺序敏感**（真发现问题优先于"没核验成"：
+  「改了 3 个模板引入问题、另 2 个是新增没法比」报 `rejected` 才对）；
+- `unvalidated` 条目**只许** `code` / `fact`，多一个键（尤其 severity）直接判不自洽 ——
+  给了程度就会被人按"轻微"放行，而这套裁决的全部价值恰恰是不许放行；
+- `attach()` 让 `ok` **严格等于** `confirmed`（它**覆盖**调用方原先写的 `ok`，那正是它存在的理由）；
+- `validate()` 可被消费方直接调用；另有 `python -m pm.verdict <payload.json|->` 自校验入口。
+
+接入三处：`gate`（含 `no_baseline` / `no_base_file` / `added_templates` / `removed_templates` /
+`gate_error` 五种未决事实）、`check`（含 `--cases-file` 的 `no_strong_veto` / `no_veto_capable`）、
+`diff`（同形带 `unvalidated: []`，理由写在代码里：空文件在上游就退 2，这条分支**核对过是空的**，
+保留键只为让三个命令 JSON 同形）。
+
+**退出码一个都没改**：首次推送仍放行（`--require-baseline` 才退 2）。
+`ok` 与退出码**故意不同步** —— 构建红不红，和"这次结论成不成立"不是同一个问题；
+让"没基线"也退 1 会把新分支永久弄红（本仓对"永远红的门禁"有专门教训：
+它会被绕过，最后变成"本地跑过、CI 也绿"的错觉）。
+
+### 验收读数
+
+- 全量 `pytest tests -q` ⇒ **2177 passed / 1 skipped / 0 failed**（收集 2156 → **2178**）。
+- `tests/test_verdict.py` **22 条**：纯逻辑（顺序、只许两键、ok 必须等于 confirmed、两种互斥）+
+  三命令各路径 + `-m pm.verdict` 的 UTF-8 管道与用法错。
+- `ruff check` / `ruff format --check`（CI 同路径）与 `mypy --strict`（102 files）全绿。
+
+### 本轮踩到并修掉的三处（都是我自己写坏的，记下来）
+
+1. **复杂度棘轮当场红**：`validate` CC=12 > 硬上限 10。按仓规**拆函数**（`_check_fact_item` +
+   `_check_verdict_facts_consistency`）而不是登记豁免；顺手换来"报错能精确到第几条哪一项"。
+2. **校验器自己在 GBK 下崩**：`python -m pm.verdict` 印 `✅/❌` 直接 `UnicodeEncodeError` ——
+   一个校验器在报错时崩掉，比不校验更糟。本仓早有这条门禁（`tests/test_console_gbk_entry.py`
+   要求交付面的 `__main__` 入口统一走 `ensure_utf8_stdio`），我第一版没照做；现已走 helper，
+   并把符号换成 `[通过]/[不通过]`。
+3. **两处夹具测错了东西**（不是产品问题，但会锁死错误结论）：① 用中文 scenario 造考卷，
+   撞上 `scenario_gap` 得到 `rejected`，测的其实是"考卷有结构问题"；改用标准名 `main_path`/`boundary`。
+   ② 往 `pm/prompts.py` **追加**一个模板来造回归，但新增模板没有基线可比、`gate` 正确地**不判回归**；
+   改成覆盖同名模板正文。两条都在用例 docstring 里写清楚了，免得下一个人再踩。
+
+另有一处**自查删掉的死代码**：原本给 `diff` 写了 `empty_left`/`empty_right` 两个未决事实，
+实测空文件在上游 `resolve_source` 就退 2（"是空文件，没有可对比的正文"），走不到裁决层 ⇒
+按仓规不留假想分支，删掉并在原地写明"核对过是空的"。
+
+### 诚实边界
+
+本轮**不改评分协议、不跑真端点**，不产生任何效果结论；22 条守卫钉的是 **JSON 契约的自洽性**，
+不是"提示词变好了"。`needs_validation` 让"没查"不再冒充"查过了"，但它**不会**让缺的检查真的被做掉 ——
+首次推送仍然没有基线，考卷仍然可能一张否决票都没有。它只是让机器读得出来。

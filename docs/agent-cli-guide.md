@@ -52,8 +52,8 @@ python run.py --task "分析销售数据并给出结论" --fast --json
 ```bash
 # 先零调用体检：不联网、不花 token，命中规则 → 退出码 1（判据与优化循环内那套同源）
 python run.py check --prompt-file 我的提示词.md --json
-# → {"mode":"prompt_check","ok":false,"findings":[{"code":"constraint_overload",...}],
-#    "constraints":11,"constraint_limit":8,"delimiter_problems":[...],"leak_tags":[...]}
+# → {"mode":"prompt_check","verdict":"confirmed","ok":true,"findings":[],
+#    "constraints":3,"constraint_limit":8,"delimiter_problems":[],"leak_tags":[],"unvalidated":[]}
 
 # 同样零调用，改体检一份用例集：先数清它有几票真能挡住差输出，再决定要不要为它花钱
 python run.py check --cases-file case_templates/sales_analysis.json --json
@@ -76,6 +76,36 @@ python run.py --task "分析销售数据并给出结论" --prompt-file 我的提
   此时 Δ 读作「比你自己的版本好多少」，不再是「比把需求直接喂给模型好多少」。
 - 原稿的体检命中项写进报告「原稿体检」节并作为判据交给改进器，
   但**不进** `prompt_quality_issues`（那一列会按轮次注入评委，改进版不该为原稿的毛病挨扣分）。
+
+#### 三个零调用命令的 JSON 都带三态裁决（2026-10-26 起）
+
+`ok` 只有一个布尔，曾把两件事混成一件：**「比过了没问题」** 与 **「没比成」**。
+实测缺陷（修前）：`gate` 在"没有基线"（新分支首次推送）时输出
+`{"skipped": true, "regressed": false, "ok": true}` —— **一个模板都没比，却报 OK**。
+
+现在所有 `--json` 出口都带 `verdict` + `unvalidated`，`ok` 严格等于 `confirmed`：
+
+| `verdict` | 含义 | 硬约束 |
+|---|---|---|
+| `confirmed` | 真的核验过，且没发现问题 | 不许带 `unvalidated` |
+| `needs_validation` | **没能核验** | **必须**带至少一条未决事实 |
+| `rejected` | 核验过，且发现问题 | — |
+
+```json
+{"mode":"prompt_gate","skipped":true,"ok":false,"verdict":"needs_validation",
+ "unvalidated":[{"code":"no_baseline","fact":"本次没有可对比的基线（…）⇒ 未做任何回归判定"}]}
+```
+
+- `unvalidated` 每条**只许** `code` / `fact`，**不许给程度**（给了就会被当成"轻微"放行）。
+  这是抄 cloudflare/security-audit-skill 的 `needs_validation` 口径。
+- ⚠️ **`ok` 与退出码不同步是刻意的**：门禁"没比成"时 `ok=false` 但退出码仍是 0
+  （首次推送不该把构建弄红，`--require-baseline` 才判 2）。构建红不红 ≠ 这次结论成不成立。
+- 消费方不必相信这份文档：`python -m pm.verdict <payload.json>`（或 `-` 读 stdin）会校验自洽性，
+  退出码 0=自洽 / 1=有问题 / 2=用法错。也可以在代码里 `from pm.verdict import validate`。
+
+`--cases-file` 是三态**最有用**的地方：一张考卷可以结构上没问题（`findings` 为空）
+却**一张否决票都没有** —— 那种考卷挡不住差输出，此时给 `needs_validation`
+（`no_strong_veto` / `no_veto_capable`），而不是含糊的 `ok: true`。
 
 ### 配置自检（零调用）
 

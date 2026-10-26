@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from pm.promptgate import DEFAULT_PATHS, GateError, gate, render_text
+from pm.verdict import attach, decide, unvalidated
 
 from .support import _EXIT_PASSED, EXIT_CONFIG, EXIT_UNDELIVERED, setup_logging
 
@@ -60,18 +61,18 @@ def gate_command(argv: list[str]) -> int:
     except GateError as e:
         # 门禁自己坏了：必须与"改动有问题"分开，退出码也分开（2 不是 1）
         if args.json:
-            print(
-                json.dumps(
-                    {
-                        "mode": "prompt_gate",
-                        "ok": False,
-                        "gate_error": str(e),
-                        "hint": "这是门禁自身没能执行，不是「提示词有回归」；先修 CI 配置或 --base",
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+            # 三态裁决：门禁没能执行 ⇒ needs_validation（"没核验成"），不是普通的失败。
+            # 这里把它做成一个**带确切未决事实**的载荷，消费方读 verdict 就能分支，
+            # 不必去猜 gate_error 这个键存不存在。
+            facts = [unvalidated("gate_error", f"门禁未能执行 ⇒ 本次未做任何回归判定：{e}")]
+            bad: dict[str, Any] = {
+                "mode": "prompt_gate",
+                "gate_error": str(e),
+                "hint": "这是门禁自身没能执行，不是「提示词有回归」；先修 CI 配置或 --base",
+                "unvalidated": facts,
+            }
+            attach(bad, decide(rejected=False, unvalidated_facts=facts))
+            print(json.dumps(bad, ensure_ascii=False, indent=2))
         else:
             print(f"❌ 门禁未能执行：{e}")
             print("   注意：这是门禁自己坏了，不是「提示词有回归」。")

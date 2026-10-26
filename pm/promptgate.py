@@ -20,6 +20,11 @@
 3. **拿不到基线要吵**，不许静默放行：「比不了」不等于「没回归」。唯一的例外是
    首次推送（全零 SHA，客观上不存在基线），那种情况显式打横幅说明并跳过。
 
+`ok` 的语义（2026-10-26 改，见 `pm/verdict.py`）：从"没回归"改成"**真的核验过**且没回归"。
+没有基线 / 有新增模板没有对照物 ⇒ `verdict=needs_validation`、`ok=false`、`unvalidated`
+逐条给出确切未决事实；退出码**不变**（首次推送仍放行，否则永远红）。
+这条差异是刻意的：构建不该红，但"没查"不该被读成"查过了"。
+
 判据与 `run.py diff` 同源（都用 `pm.promptdiff`），`tests/test_promptgate.py`
 有交叉断言钉住"门禁的判定 == run.py diff 的判定"，两处不会漂移。
 
@@ -38,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from .promptdiff import _items_delta, rule_delta, structure_delta
+from .verdict import VERDICT_CONFIRMED, attach, decide, unvalidated
 
 # 默认门禁对象：仓库里唯一的"提示词资产"文件。
 # case_templates/*.json 是**测试用例**（input/expected）不是提示词；
@@ -243,6 +249,12 @@ def gate(
         "notes": [],
         "regressed": False,
         "ok": True,
+        # 三态裁决（2026-10-26，PE-2）：`ok` 只有一个布尔，而它此前在"跳过"分支上恒为 True，
+        # 于是"一个模板都没比"与"比过且没问题"在 JSON 里长得一样（实测：全零 SHA 时
+        # `{"skipped": true, "regressed": false, "ok": true}`）。这里把两件事拆开：
+        # `unvalidated` 收"确切未决事实"，`verdict` 由它们与 regressed 共同推出。
+        "unvalidated": [],
+        "verdict": VERDICT_CONFIRMED,
     }
 
     try:
@@ -253,7 +265,11 @@ def gate(
         result["skipped"] = True
         result["skip_reason"] = str(e)
         result["notes"].append("本次未做回归判定。注意：这是「没有基线可比」，不是「检查通过」。")
-        return result
+        # 没有基线 ⇒ 一个模板都没比过 ⇒ 这是"没能核验"，不是"核验通过"。
+        result["unvalidated"].append(
+            unvalidated("no_baseline", f"本次没有可对比的基线（{e}）⇒ 未做任何回归判定")
+        )
+        return _finish(result)
 
     result["base"] = base_sha
     result["base_how"] = how
@@ -280,6 +296,13 @@ def gate(
                 f"⚠️ 基线（{base_sha[:12]}）里找不到 `{rel}`：无法与历史版本对比，"
                 "本次对该文件**未做任何回归判定**。若这个文件在基线里本该存在，"
                 "说明 --path 写错了（注意必须是仓库相对路径）"
+            )
+            result["unvalidated"].append(
+                unvalidated(
+                    "no_base_file",
+                    f"`{rel}` 在基线里不存在 ⇒ 该文件未做回归判定"
+                    "（若它本该存在，说明 --path 写错了）",
+                )
             )
 
         head_templates = extract_templates(head_src)
@@ -325,7 +348,6 @@ def gate(
     result["introduced_total"] = introduced_total
     result["added_hits_total"] = added_hits_total
     result["regressed"] = introduced_total > 0 or added_hits_total > 0
-    result["ok"] = not result["regressed"]
 
     if result["added_templates"]:
         result["notes"].append(
@@ -333,12 +355,40 @@ def gate(
             "（把它们的既有命中报成「新引入」会是假红）。请人工过一眼："
             + "、".join(result["added_templates"][:6])
         )
+        # 新增模板同样"没比成"：不参与判定 ⇒ 必须进 unvalidated，否则它们会被
+        # 那批"unnchanged/没命中"的模板一起算成"比过且干净"。
+        result["unvalidated"].append(
+            unvalidated(
+                "added_templates",
+                f"{len(result['added_templates'])} 个模板本次新增、没有基线可比 ⇒ 未参与规则判定："
+                + "、".join(result["added_templates"][:6]),
+            )
+        )
     if result["removed_templates"]:
         result["notes"].append(
             f"{len(result['removed_templates'])} 个模板在本次改动中被删除或改名："
             + "、".join(result["removed_templates"][:6])
         )
-    return result
+        result["unvalidated"].append(
+            unvalidated(
+                "removed_templates",
+                f"{len(result['removed_templates'])} 个模板被删除/改名 ⇒ 其去向未被核验："
+                + "、".join(result["removed_templates"][:6]),
+            )
+        )
+    return _finish(result)
+
+
+def _finish(result: dict[str, Any]) -> dict[str, Any]:
+    """收口：由 `regressed` 与 `unvalidated` 推出三态裁决，并让 `ok` 跟着裁决走。
+
+    这是本模块唯一改动 `ok` 语义的地方：`ok` 从"没回归"改成"**真的核验过**且没回归"。
+    退出码不在这里定（由 `gatecmd` 按 `skipped` / `regressed` 决定），两者故意不同步 ——
+    首次推送不该把构建弄红，但它也绝不该被读成"检查通过了"。理由见 `pm/verdict.py` 的模块 docstring。
+    """
+    return attach(
+        result, decide(rejected=bool(result["regressed"]), unvalidated_facts=result["unvalidated"])
+    )
 
 
 def render_text(result: dict[str, Any]) -> str:
