@@ -520,6 +520,27 @@ def test_prompt_diff_roundtrips_unicode(monkeypatch):
     assert seen["a"] == text, "中文/emoji 在落盘往返中被改动了"
 
 
+def test_zero_call_tools_forward_the_verdict_fields(monkeypatch):
+    """MCP 转发层不许把三态裁决丢掉（2026-10-26，PE-2）。
+
+    `prompt_check` / `prompt_diff` / `cases_check` 都是 `_run_cli_json` 的薄壳：
+    它们把 CLI 的 JSON **原样**返回。CLI 那边已经加了 `verdict` / `unvalidated`
+    （`ok` 严格等于 confirmed），但只要有人在这里改成"只挑几个字段返回"，
+    Agent 侧就又会退回"只有一个 ok"的老问题 —— 而那种改动看起来人畜无害。
+    这条钉住"转发必须无损"。
+    """
+    payload = {
+        "mode": "prompt_check",
+        "ok": False,
+        "verdict": "needs_validation",
+        "unvalidated": [{"code": "no_baseline", "fact": "没有可对比的基线"}],
+    }
+    monkeypatch.setattr(M, "_run_cli_json", lambda argv: dict(payload))
+    out = json.loads(M.prompt_check(prompt="任意正文"))
+    assert out["verdict"] == "needs_validation", "转发层把 verdict 丢了"
+    assert out["unvalidated"] and out["ok"] is False
+
+
 def test_main_starts_stdio_server(monkeypatch):
     """`main()` 必须调用 `mcp.run()`（stdio 传输）。
 
