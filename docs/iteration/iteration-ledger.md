@@ -2603,6 +2603,21 @@ library、gate、diff、mermaid、MCP 14 工具、假后端整图 32 调用到 p
 **检修后的复验**：全量 **2155 passed / 1 skipped / 0 failed**；`ruff` / `format --check` / `mypy --strict` 全绿；
 独立冒烟（不经 pytest）五条路径复跑：回归 rc=1、干净 rc=0、新增文件 rc=0、空 paths rc=2、坏 ref rc=2 —— **与修前一致**（没把修好的东西改坏）。
 
+### 落库与 CI（2026-10-26 当日）
+
+- 落库 `f861206`（51 files / +18,642），已推 `origin/main`。原始抓取产物按量表分流：
+  `data/`（10.2 MB 的 API 原样 JSON）与周榜 RSS（1.2 MB）**不入库**，`.gitignore` 写在报告目录里并说明
+  "可复现 + 已落成可引用形式"；留下的 `raw/` 是小而不可省的证据（清单形状原文、独立冒烟脚本与日志）。
+- **CI 绿**：run `40357353444` ⇒ `conclusion=success`，四个 job 全过 ——
+  `test (3.11)` / `test (3.12)` / `test (3.13)` / `windows`（[run](https://github.com/fengxingxuerong/prompt-master/actions/runs/40357353444)）。
+- 这条把下面那条"未验"**升级**了一格（但仍不等于全验）：13 条守卫（含 bash 端到端）是**在真 GitHub Runner 上跑的**，
+  且 **windows job 也过了** ⇒ "执行体只在本机 bash 验过"这句话过期了；仍**未验**的是
+  **消费者的 workflow 里 `uses: fengxingxuerong/prompt-master@main`** 这条路径（CI 没有消费这个 action 本身）。
+- 顺手验了"外部真能装到"：推完后从 `raw.githubusercontent.com/<repo>/HEAD/...` 取回五个分发件
+  —— `skills/prompt-master/SKILL.md` 5,781 B（frontmatter 正常）、`.claude-plugin/marketplace.json` 906 B、
+  `.claude-plugin/plugin.json` 739 B、`action.yml` 1,895 B、`scripts/action-prompt-gate.sh` 5,253 B。
+  README 让人执行的那两条安装命令背后**确实有文件**（这一步只证"取得到"，不证"市场已索引"）。
+
 ### 诚实边界
 
 本轮不改评分协议、不跑真端点，因此**不产生任何效果结论**；13 条守卫钉的是**分发件的形状**
