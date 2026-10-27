@@ -5,11 +5,14 @@
 > 把「让 AI 分析销售数据」这种一句话需求，变成**被测过、被评过、被证伪过一轮**的提示词，
 > 并如实说清哪里还不行。产出四件：最终提示词 / 交付报告 / 可选 SKILL.md / 机器可读 JSON。
 
-**它不是提示词润色器。** 按花不花钱排，它只做三件事：
+![零调用提示词审计：同一份提示词，改之前命中 suppressive_rule（退出码 1），改好之后干净（退出码 0）](docs/assets/check-demo.png)
+
+**先审计，再优化。** 上面是**真实终端输出**（`prompt-master check`）—— 不改一个字、不花一分钱、
+不出一次网，先告诉你这版提示词会不会出事。**它不是提示词润色器**；按花不花钱排，它只做三件事：
 
 | 你想干的事 | 命令 | 成本 |
 |---|---|---|
-| 体检一版已有提示词 | `run.py check --prompt-file x.md` | 零调用、零出网，命中规则退出码 1 |
+| **审计**一版已有提示词 | `run.py check --prompt-file x.md` | 零调用、零出网，命中规则退出码 1 |
 | CI 里只拦本次新引入的坑 | `run.py gate` | 零调用，判增量不判绝对值 |
 | 跑完整闭环：生成 → 用例 → 评估 → 修订 | `run.py --task "让 AI 分析销售数据"` | 会花钱，先 `--preflight` |
 
@@ -161,7 +164,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；2183 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；2184 条，无 Key、禁止真实出网）
 extras/             可选附件（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 case_templates/     可直接喂 --cases-file 的领域用例集
 releases/           三服务套件与历史发布快照（不是本产品）

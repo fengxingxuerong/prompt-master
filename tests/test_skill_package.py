@@ -125,6 +125,42 @@ def test_skill_links_only_to_existing_docs() -> None:
     assert not missing, f"技能指向了不存在的文档：{missing}"
 
 
+def test_doc_images_exist_and_are_referenced_where_they_matter() -> None:
+    """三个对外文档里的图片必须真实存在，且 SKILL/README 都要有那张演示图。
+
+    两条判据，各挡一种真实的坏法（2026-10-27，第六轮竞品对照的 PF-1a）：
+
+    ① **路径必须存在**：图片是"作者看不见"的那类坏 —— 仓库里图片没了，markdown 语法照样合法，
+       本地看起来也没事，只有别人打开时才是一个裂图。
+    ② **演示图必须挂在门口**：第六轮实测，本仓 0★ 而同期破千星的技能仓全都带演示资产；
+       README 中/英与 SKILL.md 是三个"第一眼"入口，任缺一处就等于没有。
+
+    演示图本身是 `prompt-master check` 的**真实输出**渲染成的（见 docs/assets/check-demo.png）。
+    """
+    docs = {
+        "README.md": ROOT / "README.md",
+        "README.en.md": ROOT / "README.en.md",
+        "SKILL.md": SKILL,
+    }
+    problems: list[str] = []
+    for label, path in docs.items():
+        text = path.read_text(encoding="utf-8")
+        # markdown 图片语法；相对路径以该文件所在目录为基准
+        refs = re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", text)
+        assert refs, f"{label} 里没有任何演示/示意图 —— 第六轮实测：0★ 与'门口没图'同时成立"
+        assert any("check-demo.png" in r for r in refs), f"{label} 没挂那张审计演示图"
+        for ref in refs:
+            if ref.startswith(("http://", "https://")):
+                continue
+            resolved = (path.parent / ref).resolve()
+            if not resolved.is_file():
+                problems.append(f"{label} 指向了不存在的图片：{ref} → {resolved}")
+    assert not problems, problems
+    # 图片本身不能是空文件（0 字节的 PNG 同样是坏图，但路径检查看不出来）
+    png = ROOT / "docs" / "assets" / "check-demo.png"
+    assert png.stat().st_size > 5000, f"演示图只有 {png.stat().st_size} 字节，几乎肯定渲染失败"
+
+
 def test_marketplace_points_at_an_existing_plugin_whose_name_matches() -> None:
     """市场条目 → 插件目录 → 插件名，三者必须闭合。
 

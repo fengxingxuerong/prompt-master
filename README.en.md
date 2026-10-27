@@ -8,6 +8,12 @@
 
 **This is not a prompt polisher.** Ranked by cost, it does exactly three things:
 
+![Zero-call prompt audit: the same prompt trips `suppressive_rule` before the fix (exit 1) and comes back clean after it (exit 0)](docs/assets/check-demo.png)
+
+**Audit first, then optimize.** The image above is **real terminal output** from `prompt-master check`:
+not a single character changed, not a single cent spent, no network access — it tells you whether this
+prompt is going to misbehave before you pay for anything.
+
 | What you want | Command | Cost |
 |---|---|---|
 | Audit an existing prompt | `run.py check --prompt-file x.md` | Zero calls, zero network. Exit 1 on findings |
@@ -122,7 +128,7 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 
 | Item | Value |
 |---|---|
-| Tests | **2,183 collected**, no API key, no live network |
+| Tests | **2,184 collected**, no API key, no live network |
 | Coverage | gated at floor 92 on `pm/` and floor 93 on `pm/modelhub/*`; measured values drift per round — the only maintained table lives in `docs/operations.md` (this README no longer copies snapshots) |
 | CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
 | Interfaces | CLI (13 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |

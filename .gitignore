@@ -4,6 +4,9 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .pytest_tmp/
+# 会话工具产物（截图/裁剪/矢量化等，2026-10-27 起；成品图放 docs/assets/ 入库，
+# 这个目录里的是中间件 —— 别让它们混进版本库）
+.dsh-vision-router/
 .mypy_cache/
 .ruff_cache/
 
