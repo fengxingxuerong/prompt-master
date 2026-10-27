@@ -32,6 +32,17 @@ SEED_PROMPT_MAX_CHARS = 20000
 # 新一轮运行以该标记开头提交 trace，即丢弃历史重新计数。
 TRACE_RESET: dict[str, Any] = {"__trace_reset__": True}
 
+# 澄清提问的**轮数上限**（唯一事实源，2026-10-26 收口）。
+# 此前 `2` 只硬编码在 `graph.route_after_clarify` 里，而"打满上限之后怎么办"
+# 的记账写在 `clarify_node`（PE-3）——两处各写一个字面量，改一处就会
+# "路由允许再问、节点却认为已用尽"这种自相矛盾。收成一个常量，两边共读。
+MAX_CLARIFY_QUESTION_ROUNDS = 2
+
+#: 「这一轮之后还会不会再向用户提问」的两种成因，进 `clarification_unresolved_reason`。
+#: 两者对读者的含义完全不同，报告要分开说：一个是"设计上就没问你"，一个是"问了但没问明白"。
+CLARIFY_REASON_NOT_INTERACTIVE = "not_interactive"
+CLARIFY_REASON_BUDGET_EXHAUSTED = "budget_exhausted"
+
 
 def trace_reducer(
     old: list[dict[str, Any]] | None, new: list[dict[str, Any]] | None
@@ -92,6 +103,17 @@ class State(TypedDict, total=False):
     clarify_questions_asked: int
     needs_reanalysis: bool  # 收到用户回答后需重新分析
     unresolved_questions: list[str]
+    # 带着**未澄清**的需求进入优化（2026-10-26，PE-3）。
+    # 触发条件：本轮判 `is_clear=False`，且提问轮数已用尽（不会再有下一轮提问）
+    # ⇒ 后续的受众/领域/格式/语气全部来自**系统推断**，用户从未确认过。
+    # 为什么要有这个字段：此前这条路径只打一行 `logger.warning`，
+    # 交付物（报告与机器出口）里**一个字都没有** —— 读者只看到"需求侧遗留问题"
+    # 列着几个问题，却不知道交付的提示词是拿推断上下文跑出来的。
+    # 与 PE-2 的 `needs_validation` 同一立场：没核验成的事实必须自己站出来。
+    clarification_unresolved: bool
+    # 未澄清即开跑的成因：`not_interactive`（设计上没问）/ `budget_exhausted`（问了没用）。
+    # 报告要按它说不同的话 —— "没问你"与"问了但没问明白"对读者的含义不一样。
+    clarification_unresolved_reason: str
 
     # --- Node 2 优化 ---
     prompt: str
@@ -144,6 +166,37 @@ class State(TypedDict, total=False):
     llm_usage: dict[str, Any]
 
 
+def can_ask_more_clarification(state: State) -> bool:
+    """这一轮澄清分析之后，还有没有机会再向用户提问（**唯一判据**，两边共读）。
+
+    为什么必须共用一个函数（2026-10-26，PE-3）：路由要用它决定"去 ask_user 还是去 optimize"，
+    `clarify_node` 要用它决定"要不要记『带着未澄清的需求开跑』这笔账"。
+    两处各写一遍 `not is_clear and not auto_clarify and asked < 2`，
+    只要有一处漏掉 `auto_clarify`（比如只写 `asked < 2`），就会出现
+    **非交互模式下路由已经开跑、账上却写着"还能再问"** —— 静默，而且报告会说错话。
+
+    两种"问不了"的成因（由调用方区分，见上面两个常量）：
+      · `auto_clarify=True`（**非交互，CLI 默认**）：设计上就不问用户，靠推断上下文开跑；
+      · `auto_clarify=False`（`--interactive`）：能问，但轮数已用尽。
+    """
+    if state.get("auto_clarify", True):
+        return False
+    return int(state.get("clarify_questions_asked", 0) or 0) < MAX_CLARIFY_QUESTION_ROUNDS
+
+
+def clarification_unresolved_reason(state: State) -> str:
+    """这一轮"问不了"的成因；返回空串表示"还能问"，不属于未澄清即开跑。
+
+    放在 `State` 之后定义是给 mypy 看的：`State` 是 TypedDict，
+    形参写成 `dict[str, Any]` 会与它不兼容（`arg-type` 报错）。
+    """
+    if can_ask_more_clarification(state):
+        return ""
+    if state.get("auto_clarify", True):
+        return CLARIFY_REASON_NOT_INTERACTIVE
+    return CLARIFY_REASON_BUDGET_EXHAUSTED
+
+
 def initial_state(
     task: str,
     context: str = "",
@@ -177,6 +230,8 @@ def initial_state(
         "clarify_questions_asked": 0,
         "needs_reanalysis": False,
         "unresolved_questions": [],
+        "clarification_unresolved": False,
+        "clarification_unresolved_reason": "",
         "prompt": "",
         "prompt_versions": [],
         "prompt_quality_issues": [],

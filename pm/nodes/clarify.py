@@ -13,7 +13,7 @@ from langgraph.types import interrupt
 from .. import llm
 from ..prompts import CLARIFIER_SYSTEM, CLARIFIER_USER, render
 from ..schemas import ClarificationResult
-from ..state import State
+from ..state import State, clarification_unresolved_reason
 from .common import _apply
 
 logger = logging.getLogger("pm.nodes.clarify")
@@ -76,9 +76,35 @@ def clarify_node(state: State) -> dict[str, Any]:
         ).strip()
         patch["unresolved_questions"] = result.clarifying_questions
 
+    if not result.is_clear:
+        # 本轮判不清晰。两种结局必须分开记账（2026-10-26，PE-3）：
+        #   · 还能再问 ⇒ 问题已经（或即将）摆在用户面前，属于"已知的待办"；
+        #   · 问不了（**非交互模式**没问 / 交互模式问满了轮数）⇒
+        #     **带着未澄清的需求继续**，后面的受众/领域/格式/语气全是系统推断，
+        #     用户从未确认。这是"没能核验"的事实，必须自己站出来。
+        # ⚠️ 这里与 `route_after_clarify` 读**同一条判据**（`can_ask_more_clarification`）：
+        # 各写一遍的话，非交互模式下路由已经开跑、账上却还写着"还会再问"。
+        reason = clarification_unresolved_reason(state)
+        if reason:
+            patch["clarification_unresolved"] = True
+            patch["clarification_unresolved_reason"] = reason
+            # 上面那个 `INFERRED_MARK not in context` 的幂等闸会把第二轮的
+            # 问题列表**整批丢掉**（推断标记第一轮就写进去了）⇒ 报告里列的是
+            # 第一轮的旧问题，用户看到的是过期信息。这里只刷新**问题列表**，
+            # 不碰 context，所以不会带来"上下文越跑越长"的老问题。
+            patch["unresolved_questions"] = result.clarifying_questions
+            logger.warning(
+                "澄清未果（%s）且需求仍判不清晰：带着未澄清的需求继续",
+                reason,
+            )
+
     if result.is_clear and state.get("unresolved_questions"):
         # 用户已回答且本轮判清晰：遗留问题必须清空，否则报告仍会把已回答的问题列为遗留（A7）
         patch["unresolved_questions"] = []
+    if result.is_clear:
+        # 需求已澄清 ⇒ 撤销"带着未澄清继续"的记账（同一轮里先判不清晰、后澄清的路径）
+        patch["clarification_unresolved"] = False
+        patch["clarification_unresolved_reason"] = ""
 
     # 无论本次是否判定清晰，都要把（可能含用户回答与推断的）上下文写回，
     # 否则用户回答只会停在 state 里，永远传不到 Optimizer。

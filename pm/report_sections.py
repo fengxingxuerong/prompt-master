@@ -36,6 +36,11 @@ from .schemas import (
     judge_disagreement_threshold,
     judge_jitter,
 )
+from .state import (
+    CLARIFY_REASON_BUDGET_EXHAUSTED,
+    CLARIFY_REASON_NOT_INTERACTIVE,
+    MAX_CLARIFY_QUESTION_ROUNDS,
+)
 
 
 def _header_lines(state: ReportState) -> list[str]:
@@ -224,6 +229,13 @@ def _verdict_caveats(state: ReportState, agg: dict[str, Any]) -> list[str]:
         out.append(
             "- ⚠️ **噪声不可估**：每条用例只采样 1 次，「采样噪声 0.0」是**没测到**"
             "而不是「打分完全一致」（见「置信度与采样噪声」）。"
+        )
+    if state.get("clarification_unresolved"):
+        # 与"Δ 不可采信"同级搬进结论区（2026-10-26，PE-3）：它改变的是**读者该怎么读这份交付**——
+        # 需求前提本身没被确认过，那么再准的分数也只是"在一种未经确认的理解上更好了"。
+        out.append(
+            "- ⚠️ **需求未澄清即开跑**：提问轮数已用尽仍未判清晰，本轮按**系统推断**的"
+            "受众/领域/格式/语气优化（见「需求侧遗留问题」）。"
         )
     return out
 
@@ -763,11 +775,33 @@ def _version_table_lines(state: ReportState) -> list[str]:
 
 def _unresolved_lines(state: ReportState) -> list[str]:
     unresolved = state.get("unresolved_questions", []) or []
-    if not unresolved:
+    # 带着未澄清的需求开跑（2026-10-26，PE-3）：光列问题不够 ——
+    # 读者会把这些当成"以后再答也行"，而真相是**交付物已经按系统推断的
+    # 受众/领域/格式/语气做出来了**，用户从未确认过那一版理解。
+    # 所以抬头必须说清这是哪一种"遗留"。（判据不在渲染层产生：读 state 的两个既有字段。）
+    if not unresolved and not state.get("clarification_unresolved"):
         return []
     lines: list[str] = []
     lines.append("## 需求侧遗留问题")
     lines.append("")
+    if state.get("clarification_unresolved"):
+        asked = state.get("clarify_questions_asked", 0)
+        reason = state.get("clarification_unresolved_reason", "")
+        # 两种成因对读者的含义不同，必须分开说（2026-10-26，PE-3）：
+        # "没问你"（非交互，CLI 默认）与"问了但没问明白"（打满轮数）不是同一件事，
+        # 混成一句话会让读者以为系统问过他却没答。
+        if reason == CLARIFY_REASON_NOT_INTERACTIVE:
+            why = "本轮为**非交互模式**（未向你提问，属设计如此）"
+        elif reason == CLARIFY_REASON_BUDGET_EXHAUSTED:
+            why = f"已向你提问 {asked} 轮（上限 {MAX_CLARIFY_QUESTION_ROUNDS} 轮）仍未判清晰"
+        else:
+            why = "本轮未取得澄清"
+        lines.append(
+            f"> ⚠️ **需求未澄清即开跑**：{why}，本轮**直接带着系统推断的"
+            "受众/领域/格式/语气进入优化**。下面这些问题**没有拿到你的回答**；"
+            "若它们的答案会改变结果，请先回答再重跑一轮。"
+        )
+        lines.append("")
     for q in unresolved:
         lines.append(f"- {q}")
     lines.append("")

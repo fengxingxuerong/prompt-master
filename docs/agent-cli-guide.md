@@ -107,6 +107,26 @@ python run.py --task "分析销售数据并给出结论" --prompt-file 我的提
 却**一张否决票都没有** —— 那种考卷挡不住差输出，此时给 `needs_validation`
 （`no_strong_veto` / `no_veto_capable`），而不是含糊的 `ok: true`。
 
+### 需求没澄清楚就开跑，也会自己站出来（2026-10-26）
+
+主流程的 `--json` 出口带两个字段，报告结论区与「需求侧遗留问题」节同步点名：
+
+```json
+{"status": "passed", "clarification_unresolved": true,
+ "clarification_unresolved_reason": "not_interactive",
+ "unresolved_questions": ["到底要什么？"], "clarify_questions_asked": 0}
+```
+
+- `clarification_unresolved=true` 表示：**本轮是带着未澄清的需求跑的** ——
+  受众 / 领域 / 格式 / 语气全部来自**系统推断**，你从未确认过。
+- `clarification_unresolved_reason` 区分两种成因（对读者的含义完全不同）：
+  - `not_interactive` —— **CLI 默认**（`auto_clarify = not --interactive`）：设计上就没问你；
+  - `budget_exhausted` —— `--interactive` 下问满 2 轮（`MAX_CLARIFY_QUESTION_ROUNDS`）仍判不清晰。
+- 修前这条路径只打一行 `logger.warning`，报告与 JSON 一个字段都没有 ⇒
+  Agent 只看到"跑完了、有分"，不知道交付建立在未经确认的理解之上。
+- **它不改退出码、不改判定**：仍按 `passed` / 未达标正常交付，只是把
+  "前提没被确认"如实写进产物 —— 要不要补答后重跑，由你决定。
+
 ### 配置自检（零调用）
 
 ```bash

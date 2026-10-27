@@ -161,7 +161,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；2179 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；2183 条，无 Key、禁止真实出网）
 extras/             可选附件（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 case_templates/     可直接喂 --cases-file 的领域用例集
 releases/           三服务套件与历史发布快照（不是本产品）

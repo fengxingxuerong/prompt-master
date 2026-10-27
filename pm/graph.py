@@ -29,7 +29,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from . import nodes
-from .state import State
+from .state import (
+    State,
+    can_ask_more_clarification,
+    clarification_unresolved_reason,
+)
 
 logger = logging.getLogger("pm.graph")
 
@@ -47,13 +51,19 @@ def route_after_clarify(state: State) -> str:
         return "clarify"
 
     clarification = state["clarification"] or {}
-    if not clarification.get("is_clear") and not state.get("auto_clarify", True):
+    if not clarification.get("is_clear"):
         # M8：上限按「已向用户提问的轮数」计，而不是 clarify 分析次数。
         # 旧写法 `clarify_round < 2` 里 clarify_round 在每次 clarify 都 +1
         # （含带答案重分析），实际最多只问 1 轮，与文档承诺的 2 轮不符。
-        if state.get("clarify_questions_asked", 0) < 2:
+        # ⚠️ "还能不能再问"必须与 `clarify_node` 的记账读**同一条判据**
+        # （`can_ask_more_clarification`），否则会出现"路由已经开跑、账上却还写着会再问"
+        # 的自相矛盾 —— 那种矛盾不报错，只会让报告说错话（2026-10-26，PE-3）。
+        if can_ask_more_clarification(state):
             return "ask_user"
-        logger.warning("澄清提问已达 2 轮上限，改用推断上下文继续")
+        logger.warning(
+            "澄清未果（%s），改用推断上下文继续",
+            clarification_unresolved_reason(state) or "不可提问",
+        )
     return "optimize"
 
 

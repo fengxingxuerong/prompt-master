@@ -304,6 +304,12 @@ def emit_json_result(final: dict[str, Any], log_path: Path, report_path: Path) -
         "best_prompt": final.get("prompt"),
         "early_stop_reason": final.get("early_stop_reason", ""),
         "unresolved_questions": final.get("unresolved_questions") or [],
+        # 需求前提没被确认过（2026-10-26，PE-3）：此前这条事实只活在 `logger.warning` 里，
+        # 报告与机器出口一个字段都没有 ⇒ Agent 只看到"跑完了、有分"，
+        # 不知道这份交付是拿系统推断的受众/领域/格式/语气做出来的。
+        "clarification_unresolved": bool(final.get("clarification_unresolved")),
+        "clarification_unresolved_reason": final.get("clarification_unresolved_reason", ""),
+        "clarify_questions_asked": final.get("clarify_questions_asked", 0),
         "injection_survival": final.get("injection_survival"),
         "injection_gate": final.get("injection_gate"),
         "errors": final.get("errors") or [],
