@@ -1,0 +1,259 @@
+﻿================================================================================================
+A. 24h 坐标（Δ 基线 = 第五轮 2026-10-26 读数）
+================================================================================================
+  39402    +161  linshenkx/prompt-optimizer       NOASSERTION   push=2026-10-26 09:10 created=2025-02-12 iss=3
+        An AI prompt optimizer for writing better prompts and getting be
+  38816     +26  stanfordnlp/dspy                 MIT           push=2026-10-26 21:01 created=2023-01-09 iss=825
+        DSPy: The framework for programming—not prompting—language model
+  36583     +97  langfuse/langfuse                NOASSERTION   push=2026-10-27 11:20 created=2023-05-18 iss=1114
+        🪢 Open source agent evals & observability: Trace, evaluate, and 
+  35351    +849  ifixai-ai/iFixAi                 Apache-2.0    push=2026-10-24 23:10 created=2026-04-27 iss=2
+        Independent Auditing of AI Agents. Run by human or the agent its
+  26488     +59  promptfoo/promptfoo              MIT           push=2026-10-26 19:28 created=2023-04-28 iss=869
+        Test your prompts, agents, and RAGs. Red teaming/pentesting/vuln
+  22960     +35  comet-ml/opik                    Apache-2.0    push=2026-10-27 11:19 created=2023-05-10 iss=181
+        Debug, evaluate, and monitor your LLM applications, RAG systems,
+  19660      +6  openai/evals                     NOASSERTION   push=2026-04-14 15:29 created=2023-01-23 iss=350
+        Evals is a framework for evaluating LLMs and LLM systems, and an
+  19135     +31  confident-ai/deepeval            Apache-2.0    push=2026-10-23 11:41 created=2023-08-10 iss=788
+        The LLM Evaluation Framework
+  12022     +18  Arize-ai/phoenix                 NOASSERTION   push=2026-10-27 11:17 created=2022-11-09 iss=1234
+        AI Observability & Evaluation
+   7158     +10  gepa-ai/gepa                     MIT           push=2026-10-26 19:02 created=2025-08-05 iss=138
+        Optimize prompts, code, and more with AI-powered Reflective Opti
+   7140     +49  Tencent/AI-Infra-Guard           Apache-2.0    push=2026-10-27 02:53 created=2024-12-25 iss=27
+        A full-stack AI Red Teaming platform securing AI ecosystems via 
+   6282      +7  Q00/ouroboros                    MIT           push=2026-10-26 19:36 created=2026-01-14 iss=83
+        Agent OS: the agent gets smarter on its own. We just hold the li
+   5236      +3  Kiln-AI/Kiln                     NOASSERTION   push=2026-10-27 11:19 created=2024-07-23 iss=54
+        Build, Evaluate, and Optimize AI Systems. Includes evals, RAG, a
+   4022      +0  microsoft/PromptWizard           MIT           push=2025-10-13 21:51 created=2024-05-30 iss=24
+        Task-Aware Agent-driven Prompt Optimization Framework
+   3776      +6  zou-group/textgrad               MIT           push=2025-07-25 14:30 created=2024-06-11 iss=66
+        TextGrad: Automatic ''Differentiation'' via Text -- using large 
+   3614      +3  truera/trulens                   MIT           push=2026-10-26 17:24 created=2020-11-02 iss=119
+        Evaluation and Tracking for LLM Experiments and AI Agents
+   3109     +15  UKGovernmentBEIS/inspect_ai      MIT           push=2026-10-27 11:20 created=2023-11-14 iss=456
+        Inspect: A framework for large language model evaluations
+   1027      +0  meta-llama/prompt-ops            MIT           push=2026-04-21 18:28 created=2025-03-14 iss=22
+        An open-source tool for LLM prompt optimization.
+   1000      +4  hashgraph-online/hol-guard       Apache-2.0    push=2026-10-27 11:21 created=2026-03-28 iss=85
+        Open-source antivirus for AI agents: block risky tools, secret a
+    311      +0  sutro-sh/jev-align               Apache-2.0    push=2026-10-03 17:48 created=2026-09-19 iss=2
+        Build calibrated AI Functions from human feedback using Jev and 
+      0      +0  fengxingxuerong/prompt-master    MIT           push=2026-10-27 07:24 created=2026-09-26 iss=0
+        
+
+================================================================================================
+B. 本轮新建（created>2026-10-19，star 降序，只列同题相关的前 25）
+================================================================================================
+
+--- s1-created-since-round5.json (total=4769) ---
+    2179 Jakeschincariol/day-trader-skill         created=2026-10-20
+         11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry an
+    1766 t3dotgg/tstack                           created=2026-10-24
+         The agent skills I use every day. Works with Claude Code and Codex.
+    1261 morganlinton/BeautifulRust               created=2026-10-23
+         Agent Skills that teach coding agents to write, review, and port idiomatic Rust, plus a tested clipp
+     944 andyhuo520/digital-human-koubo           created=2026-10-26
+         AI digital-human talking-head videos from one photo: Renoise MCP generation + 5 editing styles + 48 
+     920 impacifist/Windows-GPU-UNLOCK            created=2026-10-20
+         Windows GPU UNLOCK: RTX3090 UEFI port, Korean no-reset Windows boot guide, verified source and bench
+     920 DenisSergeevitch/ex-ussr-kinship-research created=2026-10-25
+         Evidence-first genealogy skill for AI agents (Codex, Claude Code): church books, civil, military, de
+     541 ZiChuanLan/agent-purge                   created=2026-10-25
+         One persona, many coding agents. Replace or inject system prompts across codex, claude, opencode, gr
+     518 rossark0/rossark-motion-skill            created=2026-10-22
+         Turn any SVG into a professional 60 fps animation. A Claude Code skill that brings anything drawn to
+     508 wangrongding/tv-fresh                    created=2026-10-24
+         tv-fresh 电视焕新：小米电视(MIUI TV)去广告/清理预装/换桌面/装代理与影视仓的 Agent Skill——免root可逆，含固件逆向实录与一键脚本
+     504 Alejandros17487/ai-jailbreaks            created=2026-10-21
+         AI jailbreaks: 35 paste-ready AI jailbreak prompts for 25+ frontier and open-weight models - system 
+     494 songjianyang/xss-audit                   created=2026-10-24
+         Static XSS audit skill with 14 layers of checks for React, TypeScript, and JavaScript projects.
+     453 agharsallah/esp-labs-web                 created=2026-10-21
+         The ESP32-S3 bench guide as a React app: live pinout, lessons with interactive simulators, a code re
+     413 actionow-ai/vvv                          created=2026-10-22
+         Build a video template once, reuse it across coding agents. Editable Remotion templates and an Agent
+     393 routerhubSI/glm-5.3-abliterated          created=2026-10-24
+         GLM 5.3 abliterated or uncensored API access with RouterHub. Browse 35 jailbreak prompt links, compa
+     366 huaxialucaicaizi/ai-startup-skills       created=2026-10-22
+         创业公司做 AI 产品的 7 步 Agent Skill 合集：验证 → BP → 政策 → 路演 → 获客 → 定价 → 注册。
+     306 KohakuBlueleaf/KohakUnlock               created=2026-10-25
+         Experimental NVIDIA tensor-compute unlock research: guarded TU102 initramfs port, offline tests, and
+     298 zgx949/ai-pojia                          created=2026-10-24
+         破甲CodeX。面向小白的实用 Skills 与插件，可直接破甲CodeX发挥出模型最大的潜能，附完整教程和示例。
+     286 lovisdotio/motion2code                   created=2026-10-20
+         Skills for coding agents: rebuild a motion design video as looping SVG + GSAP code, checked frame by
+     271 helloianneo/ian-xhs-carousel             created=2026-10-21
+         把文章、案例或笔记排成 3:4 小红书图文 | 1080×1440 | 20 个母版 | 浅色 / 深色 | Claude Code Skill
+     270 appariciojunior/video-editor-skills      created=2026-10-23
+         Skills that teach Claude Code to be a first-pass video editor in DaVinci Resolve: transcript cuts, v
+     266 Motionsites-AI/claude-skill              created=2026-10-26
+         Free Claude skill: make Claude build award-level, cinematic landing pages. By MotionSites.
+     266 EgorBo/BlazingFastDotnet                 created=2026-10-23
+         Tips & tricks to tune .NET workloads for better perf (mostly, targeting benchmarks).
+
+--- s2-created-last-48h.json (total=643) ---
+     944 andyhuo520/digital-human-koubo           created=2026-10-26
+         AI digital-human talking-head videos from one photo: Renoise MCP generation + 5 editing styles + 48 
+     266 Motionsites-AI/claude-skill              created=2026-10-26
+         Free Claude skill: make Claude build award-level, cinematic landing pages. By MotionSites.
+     193 0xSero/all-historical-evidence-of-jesus-christ created=2026-10-26
+         Evidence archive for Jesus of Nazareth: research dossier (PDF), New Testament, gnostic and extracano
+     183 deepopen-com/deepopen-3d-webs            created=2026-10-26
+         Image-driven 3D scene generation system. Users provide a reference image and prompt words, and the s
+     124 Andreas698/glm-5.3-uncensored            created=2026-10-26
+         GLM 5.3 Uncensored — 35 jailbreak prompt files, model guide and API access. One RouterHub key also c
+     116 daniellockyer/dstack                     created=2026-10-26
+         The agent skills I use daily.
+      94 ELU-Labs/dark-factory                    created=2026-10-26
+         One prompt that sets up a dark factory for your repository with Grok Bots and ELU.
+      75 derek-zhuolin/motion-skill               created=2026-10-26
+         不出镜，用文案或录音把想法做成视频。Script- or voice-driven motion graphics with Codex and Remotion: real footage, cap
+      32 F5180aunnaga/pc-game-performance-analyzer-resp-skill created=2026-10-26
+         Claude skill that checks if your PC or laptop can run a game, rates your hardware, finds bottlenecks
+
+================================================================================================
+C. 同题搜索前列（star 降序，各取前 12，只列与评测/提示词/技能相关的）
+================================================================================================
+
+--- s3-prompt-optimization.json (total=5097) ---
+   290316          affaan-m/ECC                             push=2026-10-26
+           The agent harness performance optimization system. Skills, instincts, memory, security, and rese
+   143447          Comfy-Org/ComfyUI                        push=2026-10-27
+           The most powerful and modular diffusion model GUI, api and backend with a graph/nodes interface.
+   143203          Shubhamsaboo/awesome-llm-apps            push=2026-10-22
+           100+ AI Agents, Agent Skills and RAG Apps - Free and Open Source.
+   115419          JuliusBrussee/caveman                    push=2026-10-27
+           🪨 why use many token when few token do trick. Viral skill + proxy for coding agents that cuts 65
+   110944          addyosmani/agent-skills                  push=2026-10-13
+           Production-grade engineering skills for AI coding agents.
+    90148          tt-a1i/archify                           push=2026-10-27
+           Turn any idea, plan, or codebase into a beautiful interactive diagram. An agent skill for Claude
+    84475          bytedance/deer-flow                      push=2026-10-27
+           An open-source long-horizon SuperAgent harness that researches, codes, and creates. With the hel
+    79575          dair-ai/Prompt-Engineering-Guide         push=2026-03-11
+           🐙 Guides, papers, lessons, notebooks and resources for prompt engineering, context engineering, 
+    78051          ComposioHQ/awesome-claude-skills         push=2026-09-18
+           A curated list of awesome Claude Skills, resources, and tools for customizing Claude AI workflow
+    77758          career-ops-hq/career-ops                 push=2026-10-27
+           Open-source AI job search agent and job finder: scan job boards, score each job 1-5 against your
+    57613          zylon-ai/private-gpt                     push=2026-10-27
+           Complete API layer for private AI applications on local models: RAG, skills, tools, MCP, text-to
+    56644          hesreallyhim/awesome-claude-code         push=2026-10-27
+           A hand-picked collection of the finest of resources for the most awesome of agents, Claude Code,
+
+--- s4-llm-evaluation.json (total=3043) ---
+   290316          affaan-m/ECC                             push=2026-10-26
+           The agent harness performance optimization system. Skills, instincts, memory, security, and rese
+   143203          Shubhamsaboo/awesome-llm-apps            push=2026-10-22
+           100+ AI Agents, Agent Skills and RAG Apps - Free and Open Source.
+    92954          infiniflow/ragflow                       push=2026-10-27
+           RAGFlow is a leading open-source Retrieval-Augmented Generation (RAG) engine that fuses cutting-
+    84475          bytedance/deer-flow                      push=2026-10-27
+           An open-source long-horizon SuperAgent harness that researches, codes, and creates. With the hel
+    84190          fighting41love/funNLP                    push=2024-05-10
+           中英文敏感词、语言检测、中外手机/电话归属地/运营商查询、名字推断性别、手机号抽取、身份证抽取、邮箱抽取、中日文人名库、中文缩写库、拆字词典、词汇情感值、停用词、反动词表、暴恐词表、繁简体转换
+    79575          dair-ai/Prompt-Engineering-Guide         push=2026-03-11
+           🐙 Guides, papers, lessons, notebooks and resources for prompt engineering, context engineering, 
+    78051          ComposioHQ/awesome-claude-skills         push=2026-09-18
+           A curated list of awesome Claude Skills, resources, and tools for customizing Claude AI workflow
+    56792          coreyhaines31/marketingskills            push=2026-10-26
+           Marketing skills for Claude Code and AI agents. CRO, copywriting, SEO, analytics, and growth eng
+    56644          hesreallyhim/awesome-claude-code         push=2026-10-27
+           A hand-picked collection of the finest of resources for the most awesome of agents, Claude Code,
+    54875          K-Dense-AI/scientific-agent-skills       push=2026-10-26
+           Turn any AI agent into an AI Scientist. The #1 Agent Skills library for science, used by 250,000
+    54120          Imbad0202/academic-research-skills       push=2026-10-27
+           Academic Research Skills for Claude Code: research → write → review → revise → finalize
+    53372          VoltAgent/awesome-openclaw-skills        push=2026-10-19
+           The awesome collection of OpenClaw skills. 5,400+ skills filtered and categorized from the offic
+
+--- s5-agent-skills.json (total=5484) ---
+   305875          obra/superpowers                         push=2026-10-23
+           An agentic skills framework & software development methodology that works.
+   304475          mattpocock/skills                        push=2026-10-27
+           Skills for Real Engineers. Straight from my .agents directory.
+   290316          affaan-m/ECC                             push=2026-10-26
+           The agent harness performance optimization system. Skills, instincts, memory, security, and rese
+   184121          anthropics/skills                        push=2026-10-09
+           Public repository for Agent Skills
+   143203          Shubhamsaboo/awesome-llm-apps            push=2026-10-22
+           100+ AI Agents, Agent Skills and RAG Apps - Free and Open Source.
+   141265          nextlevelbuilder/ui-ux-pro-max-skill     push=2026-10-26
+           An AI skill that provides design intelligence for building professional UI/UX across multiple pl
+   136544          Graphify-Labs/graphify                   push=2026-10-26
+           Turn any codebase, with its docs, SQL schemas, configs, and PDFs, into a queryable knowledge gra
+   110944          addyosmani/agent-skills                  push=2026-10-13
+           Production-grade engineering skills for AI coding agents.
+   103317          Leonxlnx/taste-skill                     push=2026-10-26
+           Agent skills that give coding agents taste: art direction, reference images and a browser check 
+    90148          tt-a1i/archify                           push=2026-10-27
+           Turn any idea, plan, or codebase into a beautiful interactive diagram. An agent skill for Claude
+    84475          bytedance/deer-flow                      push=2026-10-27
+           An open-source long-horizon SuperAgent harness that researches, codes, and creates. With the hel
+    78051          ComposioHQ/awesome-claude-skills         push=2026-09-18
+           A curated list of awesome Claude Skills, resources, and tools for customizing Claude AI workflow
+
+--- s6-judge-calibration.json (total=305) ---
+    39549          lm-sys/FastChat                          push=2026-05-01
+           An open platform for training, serving, and evaluating large language models. Release repo for V
+    36583    (+97) langfuse/langfuse                        push=2026-10-27
+           🪢 Open source agent evals & observability: Trace, evaluate, and improve LLM applications with on
+    36435          VoltAgent/awesome-agent-skills           push=2026-10-25
+           A curated collection of 1000+ agent skills from official dev teams and the community, compatible
+    30031          NirDiamant/RAG_Techniques                push=2026-10-26
+           This repository showcases various advanced techniques for Retrieval-Augmented Generation (RAG) s
+    22960    (+35) comet-ml/opik                            push=2026-10-27
+           Debug, evaluate, and monitor your LLM applications, RAG systems, and agentic workflows with comp
+    19135    (+31) confident-ai/deepeval                    push=2026-10-23
+           The LLM Evaluation Framework
+    18224          muratcankoylan/Agent-Skills-for-Context-Engineering push=2026-10-12
+           A comprehensive collection of Agent Skills for context engineering, multi-agent architectures, a
+     9416          oumi-ai/oumi                             push=2026-10-26
+           Easily fine-tune (SFT/RL), evaluate, and deploy Qwen, Gemma, or any open agentic LLM/VLM!
+     9139          ai-boost/awesome-prompts                 push=2026-10-27
+           Curated list of chatgpt prompts from the top-rated GPTs in the GPTs Store. Prompt Engineering, p
+     8427          MiroMindAI/MiroThinker                   push=2026-07-06
+           MiroThinker is a deep research agent optimized for complex research and prediction tasks. Our la
+     8015          evidentlyai/evidently                    push=2026-09-29
+           Evidently is ​​an open-source ML and LLM observability framework. Evaluate, test, and monitor an
+     7158    (+10) gepa-ai/gepa                             push=2026-10-26
+           Optimize prompts, code, and more with AI-powered Reflective Optimization
+
+================================================================================================
+D. 本周有推送的高星 llm 仓（total=453，前 15）
+================================================================================================
+   394524 morluto/rea                            push=2026-10-27
+           Reverse engineer anything with agents, from app behavior down to native binaries.
+   290316 affaan-m/ECC                           push=2026-10-26
+           The agent harness performance optimization system. Skills, instincts, memory, security, and 
+   257568 NousResearch/hermes-agent              push=2026-10-27
+           The agent that grows with you
+   195858 firecrawl/firecrawl                    push=2026-10-27
+           Supercharge your AI agents with data from the web and beyond. Building the library for super
+   187785 Significant-Gravitas/AutoGPT           push=2026-10-27
+           AutoGPT is the vision of accessible AI for everyone, to use and to build on. Our mission is 
+   184958 ollama/ollama                          push=2026-10-27
+           Get up and running with Kimi, GLM, MiniMax, DeepSeek, gpt-oss, Qwen, Gemma and other models.
+   174714 f/prompts.chat                         push=2026-10-27
+           f.k.a. Awesome ChatGPT Prompts. Share, discover, and collect prompts from the community. Fre
+   168233 huggingface/transformers               push=2026-10-27
+           🤗 Transformers: the model-definition framework for state-of-the-art machine learning models 
+   159678 langgenius/dify                        push=2026-10-27
+           Build Agentic workflows, RAG pipelines, with rich AI model and tool support on one collabora
+   156909 open-webui/open-webui                  push=2026-10-27
+           User-friendly AI Interface (Supports Ollama, OpenAI API, ...)
+   148548 langchain-ai/langchain                 push=2026-10-27
+           The agent engineering platform.
+   136544 Graphify-Labs/graphify                 push=2026-10-26
+           Turn any codebase, with its docs, SQL schemas, configs, and PDFs, into a queryable knowledge
+   135649 harry0703/MoneyPrinterTurbo            push=2026-10-27
+           利用 AI 大模型和自动化工作流，根据主题或关键词一键生成高清短视频。Generate HD short videos from a topic or keyword with an 
+   119263 browser-use/browser-use                push=2026-10-27
+           Open-source Python library for AI browser agents, plus Browser Use Cloud: stealth browsers a
+   116921 TauricResearch/TradingAgents           push=2026-10-27
+           TradingAgents: Multi-Agents LLM Financial Trading Framework
+
+rate_limit core: 38/60

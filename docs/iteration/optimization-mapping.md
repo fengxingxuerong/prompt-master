@@ -122,3 +122,35 @@ AI 代判落在校验 8.0-8.9 段可请所有者改判 ⇒ **零算力共 5 条*
 取证限制也照实写进报告 §六：匿名 API 限额在抓第 8 家仓库时耗尽，余下 6 家改走 `/search` 的 `repo:` 限定符；
 `Arize-ai/phoenix` 的搜索调用被 403 拦下，其读数取自同日 `topic:llm-evaluation` 搜索结果；
 功能对照全部是 README/文件树级，**没有跑过任何竞品的代码**，"它没有 X"这类否定判断是关键词检索的结论，不是穷举。
+
+---
+
+## 第六轮（2026-10-27）：24h 增量与"交卷后的位置重估"——瓶颈不在能力，在发现性
+
+> 竞品调研见 `research-reports/prompt-optimization-competitors-2026-10-27/report.md`
+> （21 个仓库坐标 + 7 组搜索，当日实测；Δ 基线 = 本轮前一日的第五轮读数）。
+> PF = 本轮新增方向；PE-4 优先级上调。P1=记录待做，P2=暂缓，🔭=只监控，❌=不采纳。
+
+| 优化项 | 对应竞品做法 | 优先级 | 实施方式 | 状态 |
+|---|---|---|---|---|
+| **PF-1a 给对外文档配演示资产** | 本周破千星的技能仓（tstack 1,766 / BeautifulRust 1,261 / day-trader-skill 2,179）**全部带演示资产或强个人品牌** | **P1（当天可做）** | 一条真实 `run.py check` 输出做成截图/asciinema cast，放 README 顶部与 SKILL.md（零调用、零出网，正好是最强展示面）。**实测缺口：README 中/英 + SKILL.md 里 0 张图** | ⏳ 未做 |
+| **PF-1b 进技能目录** | 目录层已成流量入口：`ComposioHQ/awesome-claude-skills` 78,051★、`VoltAgent/awesome-openclaw-skills` 53,372★、`VoltAgent/awesome-agent-skills` 36,435★、skills.sh | P1（**需 owner 账号**） | 四个目录各提一次收录；这是把 PF-1a/PF-2 的成果送进流量的动作 | ⏳ 未做（需你执行对外提交） |
+| **PF-2 零调用线改叫「audit」叙事** | iFixAi「Independent Auditing of AI Agents」是**唯一跑起来的叙事**（24h +849★，而它 10-24 之后没有提交 ⇒ 涨幅来自曝光不是代码） | P1 | 把 `check`/`gate` 在 README 与 SKILL 顶部讲成 *independent prompt audit*，并把我们独有的两条（三态裁决 / 澄清未果披露）作为差异点前置；**不改任何判据** | ⏳ 未做 |
+| **PF-3 把 PE-4 提为下一步实现** | 本轮复核：三态裁决与前提披露**仍无人对等**（`llm-as-a-judge` 前 12 无新玩家）；但支撑"评委可信"的读数仍是「不可采信」（AUC 95% CI 覆盖 0.5） | **P1（上调）** | 即 PE-4：`scripts/build_owner_rejudge_queue.py` 加"评委分歧/阈值邻域"不确定性采样 + 固定随机审计切片。**没有它，唯一的护城河公开不出一次可信读数** | ⏳ 未做（原 PE-4，本轮上调） |
+| 🔭 监控条目更新 | ① **iFixAi 35,351★（24h +849，三天无提交）**——叙事竞品；② **"个人技能包"品类成形**：`t3dotgg/tstack` 1,766★/3 天、`daniellockyer/dstack` 116★；③ `ZiChuanLan/agent-purge` 541★（跨 codex/claude/opencode 注入/替换 system prompt，与"提示词即交付物"相邻）；④ 停摆面继续扩大：PromptWizard 整年 **+0**、prompt-ops **+0**、jev-align **+0** | 🔭 监控 | 下一观察点：iFixAi 的 +849 是单日爆款还是持续曲线；以及三个目录里是否出现"提示词审计"这一格 | 🔭 持续 |
+| ❌ 新增一条不追 | `affaan-m/ECC` **290,316★**（311 skills + 71 agents 的 agent harness）、`obra/superpowers` 305,875★、`mattpocock/skills` 304,475★ | — | 这个量级由**叙事宽度 + 时间累积**决定，不是单点能力能补的；我们只在"具体目录里被找到"这一格竞争 | ❌ |
+
+### 本轮的关键读数（判断依据，别只看结论）
+
+- **本仓 0★ / 0 issue / 0 fork，而今天有推送**（`a9eea72`）—— 三天交了三轮，
+  但它们都属于「装得上 / 说得清」，**没有一件属于「被搜到」**。
+- **iFixAi 24h +849**（第二名 linshenkx +161 的 5.3 倍），最近 push = 10-24 ⇒ 涨幅不来自代码。
+- 同赛道停摆面（PromptWizard / prompt-ops / jev-align 本轮 **+0**）说明"自动优化"叙事仍在冷却，
+  活下来的是**审计 / 评测 / 技能**三种形态。
+
+### 本轮的诚实边界
+
+本轮**零代码改动**，只出方向。24h 的 Δ 噪声很大（+849 可能只是一天爆款，不证明产品更好；
+我们的 +0 也只说明尚未分发，不说明能力缺陷）。功能对照仍是 README/文件树级，
+`llm-as-a-judge` 搜索只证明"前 12 没有新玩家"，**没做全量扫描**。
+另：本仓记忆工具本轮不可用（Hindsight 未配 API token，401），位置判断完全基于仓内两份历史报告 + 本轮实测。
