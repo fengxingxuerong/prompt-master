@@ -149,7 +149,11 @@ def test_plain_call_meta_actually_carries_the_evidence(
         "_invoke_with_rate_limit_retry",
         lambda role, fn, overrides=None, counter=None, budget=None: fn(fake_llm),
     )
-    _text, meta = llm.plain_call("reviser", "sys", "user")
-    assert meta.get("max_tokens"), f"meta 没带 max_tokens：{sorted(meta)}"
+    # 上限在这里**钉死**而不是读 .env：本用例验的是「output_tokens == max_tokens 时归因要
+    # 带出这两个数」，档位取多少是环境的事。2026-10-28 把 PM_REVISER_MAX_TOKENS 抬到 32000
+    # 之后它曾因此变红——产品行为是对的（24000 < 32000，本来就没有打满），红的是这条用例
+    # 把 `.env` 的档位当成了常量。
+    _text, meta = llm.plain_call("reviser", "sys", "user", overrides={"max_tokens": 24000})
+    assert meta.get("max_tokens") == 24000, f"meta 没带 max_tokens：{sorted(meta)}"
     assert meta.get("output_tokens") == 24000, meta
     assert "output_tokens=24000" in empty_output_reason("修订器", meta, 3), meta
