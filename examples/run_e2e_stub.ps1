@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.0
+#Requires -Version 5.0
 <#
 .SYNOPSIS
     PromptMaster 本地 e2e 桩服务联调（Windows / PowerShell）—— examples/run_e2e_stub.sh 的等价脚本。
@@ -415,7 +415,9 @@ foreach ($r in $results) {
     Write-Line "        日志：$($r.Log)"
 }
 Write-Line ''
-Write-Line "报告与运行日志（run_id 级 JSON）另见：$(Join-Path $ProjectRoot 'logs')"
+# 产物全部落在隔离的 $WorkDir（COMMON_ENV 把 PM_LOG_DIR 指过去，绝不写进仓库 logs/）。
+# 旧文案指向 $ProjectRoot\logs 是照搬 .sh 时的笔误，照着它去找 run JSON 会扑空。
+Write-Line "报告与运行日志（run_id 级 JSON）另见：$WorkDir（隔离目录，未写进仓库 logs/）"
 
 $failed = @($results | Where-Object { -not $_.Pass })
 exit $(if ($failed.Count) { 1 } else { 0 })

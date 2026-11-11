@@ -45,23 +45,53 @@ ACTION = ROOT / "action.yml"
 GATE_SH = ROOT / "scripts" / "action-prompt-gate.sh"
 
 
-def _find_bash() -> str | None:
-    """找 bash：PATH 上先找；Windows 上再找 Git for Windows 的常见落点。
+def _bash_runs(candidate: str) -> bool:
+    """候选 bash 必须**真跑一句**才认——"文件存在"不是"能用"。
 
-    只认 `shutil.which("bash")` 的话，本机 Git Bash 明明装了却没进 PATH——
-    用例会**静默跳过**，而"Action 跑不跑得起来"这件事就又回到没证据的状态。
+    反例是本机实测的：`C:\\Windows\\System32\\bash.exe` 是 WSL 的启动器 shim，
+    系统里没装发行版时它文件在、一执行就退 1。探针只查 `is_file()` 的话会选中它，
+    6 条用例全变成一片乱码的假红（2026-10-31）。
     """
-    found = shutil.which("bash")
-    if found:
-        return found
+    if not Path(candidate).is_file():
+        return False
+    try:
+        proc = subprocess.run(
+            [candidate, "-c", "exit 0"],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def _find_bash() -> str | None:
+    """找 bash：POSIX 上认 PATH；Windows 上**先认 Git for Windows**，且候选必须验活。
+
+    两条都踩过，缺一条就退化成假绿或假红：
+
+    1. 只认 `shutil.which("bash")` 的话，本机 Git Bash 明明装了却没进 PATH——
+       用例会**静默跳过**，而"Action 跑不跑得起来"这件事就又回到没证据的状态。
+    2. 反过来只判"文件存在"也不算数：Windows 自带的 `System32\\bash.exe` 是 WSL
+       启动器 shim，没装发行版时存在但跑不了；它排在 PATH 前面，于是探针先命中它，
+       用例全假红（见 `_bash_runs` 的注释）。
+
+    为什么 Windows 上**不能**退回 WSL 的 bash：本模块的 `_posix()` 靠 Git Bash 的
+    `cygpath` 转路径，WSL 里没有那个工具，转出来的 `D:/…` 在 WSL 里根本读不到 ——
+    就算装了发行版也照样挂。所以顺序是"Git 落点优先、PATH 兜底"，两者都要验活。
+    """
     if os.name == "nt":
-        for cand in (
+        candidates = [
             r"C:\Program Files\Git\bin\bash.exe",
             r"C:\Program Files (x86)\Git\bin\bash.exe",
-        ):
-            if Path(cand).is_file():
-                return cand
-    return None
+        ]
+        found = shutil.which("bash")
+        if found:
+            candidates.append(found)
+        return next((c for c in candidates if _bash_runs(c)), None)
+    found = shutil.which("bash")
+    return found if found and _bash_runs(found) else None
 
 
 BASH = _find_bash()
@@ -259,6 +289,25 @@ def test_skill_and_gate_use_the_same_regression_pair() -> None:
     for name, text in (("CLEAN", CLEAN), ("REGRESSED", REGRESSED)):
         for line in text.splitlines():
             assert line in src, f"{name} 的这行已与 test_diff_base_ref.py 分叉：{line}"
+
+
+def test_bash_probe_requires_the_candidate_to_actually_run(tmp_path) -> None:
+    """探针不许把"存在但跑不了"的东西当 bash —— 这是那 6 条假红的根因。
+
+    真实反例：Windows 自带的 `C:\\Windows\\System32\\bash.exe`（WSL 启动器 shim）
+    在没装发行版的机器上文件存在、一执行就退 1，且排在 PATH 前面。旧探针只查
+    `is_file()`，于是选中它，本该真跑的 6 条 Action 用例变成一片乱码假红
+    （2026-10-31 实测）。这条把"存在 ≠ 能用"钉住，**不加 `needs_bash`**：
+    探针自身的正确性恰恰要在"没有可用 bash"的机器上也能验。
+    """
+    not_executable = tmp_path / "bash_such_as_a_wsl_shim.txt"
+    not_executable.write_text("这不是可执行文件\n", encoding="utf-8")
+    assert _bash_runs(str(not_executable)) is False
+
+    assert _bash_runs(str(tmp_path / "definitely-absent-bash")) is False
+
+    if BASH is not None:
+        assert _bash_runs(BASH) is True, f"探针选中的 bash 自己跑不起来：{BASH}"
 
 
 @needs_bash

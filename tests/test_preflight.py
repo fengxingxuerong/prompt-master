@@ -74,6 +74,28 @@ def test_classify_error_signatures():
     assert advice and "5 分钟" in advice
 
 
+def test_classify_error_gateway_throttle_is_not_quota():
+    """网关把 tpm/rpm 限流报成 code=insufficient_quota 时不许被骗成"余额不足"。
+
+    2026-11-09 商汤网关实测：同一账号 3 把 Key 轮换全是同一个 429，
+    静置几分钟后自行恢复——"换 Key 或充值"的建议会把人引去错误的方向。
+    判据信传输层事实（type=rate_limit_error / tpm/rpm 字样），不信 code 字样。
+    """
+    throttle = (
+        "Error code: 429 - {'error': {'message': 'inference exceeds tpm/rpm limit', "
+        "'type': 'rate_limit_error', 'code': 'insufficient_quota'}}"
+    )
+    kind, advice = _classify_error(throttle)
+    assert kind == "rate_limit", "限流的 type 标记必须压过 insufficient_quota 的 code 字样"
+    assert advice and "5 分钟" in advice
+    # 裸账单形态（OpenAI 语义：type 也是 insufficient_quota、无 tpm/rpm 字样）仍是配额
+    billing = (
+        "Error code: 429 - {'error': {'message': 'You exceeded your current quota', "
+        "'type': 'insufficient_quota', 'code': 'insufficient_quota'}}"
+    )
+    assert _classify_error(billing)[0] == "quota"
+
+
 def test_conditional_roles_respect_env(monkeypatch):
     monkeypatch.setenv("PM_JUDGES", "1")
     monkeypatch.setenv("PM_PAIRWISE", "0")

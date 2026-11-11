@@ -35,11 +35,14 @@ from .llm import _env, _float_env, build_config, int_env, plain_call
 logger = logging.getLogger("pm.preflight")
 
 # 错误签名归类：预检的价值不在"报错"而在"告诉你现在该等还是该改配置"
+# 限流建议单独提成常量：_classify_error 的 429 快路径与签名表共用同一条文本，
+# 别让"等 5 分钟"这句实话在两处各写一份然后漂移。
+_RATE_LIMIT_ADVICE = "IP/账号级限流：实测冷却需 5 分钟以上（Key 池轮换无效），错峰后再跑"
 _ERROR_SIGNATURES: list[tuple[str, str]] = [
     # (签名子串, 对症建议)
     (
         "rate limit",
-        "IP/账号级限流：实测冷却需 5 分钟以上（Key 池轮换无效），错峰后再跑",
+        _RATE_LIMIT_ADVICE,
     ),
     (
         "504",
@@ -112,8 +115,20 @@ class PreflightReport:
 
 
 def _classify_error(err: str) -> tuple[str, str | None]:
-    """错误签名归类，返回 (kind, advice)。"""
+    """错误签名归类，返回 (kind, advice)。
+
+    ⚠️ 限流证据必须先于 "insufficient" 子串判（2026-11-09 真实端点实测）：
+    商汤网关把 tpm/rpm 限流报成
+      `Error code: 429 - {..., 'type': 'rate_limit_error', 'code': 'insufficient_quota'}`
+    "insufficient" 子串先命中 ⇒ 归类 quota、建议「换 Key 或充值」——而实测
+    换满 3 把 Key 都是同一个 429、静置几分钟后窗口自行恢复。错误体里的
+    code 字样是网关自己的归类噪声，**type=rate_limit_error / tpm/rpm 字样
+    才是传输层事实**。裸的 `insufficient_quota`（无限流证据，OpenAI 账单
+    语义里 type 也是它）仍按配额处理，不把充值问题说成"等等就好"。
+    """
     low = err.lower()
+    if "rate_limit_error" in low or "tpm/rpm" in low:
+        return "rate_limit", _RATE_LIMIT_ADVICE
     for sig, advice in _ERROR_SIGNATURES:
         if sig in low:
             kind = {
