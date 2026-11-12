@@ -1,5 +1,45 @@
 # Release notes
 
+## 2.4.0 — 2026-11-12（分发入口 + 三态裁决 + 规则可靠性表）
+
+**分发入口（Round 44，PF-1a）**：三条零调用能力的对外包装一次补齐——
+`npx skills add https://github.com/fengxingxuerong/prompt-master --skill prompt-master`
+技能包、Claude Code 插件清单（`.claude-plugin/`，一份正文喂两个渠道）、GitHub Action
+（`uses: fengxingxuerong/prompt-master@main`，composite，只调 `diff --base-ref`，
+计费入口一律不进 CI）。守卫 `tests/test_skill_package.py`；本轮另修 Windows 上
+bash 探针选中 WSL 启动器 shim（文件存在、执行必退 1）导致的 6 条 Action 用例假红。
+
+**三态裁决（PE-2）**：`check` / `diff` / `gate` 的 `--json` 出口由单布尔 `ok` 升级为
+`confirmed` / `needs_validation` / `rejected` 三态，**退出码不变**。直接动机：
+`gate` 在没有基线时报 `{"skipped": true, "ok": true}` —— 一个模板都没比却说自己 OK；
+现在「没比成」报 needs_validation，不再冒充「没问题」。
+
+**澄清记账（PE-3）**：澄清预算用尽或非交互不问时，「带推断开跑」写进产物与 JSON，
+不再只活在日志里。
+
+**锚点取样（PE-4 / PF-3）**：owner 待判清单改按不确定性排序取样 + 固定种子随机审计
+切片，防锚点集全落在判定线附近；`tests/test_owner_rejudge_queue.py` 钉可复现性。
+
+**规则可靠性表（PE-5）**：给自己的零调用规则层发成绩单（`docs/rule-reliability.md`）：
+72 条真实文本全量去重 + 129 条对抗变体；实测 `delimiter_unbalanced` 精确率 0.500、
+`suppressive_rule` 召回 0.667，缺口公开可数而不是靠断言。
+
+**注入分类学（PE-6）**：`pm/injection_pack.py` 的 10 种装束对照公开分类学
+（promptfoo 57 插件 + SkillTrustBench，ID 逐字可核）做覆盖表
+（`docs/injection-taxonomy.md`）：10 格对齐、6 格部分、真缺口 4 格。
+
+**预检限流归类修复**：网关把 tpm/rpm 限流包成 `code=insufficient_quota` 时，
+旧归类先命中 "insufficient" 子串 ⇒ 误报「换 Key 或充值」（实测 3 把 Key 同一个 429、
+静置自愈）。现在 `type=rate_limit_error` / `tpm/rpm` 传输层证据先判，裸
+`insufficient_quota`（OpenAI 账单语义）仍按配额处理。
+
+**套件三服务修复**（`releases/` 线，独立于产品版本）：存储型 XSS / 看板必崩 /
+跨进程丢数据与 401 谎报 / 探针在存储坏了时仍报绿 / 台账轮转静默失效。
+
+**测试**：2200 条（无 Key、禁止真实出网）；覆盖率门禁维持 pm/ 地板 92、
+`pm/modelhub/*` 分项地板 93。**诚实边界不变**：评分尺具仍无统计意义上的判别力
+证据（见 README「它给的分，能信多少」）。
+
 ## 2.3.0 — 2026-10-23（发布通道工具化 + 日志归档）
 
 **发布通道**：新增 `.github/workflows/release.yml`，tag 驱动、四 gate 分工
