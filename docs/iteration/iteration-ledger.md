@@ -3006,3 +3006,56 @@ push、PYPI_TOKEN、目录收录、Action 消费 workflow。
 目录格判断是关键词扫描（1,201 条未逐条人读），"没有占格"是"扫描未见"不是"逐条核过"；
 `awesome-claude-skills` 停更一个月可能只是收录流程慢；未跑任何竞品代码；
 记忆工具仍不可用（Hindsight 未配 token）。
+
+## Round 51（2026-11-13）—— v2.4.0 交付收口：推送落库、tag 触发 Release、预检归类再收两形
+
+**本轮判据**：把 Round 50 留下的 owner 侧交付清单推进到能推的极限：收口 Round 50 的
+未提交尾巴、bump 2.4.0 并推 tag（PF-6 完成线）、本地 glm-5.3-flash 网关实测照出预检
+归类两条真缺陷当场修掉。
+
+### 落了什么
+
+1. **Round 50 尾巴收口（`c5ca4fc`）**：商汤网关 tpm/rpm 限流包在 `code=insufficient_quota`
+   里被误报「换 Key 或充值」的归类修复 + Windows bash 探针选中 WSL 启动器 shim 的
+   6 条 Action 用例假红修复 + 用例计数抄件 2198→2200 + e2e 桩脚本产物路径文案 +
+   `owner_rejudge.csv` 按不确定性取样口径重排。八钩子全绿入库。
+2. **v2.4.0 发布列车（`08f8b3e` + `7e1b133`，tag 指向后者）**：版本号唯一事实源
+   2.3.0→2.4.0（`pm/__init__.py` + `.claude-plugin/plugin.json` 抄件同改），
+   release-notes 新段收 v2.3.0 以来 30 个提交的用户可见面（分发入口 / 三态裁决 /
+   澄清记账 / 锚点取样 / 规则可靠性表 / 注入分类学）。本机
+   `scripts/release_pypi.py --check` 全绿：wheel 534,765 B + sdist 1,082,578 B、
+   twine check 双 PASSED、与 tag 对账一致。tag `v2.4.0` 推送触发 Release workflow
+   （run 43284648821），main 推送触发 CI（run 43284622639）。
+3. **预检归类二轮（`7e1b133`）**：本地 glm-5.3-flash 网关（127.0.0.1:8080，OpenAI 兼容
+   /v1）实测照出两条：① 智谱 code 3008「user concurrency limit exceeded」不在签名表，
+   9 角色齐发（PREFLIGHT_CONCURRENCY=8）撞上游并发上限后整轮落 `other` 零建议；
+   ② target 行被判「鉴权失败：核对 Key」——错误文本里根本没有 401，是
+   logid `202611121838401a…` 第 13~15 位恰好是 "401"，朴素子串把长数字串当成了状态码。
+   修法：并发形态给对症建议（调低 PM_PREFLIGHT_CONCURRENCY，不是白等 5 分钟）、
+   401/404/504 改数字边界匹配、`OpenAIRateLimitError` 类名本身当传输层证据（签名顺序
+   敏感：具体的 concurrency limit 排在泛化类名前面）。test_preflight 15 条全绿（+3 守卫），
+   用例计数活体 2200→2203 四份抄件同改。**门禁的牙当场验过**：第一版提交被
+   ruff format（注释行超长）与计数守卫（2200≠2203）拦下，修完才进库。
+4. **本地端点验真**：串行档（PM_PREFLIGHT_CONCURRENCY=1）9 角色 preflight 全绿
+   exit=0（延迟 1.4~4.4s）——端点本身没问题，坏的是并发形态撞线。该端点以进程级
+   环境变量覆盖验证，`.env` 保持用户现有配置不动。
+
+### 交付通道状态
+
+- **main 推送（PF-6，P1）**：✅ 完成。`6d2aa39..7e1b133` 上 GitHub。
+- **GitHub Release v2.4.0**：Release workflow tag 触发，github-release job 自动建
+  （产物来自 artifact，与 build-check 同一份字节）。
+- **PyPI**：⏳ 仍卡 `PYPI_TOKEN`（owner 三步见 `docs/operations.md` §发版与 PyPI 发布，
+  2026-11-13 更新版支持 Re-run all jobs 走旧 run）。本机 `--check` 已证明产物可发。
+- **`.gitignore`**：收编 `_wrapup_logs_backup/`（上一轮 wrapup 的缓存备份，
+  engine.log 空 + 两个 cache json），防误提交，文件留在盘上。
+
+### 诚实边界
+
+- 预检并发撞线是**本地网关上游的性格**（按用户并发计），不是产品缺陷；但预检把
+  「全错」呈现成「端点坏」确实会误导排障方向——并发建议给出来之后这个形态自解释。
+- 本机直连 `github.com:443` 当晚抖动两次（Connection reset / connect timeout），
+  `api.github.com` 与 `ssh.github.com:443` 一直通；重试即过。教训：把「网络抖动」与
+  「配置错」分开读，先重试再排查。约定的 7890 代理全程没起来，直连自己恢复了。
+- Release workflow 的 pypi job 在 token 配好前仍会跳过（by design，不算红）。
+- 记忆工具仍不可用（Hindsight 未配 token）。

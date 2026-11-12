@@ -94,3 +94,4 @@ dist/
 # 与本产品无关的会话产物，同 小浣熊/ 先例，别让它把 git status 弄成长草（文件留在盘上，未删）
 /pelican-*.png
 /鹈鹕骑自行车动画/
+_wrapup_logs_backup/

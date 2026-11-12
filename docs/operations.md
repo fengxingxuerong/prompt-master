@@ -312,18 +312,20 @@ python run.py calibrate       # ④ 评委可信度校准 + 漂移对比
   （台账原则不动、缓存靠清除/重跑、死重由 `scripts/logs_usage.py` 只读列出后 owner 手动整删）。
 - 配套守卫：`tests/test_logs_archive.py`（dry-run 零写入 / commit 不改字节 / 文档引用不归档）。
 
-### 尚待 owner 亲决（2026-10-23 更新：Release 首跑已完成，剩两项）
+### 尚待 owner 亲决（2026-11-13 更新：v2.4.0 已推 tag，剩两项）
 
 `v2.3.0` 已用 release.yml 在真实 Runner 上跑通四条 gate（build-check / artifact /
-github-release / pypi 降级），GitHub Release 已生成。剩两项**仍只差 owner 亲自动手**：
+github-release / pypi 降级），GitHub Release 已生成；`v2.4.0` tag 已于 2026-11-13
+推送（Release workflow 同通道重跑）。剩两项**仍只差 owner 亲自动手**：
 
 1. **PyPI 上传**：`.github/workflows/release.yml` 已配好 pypi job，上传路径 100% 就绪
    （已核对：pypi.org 上 `prompt-master` 名字当前**空闲**、pyproject 元数据完整、twine 命令正确）。
    只需 owner 三步照做：
    1. GitHub → **Settings → Secrets and variables → Actions** → New repository secret，
       名字 `PYPI_TOKEN`、值你的 PyPI account-scoped token（PyPI → Account settings → API tokens）。
-   2. **推一个新的 `v*` tag**（如 `v2.3.1` 或下一版）——注意**不能重推已有的 v2.3.0**，
-      那个 tag 的 pypi job 已经跑过并因无 token 跳过；GitHub 不会因配置变更重跑旧 tag。
+   2. **让 Release workflow 重跑**：Actions → Release（v2.4.0 那次 run）→ Re-run all jobs
+      ——pypi job 当时因无 token 跳过，重跑时 secret 已在就会真上传；不想动旧 run 的话，
+      推下一个 `v*` tag（如 `v2.4.1`）同样触发全通道。
    3. 等 Actions → Release workflow 跑完，在 pypi job 确认 `Upload to PyPI` 成功，
       并访问 `https://pypi.org/project/prompt-master/<版本>/` 核对。
 
