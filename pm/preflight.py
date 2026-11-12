@@ -38,15 +38,29 @@ logger = logging.getLogger("pm.preflight")
 # 限流建议单独提成常量：_classify_error 的 429 快路径与签名表共用同一条文本，
 # 别让"等 5 分钟"这句实话在两处各写一份然后漂移。
 _RATE_LIMIT_ADVICE = "IP/账号级限流：实测冷却需 5 分钟以上（Key 池轮换无效），错峰后再跑"
+_CONCURRENCY_ADVICE = (
+    "并发超限：上游按用户并发数计（预检默认 8 角色齐发就能撞线）；"
+    "调低 PM_PREFLIGHT_CONCURRENCY / PM_TARGET_MAX_CONCURRENCY 或错峰重跑"
+)
 _ERROR_SIGNATURES: list[tuple[str, str]] = [
-    # (签名子串, 对症建议)
+    # (签名子串, 对症建议)。顺序敏感：具体的形态（concurrency limit）必须排在
+    # 泛化的类名证据（ratelimit）前面 —— 智谱的并发错误两者都含，谁在前听谁的。
     (
         "rate limit",
         _RATE_LIMIT_ADVICE,
     ),
+    # 智谱网关的并发形态（2026-11-13 本地 glm 网关实测）：
+    #   Error code: 429 - {'code': 3008, 'msg': 'user concurrency limit exceeded', ...}
+    # 与 tpm/rpm 配额限流不同源——等的用处不大，对症动作是调低并发。
     (
-        "504",
-        "网关超时：该端点对当前调用形态不稳定，建议错峰或换角色端点",
+        "concurrency limit",
+        _CONCURRENCY_ADVICE,
+    ),
+    # 异常类名本身就是传输层证据：重试层已经判过 429 才包成 OpenAIRateLimitError，
+    # 就算网关的消息文本一个 "rate limit" 字样都不带，也不能落到 "other" 没建议。
+    (
+        "ratelimit",
+        _RATE_LIMIT_ADVICE,
     ),
     (
         "timeout",
@@ -54,18 +68,21 @@ _ERROR_SIGNATURES: list[tuple[str, str]] = [
         "真要长跑两个都得给够）",
     ),
     (
-        "401",
-        "鉴权失败：核对 PM_<角色>_API_KEY 与端点是否匹配",
-    ),
-    (
-        "404",
-        "模型或路径不存在：核对 PM_<角色>_MODEL 是否为该端点支持的模型名",
-    ),
-    (
         "insufficient",
         "余额不足：该 Key 配额已耗尽，换 Key 或充值",
     ),
 ]
+
+# 数字型签名不能走朴素子串：logid / 时间戳是长数字串，随便一条就"含着" 401/404/504
+# （2026-11-13 实测：智谱 logid '202611121838401a…' 让 target 的并发限流被误报成
+# 「鉴权失败：核对 Key」——错误文本里根本没有 401，是日志 id 的第 13~15 位数字）。
+# 数字边界（前后都不是数字）才能保证它们只匹配真正的状态码。
+_NUMERIC_SIGNATURES: dict[str, tuple[str, str]] = {
+    "401": ("auth", "鉴权失败：核对 PM_<角色>_API_KEY 与端点是否匹配"),
+    "404": ("not_found", "模型或路径不存在：核对 PM_<角色>_MODEL 是否为该端点支持的模型名"),
+    "504": ("gateway", "网关超时：该端点对当前调用形态不稳定，建议错峰或换角色端点"),
+}
+_NUMERIC_RES = {sig: re.compile(rf"(?<!\d){re.escape(sig)}(?!\d)") for sig in _NUMERIC_SIGNATURES}
 
 
 @dataclass
@@ -81,7 +98,7 @@ class RoleReport:
     input_tokens: int | None = None
     output_tokens: int | None = None
     error: str | None = None
-    error_kind: str | None = None  # rate_limit / gateway / auth / not_found / quota / other
+    error_kind: str | None = None  # rate_limit/gateway/timeout/auth/not_found/quota/other
     advice: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -125,6 +142,11 @@ def _classify_error(err: str) -> tuple[str, str | None]:
     code 字样是网关自己的归类噪声，**type=rate_limit_error / tpm/rpm 字样
     才是传输层事实**。裸的 `insufficient_quota`（无限流证据，OpenAI 账单
     语义里 type 也是它）仍按配额处理，不把充值问题说成"等等就好"。
+
+    ⚠️ 数字型签名（401/404/504）按数字边界匹配（2026-11-13 实测）：logid
+    `202611121838401a…` 的第 13~15 位恰好是 "401"，朴素子串把智谱的并发限流
+    误报成「鉴权失败：核对 Key」。异常类名 OpenAIRateLimitError 同样是证据——
+    重试层判过 429 才会包这个类，消息文本一个限流字样不带也要认。
     """
     low = err.lower()
     if "rate_limit_error" in low or "tpm/rpm" in low:
@@ -133,12 +155,14 @@ def _classify_error(err: str) -> tuple[str, str | None]:
         if sig in low:
             kind = {
                 "rate limit": "rate_limit",
-                "504": "gateway",
+                "ratelimit": "rate_limit",
+                "concurrency limit": "rate_limit",
                 "timeout": "timeout",
-                "401": "auth",
-                "404": "not_found",
                 "insufficient": "quota",
             }[sig]
+            return kind, advice
+    for sig, (kind, advice) in _NUMERIC_SIGNATURES.items():
+        if _NUMERIC_RES[sig].search(low):
             return kind, advice
     return "other", None
 

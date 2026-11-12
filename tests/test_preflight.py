@@ -96,6 +96,60 @@ def test_classify_error_gateway_throttle_is_not_quota():
     assert _classify_error(billing)[0] == "quota"
 
 
+def test_classify_error_concurrency_limit_gets_targeted_advice():
+    """智谱 code 3008 的 user concurrency limit exceeded 是并发超限，给对症建议。
+
+    2026-11-13 本地 glm 网关实测：预检 9 角色齐发（PREFLIGHT_CONCURRENCY=8），
+    上游按用户并发计，9 路并发直接撞线。旧表没这条签名 ⇒ 落 "other" 零建议；
+    而它拿的是「调低并发」这个动作，不是「等 5 分钟」。
+    """
+    err = (
+        "OpenAIRateLimitError: Error code: 429 - {'code': 3008, "
+        "'msg': 'user concurrency limit exceeded', "
+        "'logid': '2026111218384072ed91b0b63294009ebd'}"
+    )
+    kind, advice = _classify_error(err)
+    assert kind == "rate_limit"
+    assert advice and "并发" in advice and "PM_PREFLIGHT_CONCURRENCY" in advice, (
+        "并发超限的建议必须指向调低并发，而不是让人白等 5 分钟"
+    )
+
+
+def test_classify_error_logid_digits_do_not_read_as_http_status():
+    """logid 长数字串里的 "401" 不许被当成 HTTP 401 —— 同一轮实测的第二形。
+
+    旧签名表朴素子串匹配：target 那条并发限流错误（文本里根本没有 401）
+    被它的 logid '202611121838401a…' 第 13~15 位误判成「鉴权失败：核对 Key」，
+    把人引去核对一把没问题的 Key。
+    """
+    err = (
+        "OpenAIRateLimitError: Error code: 429 - {'code': 3008, "
+        "'msg': 'user concurrency limit exceeded', "
+        "'logid': '202611121838401a4e0283ec14b66c828a'}"
+    )
+    kind, advice = _classify_error(err)
+    assert kind == "rate_limit", "logid 数字里藏着 401 不许判成鉴权失败"
+    assert advice and "并发" in advice
+    # 真 401 / 404 / 504 仍然认得出来（数字边界不误伤正常报错）
+    assert _classify_error("HTTP 401 Unauthorized")[0] == "auth"
+    assert _classify_error("Error code: 404 - model not found")[0] == "not_found"
+    assert _classify_error("504 Gateway Time-out")[0] == "gateway"
+    # 紧贴其他数字的 401/504 不是状态码（4013/5040 都不许命中）
+    assert _classify_error("usage quota 4013 exhausted")[0] == "other"
+    assert _classify_error("port 5040 refused")[0] == "other"
+
+
+def test_classify_error_exception_class_name_is_transport_evidence():
+    """重试层包成 OpenAIRateLimitError 本身就是判过 429 的证据。
+
+    网关消息文本可以一个限流字样都不带（智谱只给 code/msg/logid），
+    但异常类名骗不了人 —— 不能因为它长得不像 "rate limit" 就落 "other"。
+    """
+    kind, advice = _classify_error("OpenAIRateLimitError: {'code': 1302, 'msg': '高并发请求超限'}")
+    assert kind == "rate_limit"
+    assert advice, "限流类必须有建议文本"
+
+
 def test_conditional_roles_respect_env(monkeypatch):
     monkeypatch.setenv("PM_JUDGES", "1")
     monkeypatch.setenv("PM_PAIRWISE", "0")

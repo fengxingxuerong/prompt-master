@@ -31,12 +31,17 @@ bash 探针选中 WSL 启动器 shim（文件存在、执行必退 1）导致的
 **预检限流归类修复**：网关把 tpm/rpm 限流包成 `code=insufficient_quota` 时，
 旧归类先命中 "insufficient" 子串 ⇒ 误报「换 Key 或充值」（实测 3 把 Key 同一个 429、
 静置自愈）。现在 `type=rate_limit_error` / `tpm/rpm` 传输层证据先判，裸
-`insufficient_quota`（OpenAI 账单语义）仍按配额处理。
+`insufficient_quota`（OpenAI 账单语义）仍按配额处理。另收两条同族缺口（2026-11-13
+本地 glm 网关实测）：`user concurrency limit exceeded`（智谱 code 3008）给出
+「调低 PM_PREFLIGHT_CONCURRENCY」的对症建议而不是落 `other`；数字签名 401/404/504
+改按数字边界匹配——logid `202611121838401a…` 的第 13~15 位曾让并发限流被误报成
+「鉴权失败：核对 Key」；异常类名 `OpenAIRateLimitError` 本身就是传输层证据，
+消息文本不带限流字样也认。串行档（`PM_PREFLIGHT_CONCURRENCY=1`）9 角色全绿。
 
 **套件三服务修复**（`releases/` 线，独立于产品版本）：存储型 XSS / 看板必崩 /
 跨进程丢数据与 401 谎报 / 探针在存储坏了时仍报绿 / 台账轮转静默失效。
 
-**测试**：2200 条（无 Key、禁止真实出网）；覆盖率门禁维持 pm/ 地板 92、
+**测试**：2203 条（无 Key、禁止真实出网）；覆盖率门禁维持 pm/ 地板 92、
 `pm/modelhub/*` 分项地板 93。**诚实边界不变**：评分尺具仍无统计意义上的判别力
 证据（见 README「它给的分，能信多少」）。
 
