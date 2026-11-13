@@ -23,22 +23,29 @@
 2. **`human_score` 一律留空、导出只导填了的行**。与 `build_owner_rejudge_queue.py`
    同一条约束：留空 = 没判 = 不进分母；导出 48 行会把"没判"变成"判了但没写"。
 
-用法：`python scripts/build_rejudge_form.py [--out 路径]`
+用法：`python scripts/build_rejudge_form.py [--batch main|r4|all] [--check]`
+（`--check` 只比对已提交的 HTML 是否仍与数据源逐字一致，守卫测试调的就是它）
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, ROOT)
+_HERE = Path(__file__).resolve().parent
+# 两个目录都要在 sys.path 上：它是 `python scripts/build_rejudge_form.py` 直接跑的，
+# 也被 tests/ 用 spec_from_file_location 加载 —— 后一种情况 sys.path[0] 不含 scripts/，
+# 只加 ROOT 会让 `from build_owner_rejudge_queue import …` 在测试里 ImportError。
+for _p in (ROOT, _HERE):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
-from build_owner_rejudge_queue import TARGET, plan  # noqa: E402
+from build_owner_rejudge_queue import ANCHOR_DIR, TARGET, plan  # noqa: E402
 from pm.cli.calibrate import _FORM_COLUMNS  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parents[1] / "judge_calibration" / "rejudge_form.html"
@@ -62,7 +69,7 @@ _HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>改判打分 · __N__ 条</title>
+<title>__TITLE__</title>
 <style>
 :root{--bg:#0f1216;--card:#161b22;--line:#262d36;--fg:#e6edf3;--dim:#8b949e;--acc:#3fb950;--warn:#d29922;--bad:#f85149}
 *{box-sizing:border-box}
@@ -104,7 +111,7 @@ footer .grow{flex:1;font-size:12px;color:var(--dim)}
 </head>
 <body>
 <header>
-<h1>改判打分 · 这 __N__ 条的人工分是 AI 代判的（与评委同族），需要你亲自判</h1>
+<h1>__H1__</h1>
 <div class="bar">
 <span id="prog"></span>
 <span class="grow"></span>
@@ -127,7 +134,7 @@ footer .grow{flex:1;font-size:12px;color:var(--dim)}
 </footer>
 <script>
 const DATA = __DATA__;
-const KEY = "pm-rejudge-__STAMP__";
+const KEY = "__KEY__";
 let scores = JSON.parse(localStorage.getItem(KEY) || "{}");
 const list = document.getElementById("list");
 
@@ -227,7 +234,7 @@ document.getElementById("exp").addEventListener("click", ()=>{
   const blob = new Blob(["\\ufeff"+body], {type:"text/csv;charset=utf-8"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "score_form.owner_rejudge.filled.csv";
+  a.download = "__DOWNLOAD__";
   a.click();
   document.getElementById("fmsg").textContent = `已导出 ${rows.length} 行 → ` + a.download;
 });
@@ -242,18 +249,61 @@ paint();
 """
 
 
-def _items() -> list[dict[str, Any]]:
-    data = json.loads(TARGET.read_text(encoding="utf-8"))
+# 两批判分任务的参数。`key` 是 localStorage 的命名空间：
+# 主线沿用 "pm-rejudge-25" 不改 —— 改名会让已经填在浏览器里、还没导出的分变成孤儿，
+# 那是最贵的返工；r4 用独立命名空间，避免两批共用一个字典把分串到别的 id 上。
+BATCHES: dict[str, dict[str, Any]] = {
+    "main": {
+        "samples": TARGET,
+        "form": ANCHOR_DIR / "score_form.owner_rejudge.csv",
+        "out": DEFAULT_OUT,
+        "key": "pm-rejudge-25",
+        "download": "score_form.owner_rejudge.filled.csv",
+        "h1": "改判打分 · 这 {n} 条的人工分是 AI 代判的（与评委同族），需要你亲自判",
+    },
+    "r4": {
+        "samples": ANCHOR_DIR / "samples.candidates.r4.json",
+        "form": ANCHOR_DIR / "score_form.r4.csv",
+        "out": ANCHOR_DIR / "rejudge_form.r4.html",
+        "key": "pm-rejudge-r4",
+        "download": "score_form.r4.filled.csv",
+        "h1": "改判打分 · r4 批 {n} 条，全部没有人工分（也没有 AI 代判兜底）",
+    },
+}
+
+
+def _items(batch: str) -> list[dict[str, Any]]:
+    """待判条目。主线沿用 build_owner_rejudge_queue.plan() 的排法（判定线附近优先），
+    r4 那批整批待判、按文件顺序 —— 两种批次的选择规则本来就不同，不要硬凑一个。"""
+    cfg = BATCHES[batch]
+    data = json.loads(Path(cfg["samples"]).read_text(encoding="utf-8"))
     items = data if isinstance(data, list) else (data.get("samples") or [])
+    if batch != "main":
+        return [it for it in items if isinstance(it, dict) and not it.get("human_score")]
     order = {rid: i for i, rid in enumerate(plan()[0])}
     todo = [it for it in items if isinstance(it, dict) and str(it.get("id")) in order]
     todo.sort(key=lambda it: order[str(it.get("id"))])
     return todo
 
 
-def _payload() -> list[dict[str, Any]]:
+def _remarks(form: Path) -> dict[str, str]:
+    """打分表里的「备注」列（判定线附近 / 随机审计切片 / AI 代判……）。
+
+    表单导出的 CSV 要能把这一列原样写回去，所以备注必须以**当前**那张表为准。
+    旧版把它写成一句常量，2026-11-09 队列重排后表单里仍是旧文案 —— 表能填、
+    导出的备注却是上一版的说法，人看不出错，回填时也不会报错。
+    """
+    if not form.exists():
+        return {}
+    with form.open(encoding="utf-8-sig", newline="") as fh:
+        return {str(r.get("id")): (r.get("备注") or "") for r in csv.DictReader(fh)}
+
+
+def _payload(batch: str) -> list[dict[str, Any]]:
+    cfg = BATCHES[batch]
+    remarks = _remarks(Path(cfg["form"]))
     out = []
-    for it in _items():
+    for it in _items(batch):
         prov = it.get("provenance") or {}
         dims = prov.get("judge_dims") or {}
         out.append(
@@ -270,42 +320,83 @@ def _payload() -> list[dict[str, Any]]:
                 "input": str(it.get("test_input") or ""),
                 "output": str(it.get("test_output") or ""),
                 "summary": str(it.get("test_output") or "")[:160],
-                "remark": "【owner 亲判】改判 AI 代判条",
+                "remark": remarks.get(str(it.get("id")), ""),
             }
         )
     return out
 
 
-def build(out: Path) -> int:
-    payload = _payload()
+def render(batch: str) -> str:
+    cfg = BATCHES[batch]
+    payload = _payload(batch)
     if not payload:
-        print("没有待改判条目（全部已是所有者亲判）。", file=sys.stderr)
-        return 0
-    html = (
+        return ""
+    return (
         _HTML.replace(
             "__RUBRIC__",
             "".join(f"<tr><td>{a}</td><td>{b}</td></tr>" for a, b in RUBRIC),
         )
         .replace("__ANCHORS__", "".join(f"<li>{a}</li>" for a in ANCHORS))
-        .replace("__N__", str(len(payload)))
-        .replace("__STAMP__", str(len(payload)))
+        .replace("__TITLE__", f"改判打分 · {batch} · {len(payload)} 条")
+        .replace("__H1__", cfg["h1"].format(n=len(payload)))
+        .replace("__KEY__", cfg["key"])
+        .replace("__DOWNLOAD__", cfg["download"])
         .replace("__COLS__", json.dumps(list(_FORM_COLUMNS), ensure_ascii=False))
         .replace("__DATA__", json.dumps(payload, ensure_ascii=False).replace("</", "<\\/"))
     )
+
+
+def build(batch: str = "main", *, out: Path | None = None, check: bool = False) -> int:
+    """生成（或 `check=True` 时只比对）一批判分页。返回 0 = 一致/已写。
+
+    `out` 只给守卫用：`tests/test_rejudge_form.py` 要生成到 tmp_path 再逐字比对，
+    绝不能在验证过程中改写被提交的 HTML（那会让守卫自己变成"改完再验"的假绿）。
+
+    `check` 存在的理由：这份 HTML 是**派生产物**，数据源（打分表 + 锚点 JSON）
+    一动它就该跟着动。没有守卫时它静默漂移过一轮（表单里 25 条的备注停在
+    2026-10-18 的文案上，队列 11-09 已经重排），而人是照着它判分的。
+    """
+    cfg = BATCHES[batch]
+    out = Path(out) if out is not None else Path(cfg["out"])
+    payload = _payload(batch)
+    if not payload:
+        print(f"[{batch}] 没有待判条目（全部已亲判）。", file=sys.stderr)
+        return 0
+    html = render(batch)
+    if check:
+        old = out.read_text(encoding="utf-8") if out.exists() else ""
+        if html != old:
+            print(
+                f"[drift] {out} 与数据源不一致 —— 跑 "
+                f"`python scripts/build_rejudge_form.py --batch {batch}` 重生成",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"[ok] {out} 与数据源逐字一致（{len(payload)} 条）")
+        return 0
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
     print(f"改判页：{out}")
-    print(f"  {len(payload)} 条，每条带**完整**输出（不再截 160 字）、评委分默认隐藏、进度存本地。")
+    print(
+        f"  [{batch}] {len(payload)} 条，每条带**完整**输出（不再截 160 字）、评委分默认隐藏、进度存本地。"
+    )
     print("  判完点「导出 CSV」，再回填：")
-    print(f"    python run.py calibrate --samples {TARGET} --apply-scores <导出的 CSV>")
+    print(f"    python run.py calibrate --samples {cfg['samples']} --apply-scores <导出的 CSV>")
     return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--out", default=str(DEFAULT_OUT), help="输出 HTML 路径")
+    ap.add_argument(
+        "--batch", choices=[*BATCHES, "all"], default="all", help="哪一批（默认两批都刷）"
+    )
+    ap.add_argument("--check", action="store_true", help="只比对已提交的 HTML 是否仍与数据源一致")
     ns = ap.parse_args()
-    return build(Path(ns.out))
+    names = list(BATCHES) if ns.batch == "all" else [ns.batch]
+    rc = 0
+    for name in names:
+        rc |= build(name, check=ns.check)
+    return rc
 
 
 if __name__ == "__main__":

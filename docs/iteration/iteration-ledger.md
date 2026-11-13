@@ -3059,3 +3059,53 @@ push、PYPI_TOKEN、目录收录、Action 消费 workflow。
   「配置错」分开读，先重试再排查。约定的 7890 代理全程没起来，直连自己恢复了。
 - Release workflow 的 pypi job 在 token 配好前仍会跳过（by design，不算红）。
 - 记忆工具仍不可用（Hindsight 未配 token）。
+
+## Round 52（2026-11-13）—— 判分页漂移：页面能填、数据是上一版
+
+**本轮判据**：v2.4.0 交付之后，仓内只剩「owner 亲自动手」的三件（PyPI token、49 条人工判分、
+四处目录收录）。本轮不碰真钱、不碰标签，只把 owner 要用的**载体**修到与当前队列一致 ——
+因为载体错了，人判出来的分是照着错的信息给的。
+
+### 落了什么
+
+1. **判分页漂移（真缺陷，`scripts/build_rejudge_form.py`）**：`judge_calibration/rejudge_form.html`
+   里 25 条的「备注」是硬编码常量「【owner 亲判】改判 AI 代判条」，而 `score_form.owner_rejudge.csv`
+   在 11-09 已按不确定性取样重排（「【要你判】判定线附近…」「随机审计切片…」）。页面能打开、
+   能填分、能导出，导出的 CSV 会把**旧备注**写回表 —— 人看不出、程序不报错。修法：备注改为
+   **读当前打分表**；新增 `--check`（与已提交的 HTML 逐字比对）。
+2. **r4 批此前没有可判载体**：补 `judge_calibration/rejudge_form.r4.html`（24 条），
+   独立 localStorage 命名空间（`pm-rejudge-r4`）、独立导出名（`score_form.r4.filled.csv`）；
+   主线的 `pm-rejudge-25` **刻意不改名** —— 改名会让浏览器里已填未导出的分变成孤儿。
+3. **新守卫**（`tests/test_rejudge_form_freshness.py`，2 条判据 × 两批 = 4 条）：
+   ①已提交 HTML 与「现在重生成」逐字相同；②嵌的 id 与待判集**同序**（对着 A 的卡片打 B 的分
+   是最隐蔽的污染）。变异验证：篡改 1 处备注 ⇒ 1 红；交换前两条顺序 ⇒ 2 红。
+4. **既有守卫的接口同步**：`build(batch, *, out=None, check=False)`；`tests/test_rejudge_form.py`
+   6 条判据改为 `build("main", out=tmp_path/…)`，仍然只生成到临时目录、不写被提交的文件。
+5. **GBK 出口**：新打印的 `✓/✗` 被 `test_console_gbk_entry` 当场抓出（中文 Windows cp936 控制台
+   会在 print 处崩），改成 `[ok]/[drift]`。这是本轮 7 条红里的 1 条，另 6 条是 4 的签名变更。
+6. **目录收录材料**（`docs/distribution-listing.md`）：四处目录的统一字段/话术/禁止项
+   （极限词、尚未上传的 `pip install prompt-master`、AUC 覆盖 0.5 时不可引用的「准确率」）；
+   `docs/operations.md` 的 owner 清单从两项改为三项。
+7. **仓库卫生**：未跟踪的 `pm_v1_prompt.md`（示例产物）移入 gitignored 暂存区；工作树干净。
+
+### 门禁
+
+八钩子全绿：2207 条用例 / 0 failed / 覆盖率 96.14%（门槛 92），ruff + format + mypy --strict 全过。
+首次全量跑出 **7 红**（6 条签名 + 1 条 GBK），修完复跑才绿 —— 记在这里是因为「一次就绿」
+通常意味着判据没咬到东西。
+
+### 诚实边界
+
+- 判分页只是**载体**：它不产生也不修改任何人工标签，校准读数仍是「不可估」，
+  49 条判完并回填后才有新数。
+- r4 页没跑 DOM 冒烟（本机未装 jsdom），只做了 `node --check` 语法校验 + 结构断言
+  （id 集合/顺序、导出列名、全文非空）。
+- 目录收录的实际提交未做（需 owner 账号）；本轮只把话术与禁止项定死，避免四处口径漂移。
+
+### 交付通道状态
+
+- main / tag `v2.4.0`：已推（Round 51）；本轮提交为其后的文档与判分载体，不影响已发版本。
+- **PyPI**：仍卡 `PYPI_TOKEN`（唯一凭据门槛，路径已验通）。
+- **校准 49 条**：载体就绪 —— 两页（main 25 / r4 24）+ 两条 `--apply-scores` 命令，
+  见 `docs/operations.md` §尚待 owner 亲决。
+- **目录收录（PF-1b）**：材料就绪，等 owner 提交。

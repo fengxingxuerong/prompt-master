@@ -40,7 +40,7 @@ def _build(tmp_path: Path) -> Path:
         sys.path.remove(str(SCRIPTS))
         sys.path.remove(str(ROOT))
     out = tmp_path / "rejudge_form.html"
-    assert build_rejudge_form.build(out) == 0
+    assert build_rejudge_form.build("main", out=out) == 0
     return out
 
 
