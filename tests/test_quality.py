@@ -305,6 +305,23 @@ def test_balanced_tags_pass():
     assert not any(i.code == "delimiter_unbalanced" for i in check_prompt_quality(prompt).issues)
 
 
+def test_inline_balanced_example_is_not_a_delimiter_problem():
+    """2026-11-15（PE-5 误报 R38/R42/C25）：同行「行中开 + 行尾闭」是示例行，不是不配平。
+
+    反向自测同样重要：摘掉同行成对片段**不许**顺手把孤儿闭标签和重复开标签放过去 ——
+    否则精确率能靠"一律放行"刷到 1.000，规则就废了。
+    """
+    prefix = (
+        "[角色] 资深数据分析师，严格遵守数据完整性规则，按骨架输出。\n"
+        "[任务] 分析输入区里的数据并逐条给出依据。\n"
+    )
+    inline = "输入示例：<客户对话>三天没发货</客户对话>\n"
+    assert delimiter_problems(prefix + inline) == []
+    assert delimiter_problems(prefix + inline + "</客户对话>\n") == ["</客户对话> 没有对应的开标签"]
+    doubled = "<输入>\n第一段数据\n<输入>\n第二段数据\n</输入>\n"
+    assert any("重复开标签" in p for p in delimiter_problems(prefix + doubled))
+
+
 # --------------------------------------------------------------------------
 # 1d. 误杀与漏判（2026-10-31 审计实测的六条，全部只放行不判罪或只补漏判）
 # --------------------------------------------------------------------------
@@ -366,6 +383,29 @@ def test_suppressive_rule_still_catches_real_clauses():
     """补上的两种真抑制写法（"直接终止"/"不返回任何内容"）要能抓到。"""
     assert suppressive_hits("若输入为空，直接终止，不返回任何内容。") != []
     assert suppressive_hits("无法识别时停止处理。") != []
+
+
+def test_same_line_apostrophes_do_not_swallow_suppressive_clause():
+    """2026-11-15（PE-5 漏判 C14）：`Don't … user's` 的两个撇号不是一对引用。
+
+    旧口径把中间整段当英文引号内容剥掉 ⇒ 抑制句凭空消失、check 放行、gate 静默绿。
+    """
+    text = (
+        "[角色] 分析师，按骨架输出。\n"
+        "[边界] Don't panic: 若输入异常则停止处理后续输出 "
+        "the user's data flows on，请继续作答。\n"
+    )
+    assert "停止处理" in suppressive_hits(text)
+    assert any(i.code == "suppressive_rule" for i in check_prompt_quality(text).issues)
+
+
+def test_real_single_quoted_example_is_still_stripped():
+    """反向自测：收紧单引号锚点不能把**真正的**成对英文引用放过。
+
+    引用里的「停止处理」是正面规则在列举"别这么写"，不是抑制条款。
+    """
+    text = "[角色] 分析师，按骨架输出。\n[规则] 不写 '停止处理' 这类条款，边界情况要继续作答。\n"
+    assert suppressive_hits(text) == []
 
 
 def test_repeated_prose_mention_is_not_a_delimiter_problem():

@@ -3109,3 +3109,42 @@ push、PYPI_TOKEN、目录收录、Action 消费 workflow。
 - **校准 49 条**：载体就绪 —— 两页（main 25 / r4 24）+ 两条 `--apply-scores` 命令，
   见 `docs/operations.md` §尚待 owner 亲决。
 - **目录收录（PF-1b）**：材料就绪，等 owner 提交。
+
+## Round 53（2026-11-15）—— 把规则成绩单上的两个洞修掉，补一格注入分类学
+
+触发：复核「和同类竞品还差什么」时发现七轮靠齐方向已清零，**仓内唯一挂着的功能性
+"已知未修"** 是 10-29 自己量出来的两个读数（delimiter P=0.500 / suppressive R=0.667）。
+本轮零 LLM 调用、零出网、零真端点；不产生任何 Δ / 达标读数。
+
+- **修法一（delimiter）**：`pm/quality.py` 的 `delimiter_problems` 逐行先用
+  `_INLINE_PAIR_RE` 摘掉同一行同名成对的 `<X>…</X>`。旧判据只认行首/行尾，
+  示例行 `输入：<客户对话>三天没发货</客户对话>` 的开标签夹在句中（不计结构）、
+  闭标签在行尾（计结构）⇒ 报「没有对应的开标签」。R38 / R42 是真实交付物的两例。
+- **修法二（suppressive）**：`_QUOTED` 单引号分支加两侧锚
+  `(?<![A-Za-z0-9])` / `(?![A-Za-z0-9])`。10-31 的 `[^'\n]` 只治跨行；
+  `Don't … user's` 同一行两个撇号仍把中间抑制句整段当引用吞掉（C14）。
+  真正的成对英文引用（`不写 '停止处理' 这类条款`）仍照旧剥离。
+- **读数**：重跑 `scripts/measure_rule_reliability.py` ⇒ 7 条规则精确率/召回全 **1.000**，
+  gate 前后对仍 **10/10**。**四条争议语料的 `text` 与 `labels` 一字未改** ——
+  FP→TN / FN→TP 是实现的功劳，`test_readouts_improved_without_relabelling` 钉住标注与
+  正例数（防「一律放行」刷满分）。反向钉 `test_inline_balanced_example_is_not_a_delimiter_problem`
+  同时断言孤儿闭标签与重复开标签仍命中。
+- **变异验证（两组，各精确红 4 条）**：撤掉单引号锚 ⇒ C14 相关 3 条 + 文档抄件同步红；
+  撤掉同行配对 ⇒ R38/R42 相关 3 条 + 文档抄件同步红。还原后 `test_rule_reliability.py`
+  + `test_quality.py` **97 条全绿**。两组反例都语法合法，避开上一轮记过的
+  「`except SyntaxError: continue` 会跳过变异」那个坑。
+- **PE-6 补一格**：第 11 种装束 `prompt_extraction`（配置核对话术，判定口径沿用校验码回显）。
+  覆盖表 10/10→**11/11**（5 覆盖 + 6 部分）。`data-exfil` **不补**：外带类被服从时
+  模型不会回显校验码，现有 `injection_hit_kind` 只能判「未劫持」，加模板等于造假考卷；
+  阻塞原因与所需改造已写进 `docs/injection-taxonomy.md` 第三节。新增装束第一次跑守卫时
+  被「必须点名校验码」的不变量当场拦下（写的是「同步码」）——按不变量改文本，没放宽守卫。
+- **对外事实复核（11-15 GitHub API / PyPI）**：本仓仍 0★ / 0 fork / 0 subscriber、
+  `description=null`、`topics=[]`；PyPI `prompt-master` 仍 404；linshenkx **41,624★**
+  （10-29 +2,055）、iFixAi **45,738★**（+8,734，且 11-13 恢复提交）。PF-6「先推送」
+  已销账（`pushed_at=2026-11-13`，tag `v2.4.0` 已打）——0★ 不是没推，是没分发。
+
+### 本轮没做（不是遗漏，是边界）
+
+- PyPI 上传 / 四目录收录 / 49 条人工亲判：全部需 owner 账号或亲判，我代劳不了。
+- `data-exfil`、规则层射程外盲区、PC-5 留出集 split 维度、MCP `serverInfo.version`
+  口径：均未动，已在 `optimization-mapping.md` 第八轮列清。

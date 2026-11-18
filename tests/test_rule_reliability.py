@@ -103,24 +103,38 @@ def _by_id(corpus: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {it["id"]: it for it in corpus["items"]}
 
 
-def test_real_false_positives_are_still_fired(meas: Any, corpus: dict[str, Any]) -> None:
-    """R38/R42 是真实交付物的两例误报（行中开 + 行尾闭）。修掉这个误报前，
-    这两条会一直红着提醒你：先更新语料标注与文档表，再合实现。"""
+def test_real_false_positives_are_now_fixed(meas: Any, corpus: dict[str, Any]) -> None:
+    """R38/R42（真实交付物的「行中开 + 行尾闭」）2026-11-15 已修：同一行内
+    同名成对标签先配对，不再报「没有对应的开标签」。
+
+    ⚠️ 标注一个字没改（仍是负例）——读数从 FP 变 TN 是实现的功劳，
+    不是把答案改对了。谁把这两条改回命中，这条守卫必须当场红。
+    """
     items = _by_id(corpus)
     for rid in ("R38", "R42"):
         fired = meas.fired_codes(items[rid]["text"], corpus["codes"])
-        assert fired == {"delimiter_unbalanced"}, (
-            f"{rid} 预期命中 delimiter_unbalanced，实际 {fired}"
-        )
+        assert fired == set(), f"{rid} 已修成放行，实际又命中 {fired}"
         assert not items[rid]["labels"]["delimiter_unbalanced"]
 
 
-def test_known_miss_is_still_missed(meas: Any, corpus: dict[str, Any]) -> None:
-    """C14（同行撇号吞句）是计 FN 的已知漏判。哪天有人把它修了，这条会红——
-    那是好事：把语料标注改成命中、重跑脚本、更新文档，召回率就该涨。"""
+def test_known_miss_is_now_caught(meas: Any, corpus: dict[str, Any]) -> None:
+    """C14（同行撇号吞句）2026-11-15 已修：单引号分支收紧到「两端不紧贴单词字符」，
+    英文缩写/所有格的撇号不再冒充引用边界。标注仍是正例 ⇒ FN 变 TP。"""
     items = _by_id(corpus)
-    assert meas.fired_codes(items["C14"]["text"], corpus["codes"]) == set()
+    assert meas.fired_codes(items["C14"]["text"], corpus["codes"]) == {"suppressive_rule"}
     assert items["C14"]["labels"]["suppressive_rule"]
+
+
+def test_readouts_improved_without_relabelling(corpus: dict[str, Any]) -> None:
+    """满分不许靠改语料拿：四条争议样本的标注必须保持 2026-10-29 的原判，
+    且两条规则的正例数仍是 3（防「把所有东西都放行」换一张漂亮的表）。"""
+    items = _by_id(corpus)
+    assert items["C14"]["labels"]["suppressive_rule"] is True
+    assert items["C25"]["labels"]["delimiter_unbalanced"] is False
+    assert items["R38"]["labels"]["delimiter_unbalanced"] is False
+    assert items["R42"]["labels"]["delimiter_unbalanced"] is False
+    assert sum(1 for it in corpus["items"] if it["labels"]["delimiter_unbalanced"]) == 3
+    assert sum(1 for it in corpus["items"] if it["labels"]["suppressive_rule"]) == 3
 
 
 def test_gate_blind_spot_pair_is_pinned(meas: Any, corpus: dict[str, Any]) -> None:
@@ -135,9 +149,11 @@ def test_gate_blind_spot_pair_is_pinned(meas: Any, corpus: dict[str, Any]) -> No
 
 
 def test_measurement_agrees_with_doc_claims(result: dict[str, Any]) -> None:
-    """文档第四节引用的三个读数，实现一动就要对数。"""
+    """文档第四节引用的读数，实现一动就要对数（2026-11-15 两处修复后已是满分）。"""
     delim = result["per_code"]["delimiter_unbalanced"]["overall"]
-    assert delim["fp"] == 3 and delim["precision"] == 0.5
+    assert delim["fp"] == 0 and delim["precision"] == 1.0
+    assert delim["tp"] == 3 and delim["fn"] == 0, "正例仍须全部命中（不许靠放行换精确率）"
     supp = result["per_code"]["suppressive_rule"]["overall"]
-    assert supp["fn"] == 1 and supp["recall"] == pytest.approx(2 / 3)
+    assert supp["fn"] == 0 and supp["recall"] == 1.0
+    assert supp["tp"] == 3
     assert result["pairs_match"] == len(result["pairs"])

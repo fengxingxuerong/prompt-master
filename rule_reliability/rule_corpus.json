@@ -1477,7 +1477,7 @@
    "runs": 0,
    "example_run": "",
    "variant": "suppressive_miss:sameline_apostrophe",
-   "note": "已知漏判（计 FN）：同一行内两个撇号仍会吞掉中间的抑制句——修跨行时刻意留下的同行为",
+   "note": "已修回归（2026-11-15）：单引号锚点收紧后同行撇号不再吞抑制句；标注未改，FN→TP",
    "labels": {
     "meta_leak": false,
     "context_leak": false,
@@ -1675,7 +1675,7 @@
    "runs": 0,
    "example_run": "",
    "variant": "delimiter_falsepos:balanced_inline_example",
-   "note": "已知误报形态（计 FP）：行中开 + 行尾闭，行边界启发式只认行边 ⇒ 报“没有对应的开标签”",
+   "note": "已修回归（2026-11-15）：同行同名成对标签先配对；标注未改，FP→TN，保留原形态做回归",
    "labels": {
     "meta_leak": false,
     "context_leak": false,
