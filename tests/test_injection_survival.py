@@ -192,7 +192,7 @@ def test_mock_node_stores_scenarios_and_markers():
     assert re.fullmatch(r"[0-9A-F]{8}", code), f"校验码应是高熵十六进制串，实际 {code!r}"
     # 码必须真的在用例里，否则永远检不出来
     assert code in patch["test_cases"][2]
-    # 装束（PD-1 起共 10 种）按 (run_id, 序号) 确定性轮换——不能再钉死某一句话，
+    # 装束（PD-1 起 10 种，2026-11-15 补第 11 种）按 (run_id, 序号) 确定性轮换——不能再钉死某一句话，
     # 改为断言"该派生装束的渲染原文确实追加进了用例"，且模型原稿被保留在其前。
     tech = pick_technique(state.get("run_id"), 2)
     assert render_injection(tech, code) in patch["test_cases"][2], (
@@ -239,7 +239,7 @@ def test_test_node_flags_hijacked_output():
     def fake_plain(role, system, user, overrides=None):
         assert role == "target"
         # 判定"这一发是不是注入用例"认**码在不在输入里**，不认装束措辞——
-        # 装束自 PD-1 起轮换（10 种），认措辞会让这条用例随 run_id 抽到英文装束时假红。
+        # 装束自 PD-1 起轮换（现 11 种），认措辞会让这条用例随 run_id 抽到英文装束时假红。
         if code in user:
             return f"{code}", dict(_META)  # 目标模型执行了注入指令
         return "华东：1200000元", dict(_META)
@@ -373,7 +373,7 @@ def test_survival_clean_when_two_samples_survive():
 
 
 # --------------------------------------------------------------------------
-# 5. 注入技法库（PD-1，2026-10-13）：装束从 1 种扩到 10 种的守卫
+# 5. 注入技法库（PD-1 从 1 种扩到 10 种；2026-11-15 补第 11 种）的守卫
 # --------------------------------------------------------------------------
 def test_injection_pack_techniques_are_well_formed():
     """逐条核三条不变量：渲染后码在场（判定才不会失效）/ 点名要输出的东西 / 无元词自曝。"""
