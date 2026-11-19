@@ -285,19 +285,25 @@ _PROXY_KEYS = (
 
 
 @contextlib.contextmanager
-def _fast_stub_proxy() -> Iterator[str]:
-    """起一个**立刻回话**的假代理（接受连接就关），yield 它的 URL。
+def _fast_stub_proxy() -> Iterator[tuple[str, list[str]]]:
+    """起一个**立刻回话**的假代理（接受连接就关），yield (URL, 命中记录)。
 
     ⚠️ 为什么不能拿死端口（127.0.0.1:9）冒充：实测（2026-10-12）本机连死端口
     并不快速失败，而是被网络层挂到超时——"DNS 挂起 1.5s"这个判据反而被凑够了，
-    那条库行为判据照绿。要复现"httpx 真的把请求交给了代理、于是探测域名
-    **从未**经过本地 getaddrinfo"，代理必须是**能立刻答复**的那一个。
+    那条库行为判据照绿。要复现"httpx 真的把请求交给了代理"，代理必须是
+    **能立刻答复**的那一个。
+
+    为什么额外记"命中"（2026-11-20）：光看子进程里那条 DNS 用例绿不绿**分辨不出**
+    代理有没有生效——实测 httpx 0.28 走代理时仍会为目标域名调一次 getaddrinfo，
+    elapsed 照样 >1.5s，用例照样绿（细节见下方断言）。所以要一个与该判据无关的
+    观测点：代理端口的 accept 次数。夹具清干净 ⇒ 0 次；漏一个键 ⇒ ≥1 次。
     """
     srv = socket.socket()
     srv.bind(("127.0.0.1", 0))
     srv.listen(8)
     port = int(srv.getsockname()[1])
     stopped = threading.Event()
+    hits: list[str] = []
 
     def serve() -> None:
         while not stopped.is_set():
@@ -305,12 +311,13 @@ def _fast_stub_proxy() -> Iterator[str]:
                 conn, _ = srv.accept()
             except OSError:
                 return
-            conn.close()  # 立刻关：httpx 拿到的是连接错误，不是响应，也不会去解析目标域名
+            hits.append("connected")
+            conn.close()  # 立刻关：httpx 拿到的是连接错误，不是响应
 
     th = threading.Thread(target=serve, daemon=True)
     th.start()
     try:
-        yield f"http://127.0.0.1:{port}"
+        yield f"http://127.0.0.1:{port}", hits
     finally:
         stopped.set()
         srv.close()
@@ -344,10 +351,16 @@ def test_dns_library_behavior_survives_ambient_proxy(tmp_path: Path) -> None:
     sub_tmp.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["PYTEST_DEBUG_TEMPROOT"] = str(sub_tmp)
-    with _fast_stub_proxy() as proxy_url:
+    with _fast_stub_proxy() as (proxy_url, proxy_hits):
         for k in _PROXY_KEYS:
             env[k] = proxy_url
-        env["no_proxy"] = env["NO_PROXY"] = ""
+        # 不能把 no_proxy 设成空串（2026-11-20 修）：httpx 把空 pattern 编成
+        # `URLPattern('')`，而它**匹配所有 URL**（实测 `matches('http://anything/x')`
+        # 为 True）⇒ 每个请求都"命中豁免"、代理从不生效，这条守卫于是永远拿不到红，
+        # 变异测试把它读成"假闸"。要的是"没有 no_proxy 这个键"，所以删而不是清空。
+        # 大小写两种都删：Windows 环境块不分大小写，删一个即净；Linux 上各是独立键。
+        for k in ("NO_PROXY", "no_proxy"):
+            env.pop(k, None)
         proc = subprocess.run(
             [
                 sys.executable,
@@ -367,8 +380,18 @@ def test_dns_library_behavior_survives_ambient_proxy(tmp_path: Path) -> None:
             env=env,
             check=False,
         )
+        hit_count = len(proxy_hits)
     assert proc.returncode == 0, (
         "注入 HTTP_PROXY 之后，DNS 库行为判据红了 —— conftest 的 "
         "no_ambient_proxy 夹具没有兜住 ambient proxy：\n"
         f"{(proc.stdout or '')[-600:]}\n{(proc.stderr or '')[-300:]}"
+    )
+    # 主判据（2026-11-20 补）：上面那条 returncode 只在"代理让用例快速失败"时才红，
+    # 而实测 httpx 0.28 即便走代理也会先为目标域名调一次 getaddrinfo（elapsed 1.8s >
+    # 1.5s）⇒ 漏清代理时用例照样绿。于是改成看**代理端口有没有被连过**：
+    # 夹具把六个键都清了 ⇒ 请求根本不会碰代理 ⇒ 0 次；漏掉任意一个 ⇒ ≥1 次。
+    assert hit_count == 0, (
+        "假代理收到 "
+        f"{hit_count} 次连接 —— conftest 的 no_ambient_proxy 没把环境代理清干净："
+        "子进程本该在无代理环境里跑，请求却交给了代理。"
     )
