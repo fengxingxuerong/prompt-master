@@ -22,7 +22,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import app as lobster_app  # noqa: E402
+import app as lobster_app
 
 
 @pytest.fixture()
@@ -73,9 +73,8 @@ def test_write_path_uses_begin_immediate(db: Path) -> None:
     # 这条是"并发写不会互相覆盖"的机制证明：谁先拿到 IMMEDIATE 谁先改。
     other = sqlite3.connect(str(db), timeout=0.05)
     try:
-        with lobster_app._txn():
-            with pytest.raises(sqlite3.OperationalError):
-                other.execute("BEGIN IMMEDIATE")
+        with lobster_app._txn(), pytest.raises(sqlite3.OperationalError):
+            other.execute("BEGIN IMMEDIATE")
     finally:
         other.close()
 
@@ -87,7 +86,7 @@ def test_transition_survives_a_record_without_history(db: Path) -> None:
     with lobster_app._txn() as conn:
         lobster_app._upsert(conn, {"order_id": "OLD-1", "status": "pending"})
 
-    client = TestClient(lobster_app.app)
+    client = TestClient(lobster_app.app, client=("127.0.0.1", 50000))
     r = client.patch("/api/orders/OLD-1", json={"status": "confirmed"})
     assert r.status_code == 200, r.text
     assert _rows(db)["OLD-1"]["status"] == "confirmed"
@@ -97,5 +96,5 @@ def test_transition_survives_a_record_without_history(db: Path) -> None:
 def test_missing_order_still_404(db: Path) -> None:
     from fastapi.testclient import TestClient
 
-    client = TestClient(lobster_app.app)
+    client = TestClient(lobster_app.app, client=("127.0.0.1", 50000))
     assert client.patch("/api/orders/NOPE", json={"status": "confirmed"}).status_code == 404

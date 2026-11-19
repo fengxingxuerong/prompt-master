@@ -3148,3 +3148,66 @@ push、PYPI_TOKEN、目录收录、Action 消费 workflow。
 - PyPI 上传 / 四目录收录 / 49 条人工亲判：全部需 owner 账号或亲判，我代劳不了。
 - `data-exfil`、规则层射程外盲区、PC-5 留出集 split 维度、MCP `serverInfo.version`
   口径：均未动，已在 `optimization-mapping.md` 第八轮列清。
+
+## Round 54（2026-11-20）—— 把 2026-09-21 的书面豁免收回来（W7 / W8）
+
+**本轮判据**：上一轮交付复核把「三服务 W7/W8/W9 豁免未收回」列为「公网暴露前必须处理」，
+本轮按用户「开始吧」执行。零 LLM 调用、零出网；改动全部落在 `releases/` 三服务与其测试，
+不碰主产品判分链，**不动任何用户个人文件**。
+
+### 落了什么
+
+1. **W7 fail-closed（真缺陷，三服务同款）**：旧中间件是 `token = getenv(...); if token: 校验`，
+   即「没配令牌 = 全开放」。W7 原文写的正是「写接口对**局域网内所有调用者**开放」。
+   新口径分三层判定：① health 与页面 GET 永远开放（否则连排查入口都没有）；② 配了令牌 ⇒
+   白名单外一律要 `X-API-Key`（原口径不变）；③ 未配令牌 ⇒ **只有回环来源 + 同源 Origin 放行**，
+   跨机与跨站页面一律 401，错误文本自带两条出路（配 `*_TOKEN` 或写 `*_ALLOW_OPEN=1`）。
+   选「回环 + Origin」而不是「一律 401」，是因为后者会把用户本机演示直接打死 —— 而 W7 的
+   攻击面本来就不包含「能对 127.0.0.1 发请求的人」，那是 CSRF 与横向移动的边界，用 Origin 判。
+2. **W7′ 形状一并收掉**：taskboard 旧逻辑是「GET 且路径不以 `/api/tasks`、`/api/board` 开头就放行」，
+   于是 `GET /api/roster` 这类新读接口默认敞开。现改为白名单 `OPEN_PATHS`，白名单外一律要令牌。
+   原来那条特征化断言 `test_read_apis_outside_the_prefix_allowlist_are_open_today` 按设计转红，
+   已换成 `test_new_read_apis_require_token_after_whitelist`（断言 roster 无 Key 时 401）。
+3. **W8 自由文本收口**：`mask_free_text()` 用 `(?<!\d)1[3-9]\d{9}(?!\d)` 掩掉 note 里的号码，
+   接在三个落盘点：下单入岸、状态流转备注、列表兜底（幂等）。`mask_storage_phones.py` 从
+   「只掩 phone」扩到「phone + note」，复检也查两个字段。旧脚本口径注释里那句「note 属脱敏
+   范围外」是豁免期的取舍，不是不存在——这句随豁免一起作废。
+4. **文档记账**：`releases/suite/security-waiver.html` 新增「2026-11-20 收回」节（改了什么 /
+   怎么复验 / 还剩什么），标题与页脚同步；`docs/suite/README.md` 的鉴权段与责任边界段改写。
+
+### 门禁（可复跑）
+
+| 套件 | 结果 |
+|---|---|
+| `pytest releases/lobster/tests -q` | **35 passed**（原 26，+9：四态鉴权、跨机/跨站、开关显式性、note 三处掩码） |
+| `pytest releases/taskboard/tests -q` | **26 passed**（原 23，+3：跨机 401、开关、roster 收紧） |
+| `pytest releases/triage/tests -q` | **55 passed**（原 52，+3：跨机 401、跨站 401、开关） |
+| `pytest tests/test_suite_operational_scripts.py tests/test_watchdog_env.py -q` | **10 passed**（巡检/看门狗仍走 127.0.0.1，未配令牌也不受影响） |
+
+三服务必须**分三次跑**：`lobster`、`triage` 各有一个 `test_auth.py`，合跑会撞 import
+mismatch（D-011），CI 里本来就是三步。
+
+### 真数据只读审计（不是桩）
+
+```
+releases/lobster/data/orders.db     tables=2 rows=63  rows_with_plaintext_phone=0
+releases/taskboard/data/tasks.db    tables=2 rows=24  rows_with_plaintext_phone=0
+releases/triage/data/sessions.db    tables=2 rows=39  rows_with_plaintext_phone=0
+releases/lobster/mask_storage_phones.py --verify-only
+  → 订单总数 44，phone 字段 11 位明文 0 条，note 自由文本含明文 0 条
+```
+
+存量本来就干净（M3.2 的成果），本轮堵的是**新入口**：note 与状态备注以前是敞的。
+
+### 诚实边界
+
+- **本地仍然没有鉴权**：回环 + 同源即放行。这不是漏，是有意的取舍——能对本机回环发请求的
+  人本来就能读 `releases/*/data/`。真正被关掉的是「同网段另一台机器」与「浏览器里的恶意页面」。
+- **反代场景未覆盖**：若将来在前面挂 nginx 并转发到回环，`client.host` 会变成 127.0.0.1，
+  来源判定失效 ⇒ 那种部署**必须**同时配令牌（`*_ALLOW_OPEN` 不得开）。
+- **W9 没动**：`D:/Desktop/新建 Text Document.txt` 是用户个人文件，无授权不删不改。仓库侧只
+  核对了两条事实：`.env` 从未被跟踪、`git log --all -- .env` 为空。要不要作废重发由用户决定。
+- **三服务版本号未 bump**：这次是行为修复不是发布，`app.py` 里的 `version=` 保持原值；
+  真要对外发版时应连同 CHANGELOG 一起 bump，别只改代码。
+- 三服务测试**不进主套件计数**（CI 分三步跑），所以 `README` 与 `docs/operations.md` 里的
+  2211 条不需要同步；main 套件本轮未跑全量，只跑了与套件相关的 10 条。

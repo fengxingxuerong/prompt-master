@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>交付范围确认 · 安全维度已按你的指令豁免</title>
+<title>安全豁免已收回（2026-11-20）· W7/W8 已作业 · W9 待 owner</title>
 <style>
   :root { --bg:#fcfcfb; --ink:#16161a; --soft:#5d5d66; --faint:#9a9aa2;
     --line:#e6e6e3; --accent:#b5925a; --accent-wash:#f7f2ea; --mono:"SF Mono",Consolas,monospace; }
@@ -39,9 +39,9 @@
 <body>
 <div class="wrap">
 
-<div class="kicker">Scope Confirmation · Security Waiver Registered</div>
-<h1>安全维度已按你的指令<b>豁免</b>，<br>交付状态不变。</h1>
-<p class="standfirst">你的指令「安全方面不要考虑」已登记为正式的范围豁免。以下说明它改变了什么、没改变什么，以及哪三件事将来仍会等你一句话。</p>
+<div class="kicker">Scope Confirmation · Waiver Retracted 2026-11-20</div>
+<h1>安全豁免<b>已收回</b>，<br>本地体验一格没动。</h1>
+<p class="standfirst">2026-09-21 登记的 W7/W8 已作业完毕，W9 仍等你决定。下面顺序是：当初登记了什么 → 2026-09-25 复核 → 2026-11-20 收回动作与复验。</p>
 <div class="rule"></div>
 
 <section>
@@ -73,17 +73,41 @@
 </section>
 
 <section>
+  <h2>2026-11-20 · 豁免收回（W7 / W8 已作业，W9 仍在你手上）</h2>
+  <p class="big">你说「开始吧」，这一节记的是<b>改了什么、怎么验的、还剩什么</b>。口径变了：不再是「没配令牌就等于全开放」。</p>
+  <table>
+    <tr><th>条目</th><th>收回动作</th><th>复验方式（可复跑）</th></tr>
+    <tr>
+      <td class="mono">W7</td>
+      <td>三服务缺省 <b>fail-closed</b>：未配令牌时只有<b>本机回环 + 同源 Origin</b> 的调用放行，跨机 / 跨站页面一律 401。要无条件全开必须显式写 <span class="mono">LOBSTER_ALLOW_OPEN=1</span> / <span class="mono">TASKBOARD_ALLOW_OPEN=1</span> / <span class="mono">TRIAGE_ALLOW_OPEN=1</span>。<br>顺带收掉 <b>W7′</b>：taskboard 的「按前缀排除」改成白名单，<span class="mono">GET /api/roster</span> 这类新读接口不再默认敞开。</td>
+      <td><span class="mono">pytest releases/{lobster,taskboard,triage}/tests</span> ⇒ <b>35 / 26 / 55 全绿</b>。新增用例：跨机 401、跨站 Origin 401、开关必须显式（<span class="mono">0/false/空串</span>不开）、白名单收口。</td>
+    </tr>
+    <tr>
+      <td class="mono">W8</td>
+      <td>note 自由文本不再是脱敏范围外：<span class="mono">mask_free_text()</span> 在<b>入岸、状态流转备注、列表兜底</b>三处掩码；<span class="mono">mask_storage_phones.py</span> 同步扩展到 note 并复检两个字段。</td>
+      <td>三座真库只读扫描：orders <b>63 行</b> / tasks <b>24 行</b> / sessions <b>39 行</b>，含 11 位明文的行 <b>0</b>。新增 3 条用例（夹带号码、长数字串不误伤、状态备注）。</td>
+    </tr>
+    <tr>
+      <td class="mono">W9</td>
+      <td><b>没动你的文件</b>（无授权不碰桌面）。仓库侧只做核对：<span class="mono">.env</span> 从未被跟踪，<span class="mono">git log --all -- .env</span> 为空。</td>
+      <td>仍等你一句话：桌面那份明文密钥要不要作废重发；<span class="mono">.env</span> 里的 Key 是否轮换（2026-09-19 你决定暂不轮换）。</td>
+    </tr>
+  </table>
+  <p><b>本地体验没变</b>：浏览器打开 <span class="mono">127.0.0.1</span> 的页面、本机 curl 照旧能读能写。收回的是「局域网里任何一台机器」和「浏览器里随便一个网页」这两条路，不是把你自己关在门外。绕过开关的那条路只有一条，且必须有人手写到 <span class="mono">.env</span> 里才会存在。</p>
+</section>
+
+<section>
   <h2>不改变的部分</h2>
   <p>功能、性能、验收结论、监控巡检、台账与回滚机制——全部维持已验证状态。三服务当前运行正常（ModelHub :8687 / 龙虾站 :8791 / 任务台账 :8792），数据口径 models=12 / orders=7 / tasks=6。</p>
 </section>
 
 <div class="waiver-box">
-  <div class="label">Still Yours, When Ready</div>
-  <p>豁免是<b>你的决定</b>，我只负责把它执行得干净：不再催、不再计分、不再占用待办。唯一保留的动作是把这份豁免写进交接文档——将来任何人接手这套系统，都需要知道这三扇门是<b>你明知且授权敞开的</b>，而不是遗漏。哪天你想收回，说一句"把安全捡回来"就行，三条的修复路径都在缺点报告里躺着，加起来不超过一个下午。</p>
+  <div class="label">Retracted · 2026-11-20</div>
+  <p>上面那段「哪天你想收回」已经兑现：<b>W7 与 W8 在这天收回</b>，缺省从敞开改成 fail-closed。这份文档不删也不改旧账——它同时是「当初为什么敞着」和「现在按什么关着」的同一份出处。<b>W9 仍在你手上</b>：桌面那份明文密钥我既不删也不复制，要不要作废重发只在你说一句。</p>
 </div>
 
 <footer>
-  SECURITY WAIVER · REGISTERED 2026-09-21 · 复核 2026-09-25（豁免不变，两处过期表述已就地标注）· 三服务 3/3 OK · 交付物 14/14
+  SECURITY WAIVER · REGISTERED 2026-09-21 · 复核 2026-09-25 · <b>收回 2026-11-20（W7/W8 已作业，W9 待 owner）</b> · 三服务测试 35+26+55 全绿
 </footer>
 
 </div>

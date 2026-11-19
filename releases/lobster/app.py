@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -63,6 +64,19 @@ def mask_phone(ph: str) -> str:
     if "*" in ph or len(ph) != 11:
         return ph
     return ph[:3] + "****" + ph[-4:]
+
+
+FREE_TEXT_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+
+
+def mask_free_text(text: str) -> str:
+    """自由文本里的手机号一并掩码（W8 收口，2026-11-20）。
+
+    旧口径只掩 `phone` 字段，并明写「note 等自由文本属脱敏范围外」——那是豁免期
+    的取舍，不是漏洞不存在。豁免收回后这个口子一起关：note 里客户自填的 11 位
+    号码不再原样落盘。幂等，可对历史数据重复执行。
+    """
+    return FREE_TEXT_PHONE_RE.sub(lambda m: mask_phone(m.group(0)), str(text or ""))
 
 
 def _db_connect() -> sqlite3.Connection:
@@ -173,17 +187,63 @@ class StatusIn(BaseModel):
     note: str = Field(default="", max_length=200)
 
 
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def allow_open_mode(env_name: str) -> bool:
+    """显式放行开关（演示/本机联调）：只有写清 1/true/yes/on 才算开。
+
+    默认关闭。这个函数存在本身就是口径：「方便」必须由人显式声明。
+    """
+    return (os.getenv(env_name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def is_local_request(request: Request) -> bool:
+    """来源是本机、且不是跨站页面发起的请求。
+
+    W7 收口的真正靶子不是「本机 curl」，是「局域网内任何一台机器都能写」和
+    「浏览器里随便一个网页都能对本机端口发 POST」（CSRF）。所以两道门：
+    ① 来源地址必须是回环；② 带 Origin 的请求必须同源（跨站页面一律拒）。
+    """
+    client = request.client
+    if client is None or (client.host or "") not in LOOPBACK_HOSTS:
+        return False
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin:
+        return True  # curl / 服务端调用：没有 Origin 概念
+    host = (request.headers.get("host") or "").strip()
+    return urlsplit(origin).netloc == host
+
+
+def no_token_detail(prefix: str) -> str:
+    return (
+        f"未配置 {prefix}_TOKEN，且请求不是本机同源调用：API 默认关闭"
+        f"（W7 fail-closed，2026-11-20 收回 2026-09-21 豁免）。"
+        f"跨机访问请配置 {prefix}_TOKEN 并带 X-API-Key；"
+        f"明知风险要全开时设 {prefix}_ALLOW_OPEN=1。"
+    )
+
+
 @app.middleware("http")
 async def require_token(request: Request, call_next):
-    """鉴权：设了 LOBSTER_TOKEN 后，除 health/页面 GET 外均需 X-API-Key。"""
+    """鉴权：W7 收口（2026-11-20）—— 缺省不再是「没配就全开」。
+
+    设了 LOBSTER_TOKEN：除 health/页面 GET 外均需 X-API-Key（原口径不变）。
+    未设：仅本机同源调用放行（订单含手机号，但本机能发请求的人本就能读盘）；
+    跨机或跨站页面 → 401。要无条件下全开须显式 LOBSTER_ALLOW_OPEN=1。
+    """
+    path = request.url.path
+    open_paths = ("/api/health", "/", "/ledger", "/poster")
+    if request.method in ("GET", "HEAD") and path in open_paths:
+        return await call_next(request)
     token = (os.getenv("LOBSTER_TOKEN") or "").strip()
     if token:
-        path = request.url.path
-        open_paths = ("/api/health", "/", "/ledger", "/poster")
-        is_read = request.method in ("GET", "HEAD") and path in open_paths
-        if not is_read and (request.headers.get("X-API-Key") or "").strip() != token:
+        if (request.headers.get("X-API-Key") or "").strip() != token:
             return JSONResponse(status_code=401, content={"detail": "需要 X-API-Key 令牌"})
-    return await call_next(request)
+        return await call_next(request)
+    if allow_open_mode("LOBSTER_ALLOW_OPEN") or is_local_request(request):
+        return await call_next(request)
+    return JSONResponse(status_code=401, content={"detail": no_token_detail("LOBSTER")})
 
 
 @app.get("/api/health")
@@ -217,7 +277,8 @@ def create_order(o: OrderIn):
         "qty": o.qty,
         "amount_cny": SPECS[o.spec]["ref_price_cny"] * o.qty,
         "deliver_date": o.deliver_date,
-        "note": o.note,
+        # W8 收口（2026-11-20）：自由文本里的自填号码也入岸掩码，不再原样落盘
+        "note": mask_free_text(o.note),
         "status": "pending",
         "history": [{"ts": now, "action": "创建订单", "status": "pending", "note": "demo 模拟数据"}],
     }
@@ -242,6 +303,8 @@ def list_orders(status: str | None = None):
     for r in list(reversed(rows)):
         r2 = dict(r)
         r2["phone"] = mask_phone(r2.get("phone", ""))
+        # W8 收口（2026-11-20）：历史行/导入行的 note 也兜底掩一次（幂等）
+        r2["note"] = mask_free_text(r2.get("note", ""))
         masked.append(r2)
     return {"count": len(rows), "orders": masked, "status_labels": STATUS_LABEL}
 
@@ -274,7 +337,8 @@ def update_status(oid: str, request: Request, s: StatusIn | None = None):
         if rec is None:
             raise HTTPException(status_code=404, detail=f"订单不存在：{oid}")
         rec.setdefault("history", []).append(
-            {"ts": now, "action": "状态流转", "status": s.status, "note": s.note}
+            {"ts": now, "action": "状态流转", "status": s.status,
+             "note": mask_free_text(s.note)}
         )
         rec["status"] = s.status
         _upsert(conn, rec)

@@ -16,9 +16,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
 from _panel_drain import wait_panel_done
+from fastapi.testclient import TestClient
 
 # 与 test_triage.py 同款：按文件路径加载，避开与 lobster app.py 的同名模块冲突（D-011）
 _app_dir = Path(__file__).resolve().parents[1]
@@ -54,11 +53,14 @@ def client(tmp_path, monkeypatch):
         triage, "get_hub_models", lambda ttl=60: {rv["model"] for rv in triage.REVIEWERS}
     )
     monkeypatch.delenv("TRIAGE_TOKEN", raising=False)
-    return TestClient(triage.app)
+    monkeypatch.delenv("TRIAGE_ALLOW_OPEN", raising=False)
+    # 缺省来源是 `testclient`（非回环）⇒ 会被 W7 fail-closed 拦掉；钉成"本机调用"
+    # 才与被测的缺省态语义对齐。跨机场景由 _as() 显式指定。
+    return TestClient(triage.app, client=("127.0.0.1", 50000))
 
 
 # ---------------------------------------------------------------------------
-# 态一：未设 token —— 全开放，与历史行为零差异
+# 态一：未设 token —— 本机同源放行（W7 收口后不再无条件全开）
 # ---------------------------------------------------------------------------
 def test_no_token_open_access(client):
     r = client.post("/api/reviews", json={"subject": "无令牌单", "body": "未设 token 应放行"})
@@ -70,6 +72,32 @@ def test_no_token_open_access(client):
     # 成本看板必须读夹具那份（本机真实账本今天有内容）：读到真值时 days 不会为空
     assert client.get("/api/usage-board").json()["days"] == []
     # 收口再退出：否则后台线程会在夹具还原后把记录写进被跟踪的 data/ledger.jsonl
+    assert wait_panel_done(client, r.json()["session_id"])["status"] == "done"
+
+
+def _as(host: str) -> TestClient:
+    """指定来源地址的客户端：模拟局域网另一台机器。"""
+    return TestClient(triage.app, client=(host, 50000))
+
+
+def test_no_token_remote_caller_rejected(client):
+    """W7 收回的实质：工单正文含客户内容，跨机不再「默认敞开」。"""
+    c = _as("192.168.1.9")
+    assert c.post("/api/reviews", json={"subject": "s", "body": "b"}).status_code == 401
+    assert c.get("/api/sessions").status_code == 401
+    assert c.get("/api/health").status_code == 200
+
+
+def test_no_token_cross_site_origin_rejected(client):
+    h = {"origin": "http://evil.example", "host": "127.0.0.1:8791"}
+    r = _as("127.0.0.1").post("/api/reviews", json={"subject": "s", "body": "b"}, headers=h)
+    assert r.status_code == 401
+
+
+def test_allow_open_env_restores_legacy_open(client, monkeypatch):
+    monkeypatch.setenv("TRIAGE_ALLOW_OPEN", "1")
+    r = _as("192.168.1.9").post("/api/reviews", json={"subject": "s", "body": "b"})
+    assert r.status_code == 200
     assert wait_panel_done(client, r.json()["session_id"])["status"] == "done"
 
 

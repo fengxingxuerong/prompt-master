@@ -27,6 +27,7 @@ import threading
 import time
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -43,19 +44,57 @@ _LOCK = threading.Lock()
 app = FastAPI(title="Task Assignment Ledger", version="1.1.0")
 
 
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+OPEN_PATHS = ("/api/health", "/", "/rules", "/exceptions", "/handoff")
+
+
+def allow_open_mode(env_name: str) -> bool:
+    """显式放行开关（演示/本机联调）：只有写清 1/true/yes/on 才算开。"""
+    return (os.getenv(env_name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def is_local_request(request: Request) -> bool:
+    """来源是回环、且带 Origin 的请求必须同源（挡跨站页面发的 POST）。"""
+    client = request.client
+    if client is None or (client.host or "") not in LOOPBACK_HOSTS:
+        return False
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin:
+        return True
+    return urlsplit(origin).netloc == (request.headers.get("host") or "").strip()
+
+
+def no_token_detail(prefix: str) -> str:
+    return (
+        f"未配置 {prefix}_TOKEN，且请求不是本机同源调用：API 默认关闭"
+        f"（W7 fail-closed，2026-11-20 收回 2026-09-21 豁免）。"
+        f"跨机访问请配置 {prefix}_TOKEN 并带 X-API-Key；"
+        f"明知风险要全开时设 {prefix}_ALLOW_OPEN=1。"
+    )
+
+
 @app.middleware("http")
 async def require_token(request: Request, call_next):
-    """鉴权：设了 TASKBOARD_TOKEN 后，除 /api/health、页面与文档 GET 外均需 X-API-Key。"""
+    """鉴权：W7 收口（2026-11-20），同时收掉 W7′ 的「按前缀排除」形状。
+
+    设了 TASKBOARD_TOKEN：白名单之外的**所有**请求（含新增读接口）都要 X-API-Key。
+    旧实现是「GET 且不以 /api/tasks、/api/board 开头就放行」，于是以后加个
+    `GET /api/roster2` 就顺手漏鉴权；现在默认要令牌，漏不了。
+    未设：仅本机同源调用放行；跨机/跨站 → 401，要全开须显式 TASKBOARD_ALLOW_OPEN=1。
+    """
+    from fastapi.responses import JSONResponse
+
+    path = request.url.path
+    if request.method in ("GET", "HEAD") and path in OPEN_PATHS:
+        return await call_next(request)
     token = (os.getenv("TASKBOARD_TOKEN") or "").strip()
     if token:
-        path = request.url.path
-        open_paths = ("/api/health", "/", "/rules", "/exceptions", "/handoff")
-        is_read = request.method in ("GET", "HEAD") and not path.startswith("/api/tasks") and not path.startswith("/api/board")
-        if path not in open_paths and not is_read:
-            from fastapi.responses import JSONResponse
-            if (request.headers.get("X-API-Key") or "").strip() != token:
-                return JSONResponse(status_code=401, content={"detail": "需要 X-API-Key 令牌"})
-    return await call_next(request)
+        if (request.headers.get("X-API-Key") or "").strip() != token:
+            return JSONResponse(status_code=401, content={"detail": "需要 X-API-Key 令牌"})
+        return await call_next(request)
+    if allow_open_mode("TASKBOARD_ALLOW_OPEN") or is_local_request(request):
+        return await call_next(request)
+    return JSONResponse(status_code=401, content={"detail": no_token_detail("TASKBOARD")})
 
 PRIORITIES = {"P1", "P2", "P3"}
 STATUSES = {"pending", "in_progress", "review", "blocked", "done", "cancelled"}

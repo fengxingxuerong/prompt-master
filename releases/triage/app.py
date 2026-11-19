@@ -23,6 +23,7 @@ import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
@@ -72,26 +73,59 @@ app = FastAPI(title="Triage Panel", version="1.3.1")
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def allow_open_mode(env_name: str) -> bool:
+    """显式放行开关（演示/本机联调）：只有写清 1/true/yes/on 才算开。"""
+    return (os.getenv(env_name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def is_local_request(request: Request) -> bool:
+    """来源是回环、且带 Origin 的请求必须同源（挡跨站页面发的 POST）。"""
+    client = request.client
+    if client is None or (client.host or "") not in LOOPBACK_HOSTS:
+        return False
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin:
+        return True
+    return urlsplit(origin).netloc == (request.headers.get("host") or "").strip()
+
+
+def no_token_detail(prefix: str) -> str:
+    return (
+        f"未配置 {prefix}_TOKEN，且请求不是本机同源调用：API 默认关闭"
+        f"（W7 fail-closed，2026-11-20 收回 2026-09-21 豁免）。"
+        f"跨机访问请配置 {prefix}_TOKEN 并带 X-API-Key；"
+        f"明知风险要全开时设 {prefix}_ALLOW_OPEN=1。"
+    )
+
+
 @app.middleware("http")
 async def require_token(request: Request, call_next):
-    """鉴权（M3.1 安全收口 2026-09-23）：设了 TRIAGE_TOKEN 后，除 /api/health 与页面
-    （/ 与 /static/*）GET 外，其余端点（含全部写操作与 /api 数据读）均需 X-API-Key。
+    """鉴权（M3.1 2026-09-23；W7 收口 2026-11-20）。
 
-    与 taskboard/lobster 同款环境变量门控模式：默认未设 = 本地全开放（便利优先），
-    局域网/公网暴露前必须设置。比 taskboard 版更收紧的一处：/api/sessions* 等数据读
-    也在保护范围内——工单正文含客户内容（W8 教训：明文 PII 不应无凭据可读）。
+    设了 TRIAGE_TOKEN：除 /api/health 与页面（/ 与 /static/*）GET 外，其余端点
+    （含全部写操作与 /api 数据读）均需 X-API-Key。
+    未设：仅本机同源调用放行 —— 工单正文含客户内容（W8 教训），跨机/跨站不再
+    「默认全开」。要无条件全开须显式 TRIAGE_ALLOW_OPEN=1。
     """
+    path = request.url.path
+    page_get = request.method in ("GET", "HEAD") and (
+        path == "/" or path.startswith("/static/") or path == "/api/health")
+    if page_get:
+        return await call_next(request)
     token = (os.getenv("TRIAGE_TOKEN") or "").strip()
     if token:
-        path = request.url.path
-        page_get = request.method in ("GET", "HEAD") and (
-            path == "/" or path.startswith("/static/") or path == "/api/health")
-        if not page_get:
+        if (request.headers.get("X-API-Key") or "").strip() != token:
             from fastapi.responses import JSONResponse
-            if (request.headers.get("X-API-Key") or "").strip() != token:
-                return JSONResponse(status_code=401,
-                                    content={"detail": "需要 X-API-Key 令牌"})
-    return await call_next(request)
+            return JSONResponse(status_code=401,
+                                content={"detail": "需要 X-API-Key 令牌"})
+        return await call_next(request)
+    if allow_open_mode("TRIAGE_ALLOW_OPEN") or is_local_request(request):
+        return await call_next(request)
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=401, content={"detail": no_token_detail("TRIAGE")})
 
 
 # ---------- 基础设施 ----------

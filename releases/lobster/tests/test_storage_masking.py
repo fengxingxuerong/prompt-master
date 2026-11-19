@@ -59,3 +59,42 @@ def test_json_import_preserves_masking(client, tmp_path):
     rows = [json.loads(row["data"]) for row in
             lobster_app._db_connect().execute("SELECT data FROM orders")]
     assert rows[1]["phone"] == "139****9000"
+
+
+# ---------------------------------------------------------------------------
+# W8 收口（2026-11-20）：自由文本不再是脱敏范围外
+# ---------------------------------------------------------------------------
+def test_mask_free_text_masks_embedded_phones():
+    """note 里夹带的号码也要掩；已掩码/非 11 位/长数字串里的片段不动。"""
+    f = lobster_app.mask_free_text
+    assert f("打我 13800138001") == "打我 138****8001"
+    assert f("13800138001/13900139000") == "138****8001/139****9000"
+    assert f("已掩码 138****8001") == "已掩码 138****8001"
+    assert f("订单号 2026090113800138001") == "订单号 2026090113800138001"  # 前后贴数字，不算号码
+    assert f("") == ""
+    assert f(None) == ""
+
+
+def test_storage_masks_note_at_intake(client):
+    """入岸即脱敏的第二个字段：note 落库不允许残留 11 位明文。"""
+    r = client.post("/api/orders", json={
+        "name": "w8", "phone": "13800138001", "spec": "A", "qty": 1,
+        "note": "客户说他另一个号 13711112222 也行"})
+    assert r.status_code == 200
+    rows = [json.loads(row["data"]) for row in
+            lobster_app._db_connect().execute("SELECT data FROM orders")]
+    assert "13711112222" not in json.dumps(rows, ensure_ascii=False)
+    assert rows[0]["note"] == "客户说他另一个号 137****2222 也行"
+    # 接口层同样不返回明文
+    assert "13711112222" not in json.dumps(client.get("/api/orders").json(), ensure_ascii=False)
+
+
+def test_status_note_is_masked_too(client):
+    """状态流转的备注是第三个落盘点，别漏。"""
+    oid = client.post("/api/orders", json={
+        "name": "w8b", "phone": "13800138001", "spec": "A", "qty": 1}).json()["order_id"]
+    client.patch(f"/api/orders/{oid}", json={"status": "confirmed", "note": "联系 13633334444"})
+    rows = [json.loads(row["data"]) for row in
+            lobster_app._db_connect().execute("SELECT data FROM orders")]
+    assert "13633334444" not in json.dumps(rows, ensure_ascii=False)
+    assert rows[0]["history"][-1]["note"] == "联系 136****4444"

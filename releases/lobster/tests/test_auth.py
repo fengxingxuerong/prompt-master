@@ -1,26 +1,107 @@
-"""LOBSTER_TOKEN 的三态回归 —— 补 W7 豁免缺的那一半：证据。
+"""LOBSTER_TOKEN 的四态回归 —— W7 豁免于 2026-11-20 收回后的口径。
 
-豁免本身没动：token 未设时仍是"本地开放"，那是用户 2026-09-21 的书面决定。
-但 `releases/suite/security-waiver.html` 里写着"机制已实测就位"，而 2026-09-25 盘点时
-**lobster 与 taskboard 的鉴权一条用例都没有**（只有会审台有 `tests/test_auth.py`）——
-一句话没有出处，就等于下一个接手的人只能选择信不信。这里把出处补上。
+历史：2026-09-21 用户指令「安全方面不要考虑」，W7（三服务无鉴权）转书面豁免；
+2026-09-25 补了「机制已实测就位」的证据；2026-11-20 收回豁免，缺省从
+「没配令牌就全开」改为「只有本机同源调用放行，跨机 / 跨站一律 401」。
 
-`client` 夹具来自本目录 conftest.py：已封 DB/ORDERS，并 delenv LOBSTER_TOKEN
-（W16 教训：宿主环境里残留的 token 会静默改变断言方向）。
+四条态：
+  一、未配令牌 + 本机同源      → 放行（本机能发请求的人本就能读盘，不算新暴露面）
+  二、未配令牌 + 跨机 / 跨站   → 401（W7 真正的靶子：局域网写接口 + CSRF）
+  三、配了令牌                 → 除 health/页面 GET 外均需 X-API-Key（原口径不变）
+  四、显式 LOBSTER_ALLOW_OPEN=1 → 无条件放行（给人留的紧急出口，必须手写）
+
+`client` 夹具来自本目录 conftest.py：已封 DB/ORDERS、delenv LOBSTER_TOKEN，
+并**故意**设了 ALLOW_OPEN=1（业务用例不该被鉴权拖红）。本文件每条用例自己
+delenv 它，否则等于把断言方向改掉。
 """
 
 from __future__ import annotations
 
+import app as lobster_app
+from fastapi.testclient import TestClient
+
 ORDER = {"name": "张三", "phone": "13800001111", "spec": "A", "qty": 1, "note": "鉴权用例"}
 
 
-def test_no_token_open_access(client):
-    """态一（缺省）：不设 token，读写全开放 —— 与历史行为零差异。"""
-    assert client.get("/api/health").status_code == 200
-    assert client.get("/api/orders").status_code == 200
-    assert client.post("/api/orders", json=ORDER).status_code == 200
+def _as(host: str) -> TestClient:
+    """指定来源地址的客户端：模拟本机 / 局域网另一台机器。"""
+    return TestClient(lobster_app.app, client=(host, 50000))
 
 
+# ---------------------------------------------------------------------------
+# 态一：未配令牌 + 本机同源 —— 放行，与历史本地体验一致
+# ---------------------------------------------------------------------------
+def test_no_token_local_caller_passes(monkeypatch):
+    monkeypatch.delenv("LOBSTER_TOKEN", raising=False)
+    monkeypatch.delenv("LOBSTER_ALLOW_OPEN", raising=False)
+    c = _as("127.0.0.1")
+    assert c.get("/api/health").status_code == 200
+    assert c.get("/api/orders").status_code == 200
+    assert c.post("/api/orders", json=ORDER).status_code == 200
+
+
+def test_no_token_same_origin_page_passes(monkeypatch):
+    """回环 + 同源 Origin（页面自己发的 fetch）也要放行。"""
+    monkeypatch.delenv("LOBSTER_TOKEN", raising=False)
+    monkeypatch.delenv("LOBSTER_ALLOW_OPEN", raising=False)
+    c = _as("127.0.0.1")
+    h = {"origin": "http://127.0.0.1:8791", "host": "127.0.0.1:8791"}
+    assert c.post("/api/orders", json=ORDER, headers=h).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 态二：未配令牌 + 跨机 / 跨站 —— 401（这是 W7 收回的实质）
+# ---------------------------------------------------------------------------
+def test_no_token_remote_caller_rejected(monkeypatch):
+    monkeypatch.delenv("LOBSTER_TOKEN", raising=False)
+    monkeypatch.delenv("LOBSTER_ALLOW_OPEN", raising=False)
+    c = _as("192.168.1.9")
+    assert c.post("/api/orders", json=ORDER).status_code == 401
+    # 订单含手机号：数据读同样不放
+    assert c.get("/api/orders").status_code == 401
+    # 页面与健康检查永远可见，否则服务连排查入口都没有
+    assert c.get("/api/health").status_code == 200
+    assert c.get("/").status_code == 200
+
+
+def test_no_token_cross_site_origin_rejected(monkeypatch):
+    """回环来源 + 跨站 Origin：浏览器里随便一个网页不能对本机端口发 POST。"""
+    monkeypatch.delenv("LOBSTER_TOKEN", raising=False)
+    monkeypatch.delenv("LOBSTER_ALLOW_OPEN", raising=False)
+    c = _as("127.0.0.1")
+    h = {"origin": "http://evil.example", "host": "127.0.0.1:8791"}
+    assert c.post("/api/orders", json=ORDER, headers=h).status_code == 401
+
+
+def test_no_token_rejection_says_how_to_fix(monkeypatch):
+    """错误文本必须自解释：接手的人不该靠读源码才知道有 ALLOW_OPEN。"""
+    monkeypatch.delenv("LOBSTER_TOKEN", raising=False)
+    monkeypatch.delenv("LOBSTER_ALLOW_OPEN", raising=False)
+    detail = _as("192.168.1.9").post("/api/orders", json=ORDER).json()["detail"]
+    assert "LOBSTER_TOKEN" in detail and "LOBSTER_ALLOW_OPEN" in detail
+
+
+# ---------------------------------------------------------------------------
+# 态四：显式放行开关 —— 写清 1/true/yes/on 才生效
+# ---------------------------------------------------------------------------
+def test_allow_open_env_restores_legacy_open(monkeypatch):
+    monkeypatch.delenv("LOBSTER_TOKEN", raising=False)
+    for val in ("1", "true", "YES", "on"):
+        monkeypatch.setenv("LOBSTER_ALLOW_OPEN", val)
+        assert _as("192.168.1.9").post("/api/orders", json=ORDER).status_code == 200, val
+
+
+def test_allow_open_env_must_be_explicit(monkeypatch):
+    """`0` / `false` / 空串一律不算放行 —— 否则「没写」和「写错」都能打开。"""
+    monkeypatch.delenv("LOBSTER_TOKEN", raising=False)
+    for val in ("0", "false", "", "  "):
+        monkeypatch.setenv("LOBSTER_ALLOW_OPEN", val)
+        assert _as("192.168.1.9").post("/api/orders", json=ORDER).status_code == 401, val
+
+
+# ---------------------------------------------------------------------------
+# 态三：配了令牌 —— 原口径不变
+# ---------------------------------------------------------------------------
 def test_token_set_health_and_pages_exempt(client, monkeypatch):
     monkeypatch.setenv("LOBSTER_TOKEN", "secret-1")
     assert client.get("/api/health").status_code == 200
@@ -56,7 +137,9 @@ def test_token_whitespace_tolerant(client, monkeypatch):
     assert client.get("/api/orders").status_code == 401
 
 
-def test_empty_token_env_treated_as_unset(client, monkeypatch):
-    """设了但是空白 = 未设：否则 `LOBSTER_TOKEN=""` 会把整套鉴权静默关掉。"""
+def test_empty_token_env_treated_as_unset(monkeypatch):
+    """设了但是空白 = 未设：既不是凭据（跨机仍 401），也不改变本机放行。"""
     monkeypatch.setenv("LOBSTER_TOKEN", "   ")
-    assert client.get("/api/orders").status_code == 200
+    monkeypatch.delenv("LOBSTER_ALLOW_OPEN", raising=False)
+    assert _as("127.0.0.1").get("/api/orders").status_code == 200
+    assert _as("192.168.1.9").get("/api/orders").status_code == 401

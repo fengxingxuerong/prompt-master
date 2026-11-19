@@ -34,8 +34,11 @@ PY = D:\projects\prompt-master\.venv\Scripts\python.exe
 `watchdog_log.jsonl`（⚠️ 这两个 jsonl 被 git 跟踪，任何一次巡检都会让工作树变脏 ——
 `git status` 里它们常驻，别把自己的改动误归因给它们，也别把它们的内容当"当前状态"）。
 
-鉴权（M3.3，2026-09-23）：默认本地全开放；在 `.env` 写 `TASKBOARD_TOKEN` / `LOBSTER_TOKEN` /
-`TRIAGE_TOKEN`（网关另有 `PMH_GATEWAY_TOKEN`）后，受保护接口需 `X-API-Key` 头。看门狗会把
+鉴权（M3.3，2026-09-23；W7 收口 2026-11-20）：**缺省 fail-closed** —— 未配令牌时只有
+本机回环 + 同源 Origin 的调用放行，跨机 / 跨站页面一律 401。要无条件全开，显式写
+`LOBSTER_ALLOW_OPEN=1` / `TASKBOARD_ALLOW_OPEN=1` / `TRIAGE_ALLOW_OPEN=1`（演示用，别留在
+对外环境）。配了令牌（`.env` 写 `TASKBOARD_TOKEN` / `LOBSTER_TOKEN` / `TRIAGE_TOKEN`，
+网关另有 `PMH_GATEWAY_TOKEN`）后，白名单之外的接口需 `X-API-Key` 头。看门狗会把
 `.env` 的 KEY=VALUE 透传给拉起的服务进程（schtasks 极简环境下同样生效）。
 口径详见 `docs/suite/api-reference.md` 头注与会审台 README。
 
@@ -50,7 +53,7 @@ PY = D:\projects\prompt-master\.venv\Scripts\python.exe
 | 完成度盘点 | `releases/suite/completion-audit.html` + `completion-ledger.md` |
 | 现状评估 | `releases/suite/health-assessment.html`（4.2/5 评分卡） |
 | 缺点分析 | `releases/suite/weakness-report.html`（17 条，含豁免登记） |
-| 安全豁免 | `releases/suite/security-waiver.html`（W7/W8/W9 经用户指令豁免，2026-09-21） |
+| 安全豁免 | `releases/suite/security-waiver.html`（W7/W8/W9 2026-09-21 豁免 → **2026-11-20 收回**：W7 fail-closed、W8 含 note 掩码，W9 待 owner） |
 
 ## 四、快速上手（新成员 10 分钟）
 
@@ -63,7 +66,9 @@ PY = D:\projects\prompt-master\.venv\Scripts\python.exe
 
 ## 五、责任边界与已知边界
 
-- 安全维度经用户指令豁免（2026-09-21），详见 `security-waiver.html`；公网暴露前建议收回豁免；
+- 安全维度原经用户指令豁免（2026-09-21），**2026-11-20 已收回 W7/W8**（三服务缺省 fail-closed、
+  note 自由文本一并掩码），详见 `security-waiver.html` 的「收回」节；W9（桌面明文密钥文件）仍在
+  用户手上，需他本人决定是否作废重发；
 - **存储口径以代码为准**：三服务（taskboard / lobster / triage）自 v1.4.6 起真值源是
   **SQLite（WAL）**，同目录 JSON 只是只读种子快照与导出物。旧 README 写的"数据均为单机
   JSON 落盘（原子写）"已过期，别照它去回滚（回滚走 git tag，见
