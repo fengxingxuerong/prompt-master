@@ -123,6 +123,49 @@ _QUOTED = re.compile(
 _NEGATION_BEFORE_RE = re.compile(r"(?:不得|禁止|不可|不应|不要|勿|避免|无需|不必|严禁)\s*$")
 _NEGATION_WINDOW = 8
 
+# 非抑制语境豁免（2026-11-20 跨项目语料实测，5 条命中里 4 条是这几种形态）：
+# 旧判据只剥引用与前置否定，分不清"模型被要求少说"和"文档在描述/转述这些词"。
+# 误报原文：
+#   ① 症状清单：「问题 6：Claude 拒绝响应。症状：拒绝回答」——在列举故障现象；
+#   ② 用户做主语：「访谈退出条件：用户拒绝回答进一步问题」——描述用户行为，不是模型行为；
+#   ③ 请求补充：「若缺少公司名称 → 请求补充并停止处理」——先追问再停，是澄清而不是拒答；
+#   ④ 角色机制：「明确的用户信号将导致会话立即终止」——会话/游戏结束，不是任务输出被砍；
+#   ⑤ API 契约：「不含关键词，直接终止任务并返回错误码 MEAT_EGG_403」——返回码是业务结果。
+# 全部只放行不判罪（与模块一贯取舍一致），真抑制写法仍被抓：`若输入为空，直接终止，
+# 不返回任何内容` 没有上述任一语境；`无法识别时停止处理` 也没有。
+_EXEMPT_SUBJECT_RE = re.compile(r"(?:用户|对方|访客|客户|提问者)(?:明确)?\s*$")
+_EXEMPT_CONTEXT_RE = re.compile(r"(?:症状|现象|问题|原因|报错|例如|比如|如)\s*[：:]?\s*$")
+_EXEMPT_CLARIFY_RE = re.compile(
+    r"(?:请求|要求|请)\s*(?:用户)?\s*(?:补充|澄清|确认|提供)[^。；\n]{0,8}$"
+)
+# 症状清单常用「**症状：**」独占一行、条目另起一行（实测 zh-1174 的形态）：
+# 当前行前缀为空，光看同一行前缀认不出来 ⇒ 往上最多看 3 个非空行。
+_SYMPTOM_HEADING_RE = re.compile(r"^(?:症状|现象|原因|报错)\s*[:：]")
+_SYMPTOM_LOOKBACK_LINES = 3
+_EXEMPT_SESSION_RE = re.compile(r"(?:会话|对话|角色扮演|游戏)[^。；\n]{0,6}$")
+_EXEMPT_ERROR_RETURN_RE = re.compile(
+    r"^[^。；\n]{0,12}(?:错误码|error\s*code|status\s*code|HTTP\s*[45]\d\d)", re.IGNORECASE
+)
+# 前缀窗口取 18 字：要容下「若缺少公司名称 → 请求补充并」这类修饰，同时不跨句
+# （窗口里出现句号/分号就不该把上一句的语境算进来 —— 在 `suppressive_hits` 里裁到最后一个句读）。
+_SUPPRESSIVE_PREFIX_WINDOW = 18
+_SUPPRESSIVE_SUFFIX_WINDOW = 24
+
+
+def _in_symptom_list(before: str) -> bool:
+    """命中项上方 ≤3 个非空行里有「症状：/现象：/原因：/报错：」标题 ⇒ 在列举故障现象。
+
+    只看标题行，不看正文句子：正文里出现「问题」太常见（`问题6：…` 本身也是标题形态），
+    所以判定要求该行去粗体/列表符号后**以症状类词 + 冒号开头**。
+    """
+    lines = [ln for ln in before.splitlines() if ln.strip()]
+    for raw in reversed(lines[-_SYMPTOM_LOOKBACK_LINES:]):
+        line = raw.strip().lstrip("-*•+ ").strip()
+        line = line.strip("*").strip()
+        if _SYMPTOM_HEADING_RE.match(line):
+            return True
+    return False
+
 
 def suppressive_hits(text: str) -> list[str]:
     """命中的抑制型措辞，**已剥掉引用与否定语境**（`check` 与 `diff` 共用这一个口径）。
@@ -139,8 +182,21 @@ def suppressive_hits(text: str) -> list[str]:
     stripped = _QUOTED.sub(" ", text or "")
     hits: list[str] = []
     for m in _SUPPRESSIVE_RULE_RE.finditer(stripped):
-        prefix = stripped[max(0, m.start() - _NEGATION_WINDOW) : m.start()]
-        if _NEGATION_BEFORE_RE.search(prefix):
+        prefix = stripped[max(0, m.start() - _SUPPRESSIVE_PREFIX_WINDOW) : m.start()]
+        # 不跨句：窗口里若有句读，只保留最后一句（否则上一句的「用户」会把这一句豁免掉）
+        prefix = re.split(r"[。；;！!\n]", prefix)[-1]
+        if _NEGATION_BEFORE_RE.search(prefix[-_NEGATION_WINDOW:]):
+            continue
+        if (
+            _EXEMPT_SUBJECT_RE.search(prefix)
+            or _EXEMPT_CONTEXT_RE.search(prefix)
+            or _EXEMPT_CLARIFY_RE.search(prefix)
+            or _EXEMPT_SESSION_RE.search(prefix)
+            or _in_symptom_list(stripped[: m.start()])
+        ):
+            continue
+        suffix = stripped[m.end() : m.end() + _SUPPRESSIVE_SUFFIX_WINDOW]
+        if _EXEMPT_ERROR_RETURN_RE.search(suffix):
             continue
         hits.append(m.group(0))
     # 去重但保留首次出现顺序（报告里按原文顺序读更顺）
@@ -216,6 +272,138 @@ _NUMBERED_ITEM_RE = re.compile(r"^\s*(?:\d+\s*[.．、)）]|[(（]\d+[)）]|[①
 # 目标模型看到两个开标签，分不清哪段才是"数据区"，上一轮评审在 Run A 的最终提示词里就抓到过。
 _OPEN_TAG_RE = re.compile(r"<([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]{0,20})>")
 _CLOSE_TAG_RE = re.compile(r"</([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]{0,20})>")
+
+# 哪些标签算「数据区定界符」、哪些只是排版/占位符（2026-11-20 跨项目语料实测）：
+# 拿两个开源提示词库（f/awesome-chatgpt-prompts 3083 条 + 中文全译 2172 条）跑本规则，
+# 45 条命中里 21 条是 HTML 标签、20 条是模板变量占位符、3 条是组件名 —— 真正该报的约 1 条。
+# 误报形态一：`<div class="header">标题</div>` 的开标签**带属性**，逃过 `_OPEN_TAG_RE`
+# （它要求标签名后紧跟 `>`），只有 `</div>` 被捕获 ⇒ 判「没有对应的开标签」。
+# 误报形态二：`<name> pays <name> <amount>` 里占位符本来就会重复出现，被判「重复开标签」。
+# 这两类都不是"目标模型分不清数据区"，而是输出格式/模板变量，按本模块一贯取舍
+# （误杀比漏报贵）整类放行：HTML 容器标签与占位符名不参与配平判据。
+# 判据保持确定性，不做语义猜测：① 已知 HTML 标签；② 数据区同义词之外的 ASCII 占位符名
+# （全小写 `name`/`amount`/`query`，或驼峰组件名 `LargePropertiesCard`）。
+# 中文标签（`<输入>`/`<客户对话>`）与 `input`/`data` 等数据区名照旧参判 —— Run A 事故形态不变。
+_HTML_TAGS = frozenset(
+    (
+        "a",
+        "abbr",
+        "article",
+        "aside",
+        "b",
+        "blockquote",
+        "body",
+        "br",
+        "button",
+        "canvas",
+        "caption",
+        "code",
+        "col",
+        "colgroup",
+        "dd",
+        "details",
+        "div",
+        "dl",
+        "dt",
+        "em",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "head",
+        "header",
+        "hr",
+        "html",
+        "i",
+        "iframe",
+        "img",
+        "input",
+        "label",
+        "legend",
+        "li",
+        "link",
+        "main",
+        "meta",
+        "nav",
+        "ol",
+        "optgroup",
+        "option",
+        "p",
+        "path",
+        "pre",
+        "q",
+        "s",
+        "samp",
+        "script",
+        "section",
+        "select",
+        "small",
+        "source",
+        "span",
+        "strong",
+        "style",
+        "sub",
+        "summary",
+        "sup",
+        "svg",
+        "table",
+        "tbody",
+        "td",
+        "template",
+        "textarea",
+        "tfoot",
+        "th",
+        "thead",
+        "title",
+        "tr",
+        "track",
+        "u",
+        "ul",
+        "var",
+        "video",
+    )
+)
+# 数据区标签同义词：只有这些名字才做「重复开标签」判定（其它名字重复出现属正常占位）。
+_DATA_REGION_TAGS = frozenset(
+    {
+        "输入",
+        "数据",
+        "输入数据",
+        "用户输入",
+        "待分析数据",
+        "上下文",
+        "文档",
+        "内容",
+        "input",
+        "inputs",
+        "data",
+        "context",
+        "document",
+        "documents",
+        "content",
+        "user_input",
+    }
+)
+
+
+def _is_delimiter_tag(name: str) -> bool:
+    """该标签名是否按「数据区定界符」参判（False = HTML/占位符/组件名，整类放行）。"""
+    lowered = name.lower()
+    if lowered in _HTML_TAGS:
+        return False
+    if lowered in _DATA_REGION_TAGS:
+        return True
+    # 全小写（`name`/`amount`/`rule`）或驼峰组件名（`LargePropertiesCard`）：模板占位符
+    return not (name.isascii() and (name.islower() or any(ch.isupper() for ch in name[1:])))
+
+
 # 同一行内**同名成对**的 `<X>…</X>`（示例行最常见：`输入：<客户对话>三天没发货</客户对话>`）。
 # 2026-11-15 补：只摘同一行的成对片段，逐行处理、不跨行、不猜嵌套；
 # 跨行结构标签与真不配平（重复开 / 孤儿闭）一律留给下面的 stack 判据。
@@ -339,18 +527,29 @@ def delimiter_problems(prompt: str) -> list[str]:
     与构造复现 C25 全是这个形态，delimiter 精确率因此只有 0.500。
     摘掉的只是**同一行、同名、成对**的片段：跨行结构标签、重复开标签、孤儿闭标签
     照旧判定（C22 / C23 / P10 三条正例与 tests/test_quality.py 的 Run A 事故形态钉着）。
+
+    2026-11-20 补（跨项目语料实测）：只让「数据区定界符」参判。HTML 容器标签
+    （`<div class="x">`、`</button>`）与模板占位符（`<name>`、`<amount>`、`<LargePropertiesCard>`）
+    整类放行 —— 判据见 `_is_delimiter_tag`。此前 45 条命中里 44 条是这两类误报，
+    真实提示词（输出 HTML 的、带变量模板的）会被 `check` 判退出码 1。
     """
     problems: list[str] = []
     stack: list[str] = []
     for raw_line in (prompt or "").splitlines():
         line = _INLINE_PAIR_RE.sub(" ", raw_line)
         for name in _structural_tags(line, _OPEN_TAG_RE):
-            if name in stack:
+            if not _is_delimiter_tag(name):
+                continue
+            key = name.lower()
+            if key in stack:
                 problems.append(f"<{name}> 重复开标签（上一个还没闭合）")
             else:
-                stack.append(name)
+                stack.append(key)
         for name in _structural_tags(line, _CLOSE_TAG_RE):
-            if name in stack:
+            if not _is_delimiter_tag(name):
+                continue
+            key = name.lower()
+            if key in stack:
                 stack.pop()
             else:
                 problems.append(f"</{name}> 没有对应的开标签")

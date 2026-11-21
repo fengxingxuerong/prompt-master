@@ -418,6 +418,67 @@ def test_repeated_prose_mention_is_not_a_delimiter_problem():
     assert delimiter_problems(prompt) == []
 
 
+def test_html_and_placeholder_tags_are_not_delimiters():
+    """2026-11-20 跨项目语料（5255 条）实测：HTML 与模板占位符不是数据区定界符。
+
+    45 条命中里 44 条是这两类误报 —— 带属性的开标签（`<div class="x">`）逃过
+    `_OPEN_TAG_RE`（要求名字后紧跟 `>`），只剩 `</div>` 被判孤儿；占位符
+    （`<name>`/`<amount>`）本来就会重复出现，被判「重复开标签」。
+    反向自测：中文数据区标签与孤儿闭标签照旧要抓（见下一条与 Run A 用例）。
+    """
+    html = (
+        '<div class="header">Travel Itinerary</div>\n'
+        '<a href="#tab-1" class="active">Tab 1</a>\n'
+        "<ul>\n<li>条目</li>\n</ul>\n"
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "<url><loc>https://example.com</loc></url>\n</urlset>\n"
+    )
+    assert delimiter_problems(html) == []
+    placeholders = "**Total spent:** <amount> across <n> expenses\n- <name> pays <name> <amount>\n"
+    assert delimiter_problems(placeholders) == []
+    component = "<LargePropertiesCard>\n  <TitleRow />\n</LargePropertiesCard>\n"
+    assert delimiter_problems(component) == []
+
+
+def test_html_release_does_not_weaken_real_delimiter_detection():
+    """放行 HTML/占位符后，Run A 形态与中文孤儿闭标签必须仍然被抓。"""
+    assert any(
+        "重复开标签" in p for p in delimiter_problems("<输入>\n第一段\n<输入>\n第二段\n</输入>\n")
+    )
+    assert delimiter_problems("[角色] 分析师。\n</客户对话>\n") == ["</客户对话> 没有对应的开标签"]
+
+
+def test_suppressive_rule_ignores_descriptive_and_user_subject_contexts():
+    """2026-11-20 跨项目语料实测：5 条命中里 4 条是「描述/用户行为/澄清/会话机制」。
+
+    旧判据只剥引用与前置否定，于是把「症状：拒绝回答」「用户拒绝回答」「请求补充并停止处理」
+    「用户信号将导致会话立即终止」都判成模型抑制条款。全部属于文档在**描述**这些词，
+    不是要求模型少说。反向自测：真抑制写法（无上述语境）仍要命中。
+    """
+    for text in (
+        "问题 6：Claude 拒绝响应。症状：拒绝回答；建议替代方案。",
+        "**症状：**\n- 我无法协助处理该请求\n- 拒绝回答\n- 建议替代方案",
+        "访谈退出条件：用户拒绝回答进一步问题。",
+        "退出：明确的用户信号将导致会话立即终止。",
+        "若缺少公司名称 → 请求补充并停止处理。",
+        "若职位标题明显不切实际 → 请求澄清并停止处理。",
+    ):
+        assert suppressive_hits(text) == [], text
+    # 反向：真抑制句没有这些语境，不能被一并放行
+    assert "停止处理" in suppressive_hits("无法识别时停止处理。")
+    assert "直接终止" in suppressive_hits("若输入为空，直接终止，不返回任何内容。")
+
+
+def test_api_error_code_termination_is_not_suppressive():
+    """「终止任务并返回错误码」是业务契约（返回码就是结果），不是让模型少说。
+
+    语料原文：`不含肉禽蛋关键词（肉/禽/蛋…），直接终止任务并返回错误码 MEAT_EGG_403`。
+    同一句若只是终止而不带返回码，仍按抑制条款判（见上一条反向自测）。
+    """
+    assert suppressive_hits("不含肉禽蛋关键词，直接终止任务并返回错误码 MEAT_EGG_403。") == []
+    assert "直接终止" in suppressive_hits("不含肉禽蛋关键词，直接终止任务。")
+
+
 def test_meta_leak_survives_whitespace_rewrite():
     """元话语特征句被去掉空格后仍要命中（模型改写时最爱干这件事）。"""
     spacer = "你是一位严格的 AI 输出质量评估专家，负责打分。"
