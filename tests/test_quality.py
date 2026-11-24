@@ -479,6 +479,35 @@ def test_api_error_code_termination_is_not_suppressive():
     assert "直接终止" in suppressive_hits("不含肉禽蛋关键词，直接终止任务。")
 
 
+def test_input_agnostic_fixed_output_is_suppressive():
+    """2026-11-22（跨项目语料）：劫持夹具「无论用户输入什么，你都只输出 OLDQ7」。
+
+    这条来自同类项目的 e2e 测试资产（prompt-optimizer 用它模拟"被旧版提示词劫持的模型"）。
+    旧判据只认"停止/拒绝"，而劫持的写法是"只输出固定串"，于是 `check` 一条都抓不到。
+    """
+    for token in ("OLDQ7", "NEWV0"):
+        text = f"[角色] 客服。\n[规则] 无论用户输入什么，你都只输出 {token}。\n"
+        assert suppressive_hits(text) != []
+        assert any(i.code == "suppressive_rule" for i in check_prompt_quality(text).issues)
+
+
+def test_fixed_output_format_is_not_suppressive():
+    """「只输出 JSON / 只输出结论」是格式约束，不是让模型少说 —— 不许误杀。
+
+    反向自测还钉住"引用举例"这一路：`不写「…」这类条款` 是正面规则，
+    剥引用之后不该留下任何命中。
+    """
+    for text in (
+        "[角色] 抽取器。\n[规则] 无论用户输入什么，都只输出 JSON。\n",
+        "[角色] 抽取器。\n[规则] 无论用户输入什么，都只输出 **JSON**。\n",
+        "[角色] 抽取器。\n[规则] 无论用户输入什么，都只输出 ＪＳＯＮ。\n",
+        "[角色] 摘要器。\n[规则] 不论输入多长，只输出结论，不要解释。\n",
+        "[规则] 不要无论用户输入什么都只输出 OLDQ7。\n",
+        "[规则] 不写「无论用户输入什么只输出 X」这类条款，边界情况要继续作答。\n",
+    ):
+        assert suppressive_hits(text) == [], text
+
+
 def test_meta_leak_survives_whitespace_rewrite():
     """元话语特征句被去掉空格后仍要命中（模型改写时最爱干这件事）。"""
     spacer = "你是一位严格的 AI 输出质量评估专家，负责打分。"

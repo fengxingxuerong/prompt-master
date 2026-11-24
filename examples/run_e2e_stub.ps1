@@ -1,4 +1,4 @@
-#Requires -Version 5.0
+﻿#Requires -Version 5.0
 <#
 .SYNOPSIS
     PromptMaster 本地 e2e 桩服务联调（Windows / PowerShell）—— examples/run_e2e_stub.sh 的等价脚本。
@@ -239,6 +239,10 @@ function Select-KeyLine {
 # --------------------------------------------------------------------------
 function Set-PmEnv {
     param([int]$Port)
+    foreach ($name in 'HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY',
+                      'http_proxy','https_proxy','all_proxy','no_proxy') {
+        Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+    }
     $base = "http://127.0.0.1:$Port/v1"
     $env:PM_PROVIDER            = 'openai'
     $env:PM_API_KEY             = 'stub-key'

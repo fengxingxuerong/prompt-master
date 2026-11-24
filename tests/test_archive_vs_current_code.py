@@ -58,6 +58,8 @@ def _reaggregate(d: dict) -> dict:
 
 def test_the_cap_affected_arms_predate_the_fix() -> None:
     """那 10 条臂跑在封顶接线修复**之前**——这是差值的来源。"""
+    if not any(LOGS.glob("run_*.json")):
+        pytest.skip("本机没有历史运行归档")
     seen = 0
     for rid in CAP_AFFECTED:
         p = LOGS / f"run_{rid}.json"
@@ -69,7 +71,7 @@ def test_the_cap_affected_arms_predate_the_fix() -> None:
             f"{rid}（{mtime}）已不早于封顶修复（{CAP_FIX}），"
             "它在当前代码下重跑应该会与归档一致——请重判这条是否还该列在 CAP_AFFECTED"
         )
-    assert seen or not LOGS.exists(), "归档目录在但一条都没读到"
+    assert seen, "有运行归档，但 CAP_AFFECTED 指定的一条都没读到"
 
 
 @pytest.mark.parametrize("run_id", CAP_AFFECTED)

@@ -88,6 +88,25 @@ def test_every_text_mode_subprocess_pins_utf8() -> None:
     )
 
 
+def test_windows_stub_script_declares_utf8() -> None:
+    raw = (ROOT / "examples" / "run_e2e_stub.ps1").read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf"), (
+        "Windows PowerShell 5.1 会把无 BOM 的 UTF-8 脚本按 GBK 解析，中文提示词可触发语法错误"
+    )
+    raw.decode("utf-8-sig")
+
+
+def test_stub_e2e_scripts_isolate_host_proxy() -> None:
+    scripts = [
+        (ROOT / "examples" / "run_e2e_stub.sh").read_text(encoding="utf-8"),
+        (ROOT / "examples" / "run_e2e_stub.ps1").read_text(encoding="utf-8-sig"),
+    ]
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "no_proxy"):
+        assert all(name in script for script in scripts), f"桩端到端脚本没有隔离 {name}"
+    assert "unset HTTP_PROXY" in scripts[0]
+    assert 'Remove-Item "Env:$name"' in scripts[1]
+
+
 def test_the_guard_can_actually_fail() -> None:
     """闸本身的阴性对照：判据能认出一个真实的违规写法。
 

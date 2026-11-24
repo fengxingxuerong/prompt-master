@@ -56,16 +56,37 @@ def test_check_command_cases_path_in_process(tmp_path: Path, capsys) -> None:
     assert check_command(["--cases-file", str(path), "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["mode"] == "cases_check" and payload["veto_capable"] == 2
-    # 这份样本没标 scenario，所以覆盖缺口也会报出来 —— 期望里带着它，
-    # 免得下一个人把 scenario_gap 当成误报删掉
-    assert {f["code"] for f in payload["findings"]} == {"echoes", "scenario_gap"}
+    # 外部用例集缺内部 scenario 标签只记未决事实；echoes 是真问题，仍判 rejected。
+    assert {f["code"] for f in payload["findings"]} == {"echoes"}
+    assert {fact["code"] for fact in payload["unvalidated"]} == {"scenario_gap"}
+    assert payload["verdict"] == "rejected"
 
     assert check_command(["--cases-file", str(path)]) == 1
     text = capsys.readouterr().out
     assert "能一票否决的：2 条" in text and "强判据落在第 2 条" in text
+    assert "scenario_gap" in text and "未决事实" in text
 
     with pytest.raises(SystemExit):
         check_command(["--cases-file", str(path), "--prompt", "一句提示词"])
+
+
+def test_external_scenario_gap_is_unvalidated_not_rejected(tmp_path: Path, capsys) -> None:
+    from pm.cli.check import check_command
+
+    path = tmp_path / "external.json"
+    path.write_text(
+        json.dumps(
+            [{"input": "请总结合同的核心条款", "expected": "违约责任", "mode": "contains"}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    assert check_command(["--cases-file", str(path), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["findings"] == []
+    assert payload["verdict"] == "needs_validation"
+    assert payload["ok"] is False
+    assert [fact["code"] for fact in payload["unvalidated"]] == ["scenario_gap"]
 
 
 def test_the_default_mode_is_the_same_for_both_paths() -> None:

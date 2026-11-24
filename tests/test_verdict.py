@@ -239,11 +239,8 @@ def test_check_cases_without_strong_veto_is_needs_validation(tmp_path, capsys) -
 
     `render_cases` 早就把这句话印给人看了，JSON 出口却只给 `ok: true`。这里钉住两者一致。
 
-    夹具用**标准 scenario 名**（`main_path` / `boundary`）：`casesaudit` 会对照
-    `pm/nodes/execute.py::_has_coverage` 的同一份判据查场景缺口，缺了就会多出
-    `scenario_gap` 这条 finding，于是裁决变成 `rejected` —— 那是"考卷本身有结构问题"，
-    与"考卷结构没问题、但挡不住差输出"不是同一件事。本轮夹具第一版就栽在这里
-    （用中文 scenario，撞上 `scenario_gap`，测出来的是 rejected）。
+    夹具用**标准 scenario 名**（`main_path` / `boundary`），避免外部用例集的
+    `scenario_gap` 未决事实干扰本测试；缺标签现在记 `needs_validation`，不再判 `rejected`。
     """
     f = tmp_path / "cases.json"
     f.write_text(

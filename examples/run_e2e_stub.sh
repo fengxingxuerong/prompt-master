@@ -20,6 +20,7 @@
 
 set -u
 cd "$(dirname "$0")/.."
+unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy
 
 # venv python 跨平台探测：Linux/macOS 是 .venv/bin/python，Windows venv 是
 # .venv/Scripts/python.exe——Git Bash 下也常见，自动回退而不是写死一种。

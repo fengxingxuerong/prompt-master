@@ -51,10 +51,12 @@ _TRANSIENT_CONN_HINTS = (
     # 实测的真实超时形态（openai/langchain 包一层后不带 "read timeout" 字样）
     "timeouterror",
     "timed out",
+    "http 0",
+    "temporarily unavailable",
 )
 
 
-_TRANSIENT_STATUS_CODES = frozenset({408, 500, 502, 503, 504})
+_TRANSIENT_STATUS_CODES = frozenset({408, 500, 502, 503, 504, 524})
 
 
 _DNS_RESOLVED: set[str] = set()
@@ -159,9 +161,11 @@ def _is_transient_conn_error(e: Exception) -> bool:
     code = getattr(e, "status_code", None) or getattr(
         getattr(e, "response", None), "status_code", None
     )
-    if isinstance(code, int):
-        return code in _TRANSIENT_STATUS_CODES
     text = f"{type(e).__name__}: {e}".lower()
+    if isinstance(code, int):
+        if code in _TRANSIENT_STATUS_CODES:
+            return True
+        return code == 400 and "temporarily unavailable" in text
     return any(k in text for k in _TRANSIENT_CONN_HINTS)
 
 

@@ -154,10 +154,38 @@ def test_status_code_5xx_is_transient_even_without_hint_text() -> None:
     assert L._is_transient_conn_error(e) is True
 
 
+def test_cloudflare_timeout_and_http_zero_are_transient() -> None:
+    assert (
+        L._is_transient_conn_error(_exc_with_status(524, "Error code: 524 - origin timeout"))
+        is True
+    )
+    assert (
+        L._is_transient_conn_error(ValueError("{'message': 'HTTP 0', 'code': 'invalid_request'}"))
+        is True
+    )
+
+
+def test_temporary_model_unavailability_is_transient_but_bad_request_is_not() -> None:
+    unavailable = _exc_with_status(
+        400,
+        "Error code: 400 - This model is temporarily unavailable. Please try another model or retry later.",
+    )
+    assert L._is_transient_conn_error(unavailable) is True
+    assert (
+        L._is_transient_conn_error(_exc_with_status(400, "Error code: 400 - bad request")) is False
+    )
+
+
 def test_client_errors_and_rate_limit_stay_non_transient() -> None:
     assert L._is_transient_conn_error(ValueError("dimension_scores Field required")) is False
     assert (
         L._is_transient_conn_error(_exc_with_status(400, "Error code: 400 - bad request")) is False
+    )
+    assert (
+        L._is_transient_conn_error(
+            _exc_with_status(403, "Access denied: too many different IP addresses detected")
+        )
+        is False
     )
     # 429 归限流通道（退避 + 换 Key），不能同时被连接重试吃掉名额
     assert L._is_transient_conn_error(_exc_with_status(429, "Error code: 429 - slow down")) is False
@@ -167,6 +195,21 @@ def test_client_errors_and_rate_limit_stay_non_transient() -> None:
 def test_plain_connection_error_still_transient() -> None:
     """原有能力不许退化：第 6 轮真实事故靠这条救回来的。"""
     assert L._is_transient_conn_error(Exception(_CONN_TEXT)) is True
+
+
+def test_http_zero_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    def flaky() -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ValueError("{'message': 'HTTP 0', 'code': 'invalid_request'}")
+        return "ok"
+
+    monkeypatch.setattr(L, "TRANSIENT_CONN_RETRIES", 1)
+    assert L._invoke_with_conn_retry("optimizer", flaky) == "ok"
+    assert calls == 2
 
 
 # --------------------------------------------------------------------------

@@ -154,6 +154,12 @@ def render_cases(source: str, report: dict[str, Any]) -> str:
         "（`run.py --task … --prompt-file 你的原稿`，Δ 才读得出比你自己好多少），"
         "而评委那把尺子目前还没对准所有者的标准（README §三）。"
     )
+    facts = report.get("unvalidated") or []
+    if facts:
+        lines.append("未决事实（不判失败，但本次未完整核验）：")
+        for fact in facts:
+            lines.append(f"- [{fact['code']}] {fact['fact']}")
+        lines.append("")
     strong = stats["veto_strong_cases"]
     if stats["veto_strong"] == 0:
         lines.append(
@@ -181,7 +187,15 @@ def _cases_target(p: argparse.ArgumentParser, args: argparse.Namespace) -> dict[
                 "scenario": fields["scenario"],
             }
         )
-    return audit_cases(cases, max_cases=MAX_SEED_CASES)
+    report = audit_cases(cases, max_cases=MAX_SEED_CASES)
+    scenario_findings = [f for f in report["findings"] if f["code"] == "scenario_gap"]
+    if scenario_findings:
+        report["findings"] = [f for f in report["findings"] if f["code"] != "scenario_gap"]
+        report["unvalidated"] = [
+            unvalidated("scenario_gap", f"{finding['detail']} 外部用例集不因此判失败。")
+            for finding in scenario_findings
+        ]
+    return report
 
 
 def _prompt_payload(
@@ -205,14 +219,18 @@ def _prompt_payload(
 
 
 def _cases_payload(
-    source: str | None, findings: list[dict[str, Any]], stats: dict[str, Any]
+    source: str | None,
+    findings: list[dict[str, Any]],
+    stats: dict[str, Any],
+    unvalidated_facts: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """`check --cases-file` 的 JSON 载荷：**此处是三态真正有用的地方**。
 
     一张考卷可以"结构上没问题"（findings 为空）却**一票否决强判据为 0 条**
     ——那种考卷挡不住差输出，达标判定将完全由评委印象分决定（`render_cases` 里
     早就有这句话，但 JSON 出口把它吞了：只给 `ok: true`）。
-    ⇒ 强判据为 0 记 `no_strong_veto`，一张否决票都没有记 `no_veto_capable`。
+    ⇒ 强判据为 0 记 `no_strong_veto`，一张否决票都没有记 `no_veto_capable`；
+    外部用例集缺内部场景标签记 `scenario_gap`，但不因此判失败。
     """
     payload: dict[str, Any] = {
         "mode": "cases_check",
@@ -221,8 +239,9 @@ def _cases_payload(
         **stats,
         "unvalidated": [],
     }
+    facts: list[dict[str, str]] = list(unvalidated_facts or [])
+    payload["unvalidated"] = facts
     if not findings:
-        facts: list[dict[str, str]] = []
         if not stats.get("veto_strong"):
             facts.append(
                 unvalidated(
@@ -237,7 +256,6 @@ def _cases_payload(
                     "这张考卷没有任何一条能一票否决的用例 ⇒ 它挡不住差输出",
                 )
             )
-        payload["unvalidated"] = facts
     rejected = bool(findings)
     return attach(payload, decide(rejected=rejected, unvalidated_facts=payload["unvalidated"]))
 
@@ -277,7 +295,7 @@ def check_command(argv: list[str]) -> int:
         if args.json:
             print(
                 json.dumps(
-                    _cases_payload(args.cases_file, findings, stats),
+                    _cases_payload(args.cases_file, findings, stats, report.get("unvalidated")),
                     ensure_ascii=False,
                     indent=2,
                 )

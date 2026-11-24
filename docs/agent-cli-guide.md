@@ -104,8 +104,9 @@ python run.py --task "分析销售数据并给出结论" --prompt-file 我的提
   退出码 0=自洽 / 1=有问题 / 2=用法错。也可以在代码里 `from pm.verdict import validate`。
 
 `--cases-file` 是三态**最有用**的地方：一张考卷可以结构上没问题（`findings` 为空）
-却**一张否决票都没有** —— 那种考卷挡不住差输出，此时给 `needs_validation`
-（`no_strong_veto` / `no_veto_capable`），而不是含糊的 `ok: true`。
+却**一张否决票都没有**，或未标内部 `scenario` 覆盖标签；此时给 `needs_validation`
+（`no_strong_veto` / `no_veto_capable` / `scenario_gap`），而不是含糊的 `ok: true`。
+外部用例集的 `scenario_gap` 只记录未决事实，不判失败；真正的结构问题仍为 `rejected`。
 
 ### 需求没澄清楚就开跑，也会自己站出来（2026-10-26）
 
