@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 import os
 import subprocess
@@ -10,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pm.cli.experiment import ExperimentError, experiment_command, load_spec
+from pm.cli.experiment import ExperimentError, _write_csv, experiment_command, load_spec
 from pm.datasets import add_version
 
 
@@ -109,7 +111,7 @@ def test_matrix_switches_real_target_config_and_restores_environment(
         return {
             "run_id": f"run-{len(seen)}",
             "status": "passed",
-            "aggregate": {"avg_score": score},
+            "aggregate": {"avg_score": score, "ci_lower": score - 0.5, "noise": 0.4},
             "baseline_aggregate": {"avg_score": 6.0},
             "pairwise": {"verdict": "tie"},
             "llm_calls": 3,
@@ -127,6 +129,8 @@ def test_matrix_switches_real_target_config_and_restores_environment(
     assert alpha[0]["base_url"] == "https://alpha.invalid/v1"
     assert alpha[0]["key"] == "unit-secret-value"
     assert payload["ranking"][0]["avg"] == 9.0
+    assert payload["ranking"][0]["ci_lower"] == 8.5
+    assert payload["ranking"][0]["noise"] == 0.4
     assert payload["ranking"][0]["delta"] == 3.0
     assert os.environ["PM_TARGET_MODEL"] == "before-model"
     assert os.environ["PM_TARGET_BASE_URL"] == "https://before.invalid/v1"
@@ -135,6 +139,22 @@ def test_matrix_switches_real_target_config_and_restores_environment(
     assert "unit-secret-value" not in (result_dir / "summary.json").read_text(encoding="utf-8")
     replay = json.loads((result_dir / "config.json").read_text(encoding="utf-8"))
     assert replay["dataset"] == "qa:1" and replay["prompts"][0]["prompt"] == "请简洁地回答用户问题"
+    canonical = json.dumps(replay, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    assert (
+        payload["reproducibility"]["config_sha256"]
+        == hashlib.sha256(canonical.encode()).hexdigest()
+    )
+    assert len(payload["reproducibility"]["code_commit"]) == 40
+    assert {row["role"] for row in payload["reproducibility"]["ruler"]} == {
+        "evaluator",
+        "evaluator_b",
+        "comparator",
+    }
+    assert payload["created_at"] and payload["finished_at"]
+    with Path(payload["csv_path"]).open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 4 and rows[0]["ci_lower"] == "8.5"
+    assert "unit-secret-value" not in Path(payload["csv_path"]).read_text(encoding="utf-8-sig")
 
 
 def test_one_failed_cell_does_not_abort_the_matrix(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -198,6 +218,29 @@ def test_experiment_real_entry_with_fake_backend(tmp_path: Path, monkeypatch) ->
     }
     assert all(Path(cell["log_path"]).exists() for cell in payload["cells"])
     assert Path(payload["report_path"]).exists()
+
+
+def test_csv_export_neutralizes_formula_cells(tmp_path: Path) -> None:
+    path = tmp_path / "summary.csv"
+    _write_csv(
+        {
+            "ranking": [
+                {
+                    "prompt_id": "safe",
+                    "model": "safe",
+                    "target_model": "=1+1",
+                    "status": "passed",
+                    "avg": 9.0,
+                    "delta": -1.25,
+                }
+            ]
+        },
+        path,
+    )
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["target_model"] == "'=1+1"
+    assert row["delta"] == "-1.25"
 
 
 def test_matrix_size_and_duplicate_ids_are_rejected_before_spending(

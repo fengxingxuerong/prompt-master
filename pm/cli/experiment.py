@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import hashlib
 import json
 import os
 import re
+import subprocess
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from pm import __version__
 from pm.datasets import DatasetError, get_dataset, parse_ref
 from pm.modelhub.filelock import _atomic_write
 from pm.state import SEED_PROMPT_MAX_CHARS, initial_state
@@ -339,6 +344,8 @@ def _cell_summary(
         "run_id": final.get("run_id"),
         "status": final.get("status"),
         "avg": avg,
+        "ci_lower": _score(aggregate.get("ci_lower")),
+        "noise": _score(aggregate.get("noise")),
         "baseline_avg": base_avg,
         "delta": round(avg - base_avg, 3) if avg is not None and base_avg is not None else None,
         "pairwise": final.get("pairwise"),
@@ -415,9 +422,11 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- 数据集：`{summary['config']['dataset']}`（SHA256 `{summary['config']['dataset_sha256']}`）",
         f"- 规模：{len(summary['config']['prompts'])} 个提示词 × {len(summary['config']['models'])} 个模型",
         f"- 状态：{summary['status']}；失败格：{summary['cell_failures']}",
+        f"- 代码：`{summary['reproducibility']['code_commit']}` · PromptMaster `{summary['reproducibility']['version']}`",
+        f"- 配置 SHA256：`{summary['reproducibility']['config_sha256']}`",
         "",
-        "| 排名 | 提示词 | 模型 | 均分 | 基线 | Δ | 盲评 | 状态 | 调用 |",
-        "| ---: | --- | --- | ---: | ---: | ---: | --- | --- | ---: |",
+        "| 排名 | 提示词 | 模型 | 均分 | 保守下界 | 噪声 | 基线 | Δ | 盲评 | 状态 | 调用 |",
+        "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |",
     ]
     for index, cell in enumerate(summary["ranking"], 1):
         pairwise = (
@@ -430,6 +439,8 @@ def _render_markdown(summary: dict[str, Any]) -> str:
             cell.get("prompt_id"),
             cell.get("model"),
             cell.get("avg"),
+            cell.get("ci_lower"),
+            cell.get("noise"),
             cell.get("baseline_avg"),
             cell.get("delta"),
             pairwise or "-",
@@ -482,6 +493,87 @@ def _error_text(exc: Exception) -> str:
     return text
 
 
+def _now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _code_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path.cwd(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return result.stdout.strip() if result.returncode == 0 else "unknown"
+
+
+def _config_sha256(config: dict[str, Any]) -> str:
+    raw = json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _ruler_identity() -> list[dict[str, str]]:
+    from pm.llm.config import build_config
+
+    rows: list[dict[str, str]] = []
+    for role in ("evaluator", "evaluator_b", "comparator"):
+        try:
+            cfg = build_config(role)
+        except ValueError:
+            rows.append({"role": role, "model": "unknown", "provider": "", "base_url": ""})
+            continue
+        rows.append(
+            {
+                "role": role,
+                "model": cfg.model,
+                "provider": cfg.provider,
+                "base_url": cfg.base_url or "",
+            }
+        )
+    return rows
+
+
+def _csv_safe(value: Any) -> Any:
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
+def _write_csv(summary: dict[str, Any], path: Path) -> None:
+    fields = (
+        "prompt_id",
+        "model",
+        "target_model",
+        "status",
+        "avg",
+        "ci_lower",
+        "noise",
+        "baseline_avg",
+        "delta",
+        "pairwise",
+        "llm_calls",
+        "quality_issues",
+        "run_id",
+        "log_path",
+        "report_path",
+    )
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for cell in summary["ranking"]:
+            pairwise = cell.get("pairwise") or {}
+            row = {key: cell.get(key) for key in fields}
+            row["pairwise"] = pairwise.get("verdict") if isinstance(pairwise, dict) else None
+            writer.writerow({key: _csv_safe(value) for key, value in row.items()})
+
+
 def _execute(spec: ExperimentSpec) -> dict[str, Any]:
     experiment_id = uuid.uuid4().hex[:12]
     directory = log_dir() / "experiments" / experiment_id
@@ -490,13 +582,22 @@ def _execute(spec: ExperimentSpec) -> dict[str, Any]:
         "experiment_id": experiment_id,
         "name": spec.name,
         "status": "running",
+        "created_at": _now(),
         "config": _public_spec(spec),
+        "reproducibility": {
+            "code_commit": _code_commit(),
+            "version": __version__,
+            "config_sha256": "",
+            "ruler": _ruler_identity(),
+        },
         "cells": [],
         "cell_failures": 0,
         "result_dir": str(directory),
     }
     summary_path = directory / "summary.json"
-    _atomic_write(directory / "config.json", _replay_config(spec))
+    replay_config = _replay_config(spec)
+    summary["reproducibility"]["config_sha256"] = _config_sha256(replay_config)
+    _atomic_write(directory / "config.json", replay_config)
     _atomic_write(summary_path, summary)
     with _measurement_env(spec):
         for prompt in spec.prompts:
@@ -519,11 +620,15 @@ def _execute(spec: ExperimentSpec) -> dict[str, Any]:
                 summary["ranking"] = _rank(summary["cells"])
                 _atomic_write(summary_path, summary)
     summary["status"] = "completed" if not summary["cell_failures"] else "completed_with_failures"
+    summary["finished_at"] = _now()
     summary["ranking"] = _rank(summary["cells"])
     report_path = directory / "summary.md"
     report_path.write_text(_render_markdown(summary), encoding="utf-8")
+    csv_path = directory / "summary.csv"
+    _write_csv(summary, csv_path)
     summary["summary_path"] = str(summary_path)
     summary["report_path"] = str(report_path)
+    summary["csv_path"] = str(csv_path)
     _atomic_write(summary_path, summary)
     return summary
 

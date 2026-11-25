@@ -121,6 +121,32 @@ def test_dataset_cli_add_show_and_diff(tmp_path: Path, monkeypatch, capsys) -> N
     assert len(json.loads(capsys.readouterr().out)["added"]) == 1
 
 
+def test_add_rejects_invalid_assertion_shapes(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PM_DATASET_DIR", str(tmp_path))
+    with pytest.raises(DatasetError, match="mode 非法"):
+        add_version("qa", [{"input": "x", "mode": "made-up"}])
+    with pytest.raises(DatasetError, match="contains-any"):
+        add_version("qa", [{"input": "x", "expected": "not-an-array", "mode": "contains-any"}])
+
+
+def test_dataset_check_reuses_the_shared_case_verdict(tmp_path: Path, monkeypatch, capsys) -> None:
+    from pm.cli.datasetcmd import dataset_command
+
+    monkeypatch.setenv("PM_DATASET_DIR", str(tmp_path))
+    add_version("weak", [{"input": "复制甲", "expected": "甲", "mode": "contains"}])
+    add_version("strong", [{"input": "输入甲", "expected": "结论甲", "mode": "contains"}])
+
+    assert dataset_command(["check", "weak", "--json"]) == 1
+    weak = json.loads(capsys.readouterr().out)
+    assert weak["mode"] == "dataset_check" and weak["verdict"] == "rejected"
+    assert weak["dataset_version"] == 1 and weak["dataset_sha256"]
+    assert {finding["code"] for finding in weak["findings"]} == {"echoes"}
+
+    assert dataset_command(["check", "strong"]) == 0
+    text = capsys.readouterr().out
+    assert "数据集体检：strong" in text and "强判据落在第 1 条" in text
+
+
 def test_malformed_dataset_file_is_reported(tmp_path: Path, monkeypatch, capsys) -> None:
     from pm.cli.datasetcmd import dataset_command
 

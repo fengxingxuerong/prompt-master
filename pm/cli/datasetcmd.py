@@ -7,9 +7,17 @@ import json
 import sys
 from typing import Any
 
-from pm.datasets import DatasetError, add_version, diff_datasets, get_dataset, list_datasets
+from pm.datasets import (
+    DatasetError,
+    add_version,
+    diff_datasets,
+    get_dataset,
+    list_datasets,
+    parse_ref,
+)
 
-from .support import EXIT_CONFIG, read_cases_file
+from .check import cases_check_payload, render_cases
+from .support import EXIT_CONFIG, EXIT_UNDELIVERED, read_cases_file
 
 
 def _emit(payload: Any, as_json: bool) -> None:
@@ -30,6 +38,13 @@ def _emit(payload: Any, as_json: bool) -> None:
                 )
         return
     version = payload.get("version")
+    if payload.get("mode") == "dataset_check":
+        print(
+            f"数据集体检：{payload['dataset']}  版本：{payload['dataset_version']}  "
+            f"SHA256：{payload['dataset_sha256']}"
+        )
+        print(render_cases(payload["dataset"], payload))
+        return
     if not isinstance(version, dict):
         print(
             f"已添加数据集：{payload['name']}  版本：{version}  "
@@ -62,6 +77,9 @@ def _build_parser() -> argparse.ArgumentParser:
     diff.add_argument("--from-version", type=int, required=True)
     diff.add_argument("--to-version", type=int, required=True)
     diff.add_argument("--json", action="store_true")
+    check = sub.add_parser("check", help="零调用体检数据集或指定版本")
+    check.add_argument("name", help="数据集名称或 name:version")
+    check.add_argument("--json", action="store_true")
     return parser
 
 
@@ -77,10 +95,26 @@ def dataset_command(argv: list[str]) -> int:
             )
         elif args.action == "show":
             payload = get_dataset(args.name, args.version)
+        elif args.action == "check":
+            name, version = parse_ref(args.name)
+            dataset = get_dataset(name, version)
+            selected = dataset["version"]
+            payload = cases_check_payload(
+                selected["cases"],
+                f"{dataset['name']}:{selected['version']}",
+                max_cases=len(selected["cases"]),
+            )
+            payload.update(
+                mode="dataset_check",
+                dataset=dataset["name"],
+                dataset_version=selected["version"],
+                dataset_sha256=selected["sha256"],
+            )
         else:
             payload = diff_datasets(args.name, args.from_version, args.to_version)
     except DatasetError as exc:
         print(f"数据集错误：{exc}", file=sys.stderr)
         return EXIT_CONFIG
     _emit(payload, args.json)
-    return 0
+    rejected = isinstance(payload, dict) and payload.get("verdict") == "rejected"
+    return EXIT_UNDELIVERED if rejected else 0

@@ -126,7 +126,20 @@ def _read_target(p: argparse.ArgumentParser, args: argparse.Namespace) -> tuple[
 
 def render_cases(source: str, report: dict[str, Any]) -> str:
     """用例集体检的人读输出：先给票数，再给逐条命中，最后划清它能说什么、不能说什么。"""
-    stats = report["stats"]
+    stats = report.get("stats")
+    if stats is None:
+        keys = (
+            "cases",
+            "max_cases",
+            "veto_capable",
+            "veto_strong",
+            "advisory",
+            "judge_only",
+            "no_assertion",
+            "echo_only",
+            "veto_strong_cases",
+        )
+        stats = {key: report.get(key) for key in keys}
     findings = report["findings"]
     lines: list[str] = [
         f"用例集体检：{source}（{stats['cases']} 条，上限 {stats['max_cases']}）",
@@ -172,6 +185,21 @@ def render_cases(source: str, report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def cases_check_payload(
+    cases: list[dict[str, Any]], source: str, *, max_cases: int
+) -> dict[str, Any]:
+    """把同一份用例体检判据供文件与版本化数据集共用。"""
+    report = audit_cases(cases, max_cases=max_cases)
+    scenario_findings = [f for f in report["findings"] if f["code"] == "scenario_gap"]
+    if scenario_findings:
+        report["findings"] = [f for f in report["findings"] if f["code"] != "scenario_gap"]
+        report["unvalidated"] = [
+            unvalidated("scenario_gap", f"{finding['detail']} 外部用例集不因此判失败。")
+            for finding in scenario_findings
+        ]
+    return _cases_payload(source, report["findings"], report["stats"], report.get("unvalidated"))
+
+
 def _cases_target(p: argparse.ArgumentParser, args: argparse.Namespace) -> dict[str, Any]:
     """`--cases-file` 模式：取值路径与跑批完全同源（`support.case_entry_fields` 与
     `support.resolve_case_mode`），所以"体检说没问题"与"跑起来被拦"不会各说一套。"""
@@ -187,15 +215,7 @@ def _cases_target(p: argparse.ArgumentParser, args: argparse.Namespace) -> dict[
                 "scenario": fields["scenario"],
             }
         )
-    report = audit_cases(cases, max_cases=MAX_SEED_CASES)
-    scenario_findings = [f for f in report["findings"] if f["code"] == "scenario_gap"]
-    if scenario_findings:
-        report["findings"] = [f for f in report["findings"] if f["code"] != "scenario_gap"]
-        report["unvalidated"] = [
-            unvalidated("scenario_gap", f"{finding['detail']} 外部用例集不因此判失败。")
-            for finding in scenario_findings
-        ]
-    return report
+    return cases_check_payload(cases, args.cases_file, max_cases=MAX_SEED_CASES)
 
 
 def _prompt_payload(
@@ -291,15 +311,9 @@ def check_command(argv: list[str]) -> int:
                 "--cases-file 与 --prompt/--prompt-file 互斥：一次体检一样东西，退出码才有单一含义"
             )
         report = _cases_target(p, args)
-        findings, stats = report["findings"], report["stats"]
+        findings = report["findings"]
         if args.json:
-            print(
-                json.dumps(
-                    _cases_payload(args.cases_file, findings, stats, report.get("unvalidated")),
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
             print(render_cases(args.cases_file, report))
         return _EXIT_PASSED if not findings else EXIT_UNDELIVERED

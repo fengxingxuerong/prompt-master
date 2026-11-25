@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .assertions import parse_contains_any
+from .casesaudit import mode_is_valid, mode_of
 from .modelhub.filelock import _atomic_write, _process_lock
 
 MAX_DATASET_CASES = 1000
@@ -79,6 +81,16 @@ def _normalize_cases(cases: Any) -> list[Any]:
     return normalized
 
 
+def _validate_modes(cases: list[Any]) -> None:
+    for index, item in enumerate(cases, 1):
+        case = item if isinstance(item, dict) else {"input": item}
+        mode = mode_of(case)
+        if not mode_is_valid(mode):
+            raise DatasetError(f"第 {index} 条用例 mode 非法：{mode}")
+        if mode == "contains-any" and parse_contains_any(case.get("expected")) is None:
+            raise DatasetError(f"第 {index} 条用例 contains-any 的 expected 需为非空字符串数组")
+
+
 def _read(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -96,6 +108,7 @@ def _read(path: Path) -> dict[str, Any]:
 def add_version(name: str, cases: list[Any], description: str = "") -> dict[str, Any]:
     dataset_name = _validate_name(name)
     normalized = _normalize_cases(cases)
+    _validate_modes(normalized)
     path = _path(dataset_name)
     with _process_lock(path):
         if path.exists():
