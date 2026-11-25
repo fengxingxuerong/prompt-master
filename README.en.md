@@ -27,6 +27,7 @@ prompt is going to misbehave before you pay for anything.
 | You already have a draft, want obvious defects first | `run.py check --prompt-file x.md` | **zero calls, offline** |
 | Block only *newly introduced* defects in **your own repo's** CI | `run.py diff --base-ref origin/main x.md` | **zero calls** |
 | Know the call budget before spending | `run.py --dry-run --task "…"` | **zero calls** |
+| Compare prompt drafts and target models on one fixed exam | `run.py experiment matrix.json --dry-run` | estimate is free; execution is billed |
 | First real run — check the endpoint is alive | `run.py --preflight` | a few calls |
 | Run the full loop in a terminal | `run.py --task "…"` (interactive: quotes first, asks y/N) | billed |
 | Long run without holding a terminal | `python run_server.py` + `run.py submit --task "…"`, then `run.py wait <run_id>` | billed |
@@ -128,10 +129,10 @@ Full experiment log, including the self-audit that found the fabricated anchors:
 
 | Item | Value |
 |---|---|
-| Tests | **2,227 collected**, no API key, no live network |
+| Tests | **2,247 collected**, no API key, no live network |
 | Coverage | gated at floor 92 on `pm/` and floor 93 on `pm/modelhub/*`; measured values drift per round — the only maintained table lives in `docs/operations.md` (this README no longer copies snapshots) |
 | CI | GitHub Actions: Linux matrix (3.11 / 3.12 / 3.13) + a Windows job; ruff + mypy + coverage ratchet |
-| Interfaces | CLI (13 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |
+| Interfaces | CLI (15 subcommands) · REST · MCP (13 tools) · zero-call local panel · optional Tkinter desktop (`extras/`, project-aware: read-only scan → one analysis call → prompt; free scan without a key) |
 
 <details>
 <summary><b>Known boundaries (ordered by how much they can fool you) — read these first</b></summary>

@@ -183,6 +183,51 @@ python run.py --dry-run --task "分析销售数据并给出结论" --cases-file 
 # 旧文档写的 45~83 是更早一版口径）；第 13 轮实测 81 次 ✓
 ```
 
+### 版本化数据集与实验矩阵（2026-11-26）
+
+先把用例集存成不可变版本，后续每轮都点名同一版本，避免“考卷悄悄变了”：
+
+```bash
+python run.py dataset add support --cases-file case_templates/customer_service.json --description "客服首版"
+python run.py dataset add support --cases-file case_templates/customer_service_v2.json
+python run.py dataset show support --version 1 --json
+python run.py dataset diff support --from-version 1 --to-version 2 --json
+python run.py --task "回答客服问题" --dataset support:1 --dry-run
+python run.py submit --task "回答客服问题" --dataset support:1   # 异步入口同样支持
+```
+
+- 存储目录由 `PM_DATASET_DIR` 指定，默认 `<当前目录>/datasets`（已 gitignore）；文件名是 `<名称>.json`。
+- `add` 只追加版本，不覆盖旧快照；每版带用例数、UTC 时间与规范化 JSON 的 SHA-256。
+- 写入使用跨进程锁和唯一临时文件原子替换；名称限 1–64 位字母/数字/点/下划线/连字符。
+- 单版最多 1000 条，但同步优化入口仍限 8 条（与 `--cases-file` 相同）；`--dataset` 与
+  `--cases-file` 互斥。`diff` 按用例序号比较，增删尾部用例，中间变化逐条列出。
+
+矩阵配置见 [`examples/experiment.example.json`](../examples/experiment.example.json)：
+
+```bash
+python run.py experiment matrix.json --dry-run --json   # 零调用、零出网、不落盘
+python run.py experiment matrix.json --json             # 顺序跑完所有格，stdout 仅一个汇总 JSON
+```
+
+| 字段 | 含义 |
+|---|---|
+| `task` / `context` | 所有格共用同一需求与上下文 |
+| `dataset` | `name` 或 `name:version`；开跑前解析并钉成具体版本 |
+| `prompts` | 字符串或 `{id, prompt}` / `{id, file}`；每份原稿 8–20000 字，作为该格的改进起点 |
+| `models` | 模型名字符串，或 `{id, model, provider?, base_url?, api_key_env?}` |
+| `samples` / `max_iter` | 1–5 次重复采样；0–10 轮修订 |
+| `baseline` / `pairwise` | 布尔开关；原稿模式下基线臂是该格自己的原稿 |
+
+矩阵**真正切换 target 角色**的 `PM_TARGET_MODEL`，不是只改报告标签；优化器与评委仍沿用当前角色配置，
+以保证跨格使用同一把尺。端点或密钥可放在模型对象里，但密钥只接受 `api_key_env` 环境变量名，
+不接受 `api_key` 明文。未设置的环境变量会在开跑前报错。
+
+- 最多 8 个提示词 × 8 个模型、20 格；顺序执行，单格异常不阻断后续格，失败证据仍落盘。
+- 产物在 `PM_LOG_DIR/experiments/<id>/`：`config.json`（可重放配置）、逐格 run/report、
+  `summary.json` 与 `summary.md`。每格结束就更新汇总，Ctrl+C 不会丢掉已完成格。
+- 排名先看均分，再看相对各自基线的 Δ；**均分与 Δ 只是方向参考，不是显著性结论**。
+- 退出码：`0` 所有格完成；`2` 配置/数据集错误；`3` 至少一格运行失败。提示词本身未达标不等于矩阵失败。
+
 ### 真实运行前的成本确认（只对"能问人"的终端）
 
 ```bash

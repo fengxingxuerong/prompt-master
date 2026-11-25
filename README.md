@@ -23,6 +23,7 @@
 | 手上已有一版提示词，只想先看有没有硬伤 | `run.py check --prompt-file x.md` | **零调用、零出网** |
 | 想在**自己仓库**的 CI 里只拦"本次新引入"的坑 | `run.py diff --base-ref origin/main x.md` | **零调用** |
 | 先知道"跑一轮大概多少次调用" | `run.py --dry-run --task "让 AI 分析销售数据"` | **零调用** |
+| 固定考卷，比较多版提示词与多个目标模型 | `run.py experiment matrix.json --dry-run` | 预估零调用；正式运行计费 |
 | 第一次真跑，先确认端点活着 | `run.py --preflight` | 少量调用 |
 | 人在终端，跑完整闭环 | `run.py --task "让 AI 分析销售数据"`（交互终端下会**先报价、要一句 y/N**） | 计费 |
 | 长任务不想占终端 | `python run_server.py` + `run.py submit --task "让 AI 分析销售数据"`，再 `run.py wait <run_id>` | 计费 |
@@ -108,13 +109,15 @@ python run.py calibrate --aggregate     # 零调用，纯账本重算
 | 版本差分 | `run.py diff A B` / `--base-ref origin/main x.md` | **零调用**：改了什么、修好几条、新引入几条；适合放进你自己的 CI |
 | 改动门禁 | `run.py gate` | **零调用**：只拦本次**新引入**的规则失败模式（判增量不判绝对值）。⚠️ 对象是 Python 模块里的「全大写 = 字符串常量」提示词模板（默认 `pm/prompts.py`）；**markdown 提示词文件走 `diff --base-ref`**（实测：把 `.md` 喂给 `gate` 会退 2 报"源码无法解析"） |
 | 事实断言 | `--cases-file cases.json --assert-mode rule` | `exact` / `contains` / `contains-any` / `not-contains` / `regex` 可一票否决；`custom:<名>` 可挂你自己的断言函数 |
+| 版本化考卷 | `run.py dataset add/show/diff` + `--dataset name:version` | 追加版本、内容哈希、跨进程原子写；同一版本可重复评测 |
+| 实验矩阵 | `run.py experiment matrix.json --dry-run` | 同数据集 × 多原稿 × 多目标模型，顺序运行、逐格隔离、统一评委口径 |
 | 资产与校准 | `run.py library` / `history` / `calibrate` | 达标成品检索与导出 · Δ 显著性 · 评委可信度 |
 | 图形入口 | `run.py panel` / `run.py desktop` | 浏览器小窗 / 原生窗口（桌面端是**可选附件**，不随 `pip install .` 安装） |
 
 MCP 接入（13 个工具，stdio）：`python -m pm.mcp_server`。计算类工具直接跑 CLI，长任务类转发本机 server。
 
 `python run.py --version` 报出版本（与 REST / 面板自报同源）；`python run.py --help` 列出全部参数与**子命令**
-（`submit/status/report/wait/history/calibrate/library/check/diff/gate/doctor/panel/desktop`）。
+（`submit/status/report/wait/history/calibrate/library/dataset/experiment/check/diff/gate/doctor/panel/desktop`）。
 逐条参数面、Agent 调用协议、面板与桌面的接线细节见 [`docs/agent-cli-guide.md`](docs/agent-cli-guide.md)。
 
 ### 在**你自己的仓库**里给提示词上门禁
@@ -164,7 +167,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；2227 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；2247 条，无 Key、禁止真实出网）
 extras/             可选附件（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 case_templates/     可直接喂 --cases-file 的领域用例集
 releases/           三服务套件与历史发布快照（不是本产品）

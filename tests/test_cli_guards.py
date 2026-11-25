@@ -196,6 +196,8 @@ def test_help_lists_every_subcommand():
         "history",
         "calibrate",
         "library",
+        "dataset",
+        "experiment",
         "panel",
         "desktop",
     ):
@@ -213,6 +215,8 @@ def test_each_subcommand_has_its_own_help():
         "history",
         "calibrate",
         "library",
+        "dataset",
+        "experiment",
         "panel",
         "desktop",
     ):

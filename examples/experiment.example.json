@@ -1,0 +1,35 @@
+{
+  "name": "customer-support-matrix",
+  "task": "根据用户问题给出准确、简洁的客服答复，并明确说明无法确认的事项",
+  "dataset": "support:1",
+  "prompts": [
+    {
+      "id": "baseline",
+      "prompt": "请回答用户的客服问题。"
+    },
+    {
+      "id": "structured",
+      "prompt": "先识别用户意图，再依据已知信息回答；缺少证据时明确说无法确认，不编造政策或处理结果。"
+    }
+  ],
+  "models": [
+    {
+      "id": "primary",
+      "model": "your-primary-model",
+      "provider": "openai",
+      "base_url": "https://your-endpoint.invalid/v1",
+      "api_key_env": "PRIMARY_API_KEY"
+    },
+    {
+      "id": "secondary",
+      "model": "your-secondary-model",
+      "provider": "openai",
+      "base_url": "https://your-second-endpoint.invalid/v1",
+      "api_key_env": "SECONDARY_API_KEY"
+    }
+  ],
+  "samples": 2,
+  "max_iter": 2,
+  "baseline": true,
+  "pairwise": false
+}

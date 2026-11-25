@@ -159,6 +159,11 @@ def seal_calibration_ledger(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 
 
 @pytest.fixture(autouse=True)
+def isolate_dataset_write_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PM_DATASET_DIR", str(tmp_path / "datasets"))
+
+
+@pytest.fixture(autouse=True)
 def isolate_jitter_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """三个评委座位的抖动键必须清掉（2026-10-05 §十八·六）。
 

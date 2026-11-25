@@ -64,6 +64,8 @@ _SUBCOMMAND_HELP = """
   history     运行历史 + 相对基线的 Δ 显著性（--last N / --include-demo / --json）
   calibrate   评委校准：评委分 vs 锚点人工分，--repeat N 测评委自我复现性
   library     达标提示词资产库（--recommend --task-text 找参考 / --export 导出）
+  dataset     版本化评测数据集（list / add / show / diff），可与 --dataset 复用
+  experiment  实验矩阵：同一数据集 × 多个提示词 × 多个模型，顺序运行并汇总对比
   check       零调用静态体检：量你已有的那一版提示词，或数一份用例集有几票能否决（--prompt-file / --cases-file / --json）
   diff        零调用差分：两版提示词（或两个 run）之间改了什么、修好几条、又新引入几条
               —— 退出码 1 = 有新引入的规则问题，可直接当 CI 回归门禁
@@ -94,6 +96,8 @@ _SUBCOMMANDS = (
     "history",
     "calibrate",
     "library",
+    "dataset",
+    "experiment",
     "check",
     "diff",
     "gate",
@@ -141,6 +145,14 @@ def _dispatch_lazy(cmd: str, argv: list[str]) -> int:
         from pm.desktop import app_main
 
         return app_main(argv)
+    if cmd == "dataset":
+        from .datasetcmd import dataset_command
+
+        return dataset_command(argv)
+    if cmd == "experiment":
+        from .experiment import experiment_command
+
+        return experiment_command(argv)
     return _library_command(argv)
 
 
@@ -333,6 +345,10 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         + CASES_FILE_HINT,
     )
     p.add_argument(
+        "--dataset",
+        help="版本化数据集名称或 name:version；与 --cases-file 互斥，提供后复用同一份考卷",
+    )
+    p.add_argument(
         "--assert-mode",
         default=DEFAULT_MODE,
         type=assert_mode_arg,
@@ -340,7 +356,7 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         help="事实断言模式（配合 --cases-file 的 expected，默认 contains；"
         "rule = 把 expected 当需求规则交给评委逐条核验，不做字面比对；"
         '单条用例可用 "mode" 覆盖此默认值；'
-        "可选 exact/contains/regex/rule/custom:<已注册名>）",
+        "可选 exact/contains/contains-any/not-contains/regex/rule/custom:<已注册名>）",
     )
     p.add_argument(
         "--samples",
@@ -494,24 +510,38 @@ def _validate_out_path(p: argparse.ArgumentParser, raw: str | None) -> None:
         p.error(f"--out 的父目录不可写：{parent}")
 
 
-def _load_seed_cases(p: argparse.ArgumentParser, args: argparse.Namespace) -> list[dict[str, Any]]:
-    """--cases-file：读入 → 逐条成案 → 再预检一次 expected 的写法。没给就是空表。
+def _seed_cases_source(
+    p: argparse.ArgumentParser, args: argparse.Namespace
+) -> tuple[list[Any], str]:
+    if args.cases_file and getattr(args, "dataset", ""):
+        p.error("--cases-file 与 --dataset 互斥；数据集版本可直接用 --dataset name:version")
+    if getattr(args, "dataset", ""):
+        from pm.datasets import DatasetError, get_dataset, parse_ref
 
-    取值走 `support.case_entry_fields`（与 `check --cases-file` 同一份），
-    校验顺序保持原样：空 input → 条数上限 → mode 合法性 → 全文 rule-like。
-    """
-    if not args.cases_file:
+        try:
+            name, version = parse_ref(args.dataset)
+            return get_dataset(name, version)["version"]["cases"], "--dataset"
+        except DatasetError as exc:
+            p.error(str(exc))
+    if args.cases_file:
+        return read_cases_file(p, args.cases_file), "--cases-file"
+    return [], ""
+
+
+def _load_seed_cases(p: argparse.ArgumentParser, args: argparse.Namespace) -> list[dict[str, Any]]:
+    """从文件或版本化数据集读入 → 逐条成案 → 再预检 expected 的写法。"""
+    raw, source = _seed_cases_source(p, args)
+    if not raw:
         return []
-    raw = read_cases_file(p, args.cases_file)
     seed_cases: list[dict[str, Any]] = []
     for i, item in enumerate(raw):
         fields = case_entry_fields(item)
         if not fields["input"].strip():
-            p.error(f"--cases-file 第 {i + 1} 条缺少非空 input")
+            p.error(f"{source} 第 {i + 1} 条缺少非空 input")
         if len(seed_cases) >= MAX_SEED_CASES:
             # 不能默默丢掉多余用例：n_test_cases 按声明条数做完整性校验（C1），
             # 静默截断会让本轮永远无法判达标，且原因藏在报告角落里
-            p.error(f"--cases-file 最多 {MAX_SEED_CASES} 条用例，当前 {len(raw)} 条；请筛选后再跑")
+            p.error(f"{source} 最多 {MAX_SEED_CASES} 条用例，当前 {len(raw)} 条；请筛选后再跑")
         case: dict[str, Any] = {
             "input": fields["input"],
             "expected": fields["expected"],
@@ -533,12 +563,12 @@ def _load_seed_cases(p: argparse.ArgumentParser, args: argparse.Namespace) -> li
     # 用例数以用户提供为准（断言按序号与 expected 对齐）
     args.cases = len(seed_cases)
 
-    _reject_rule_like_expected(p, seed_cases)
+    _reject_rule_like_expected(p, seed_cases, source)
     return seed_cases
 
 
 def _reject_rule_like_expected(
-    p: argparse.ArgumentParser, seed_cases: list[dict[str, Any]]
+    p: argparse.ArgumentParser, seed_cases: list[dict[str, Any]], source: str = "--cases-file"
 ) -> None:
     """expected 写成需求规则、mode 却是 contains/exact 时当场拦住。
 
@@ -552,7 +582,7 @@ def _reject_rule_like_expected(
     """
     from pm.assertions import rule_like_expected_detail
 
-    detail = rule_like_expected_detail(seed_cases, origin="--cases-file")
+    detail = rule_like_expected_detail(seed_cases, origin=source)
     if detail:
         p.error(detail)
 

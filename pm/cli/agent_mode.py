@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from pm.datasets import DatasetError, get_dataset, parse_ref
+
 from .history import _TERMINAL_STATUS
 from .support import (
     CASES_FILE_HINT,
@@ -62,17 +64,21 @@ def _build_agent_parser(cmd: str) -> argparse.ArgumentParser:
         ap.add_argument("--task", required=True, help="原始需求描述")
         ap.add_argument("--target-model", default="未指定")
         ap.add_argument("--cases", type=int, default=3, help="测试用例数量（1-8）")
-        ap.add_argument(
+        cases_group = ap.add_mutually_exclusive_group()
+        cases_group.add_argument(
             "--cases-file",
             help='JSON 用例集：[{"input","expected","mode","scenario","hijack_marker"}]'
             + CASES_FILE_HINT,
+        )
+        cases_group.add_argument(
+            "--dataset", help="版本化数据集名称或 name:version；与 --cases-file 互斥"
         )
         ap.add_argument(
             "--assert-mode",
             default="contains",
             type=assert_mode_arg,
             metavar="MODE",
-            help="事实断言模式：exact/contains/regex/rule/custom:<已注册名>"
+            help="事实断言模式：exact/contains/contains-any/not-contains/regex/rule/custom:<已注册名>"
             "（与同步 CLI 的 --assert-mode 同一解析器，白名单不分叉）",
         )
         ap.add_argument("--max-iter", type=int, default=3)
@@ -113,16 +119,22 @@ def _agent_submit(ap: argparse.ArgumentParser, ns: argparse.Namespace, base: str
         "target_model": ns.target_model,
         "n_test_cases": ns.cases,
         "max_iterations": ns.max_iter,
-        "assertion_mode": ns.assert_mode if ns.cases_file else "contains",
+        "assertion_mode": ns.assert_mode if ns.cases_file or ns.dataset else "contains",
     }
     # 原稿护栏与同步 CLI 同一个函数：两条入口对 --prompt/--prompt-file 的
     # 互斥、长度上下限必须同数，分叉迟早变成"一边能跑一边白烧钱"
     seed = read_seed_prompt(ap, ns)
     if seed:
         payload["seed_prompt"] = seed
-    if ns.cases_file:
-        # 与同步 CLI 同一条加载路径：编码兜底、非空数组、JSON 错误都在同一处报
-        raw = read_cases_file(ap, ns.cases_file)
+    if ns.cases_file or ns.dataset:
+        if ns.dataset:
+            try:
+                name, version = parse_ref(ns.dataset)
+                raw = get_dataset(name, version)["version"]["cases"]
+            except DatasetError as exc:
+                ap.error(str(exc))
+        else:
+            raw = read_cases_file(ap, ns.cases_file)
         payload["test_cases"] = [
             {
                 "input": str(c.get("input") or ""),

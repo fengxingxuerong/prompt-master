@@ -19,6 +19,7 @@ __pycache__/
 
 # 运行产物（状态存档 / 报告 / 缓存 / 检查点）
 logs/
+datasets/
 *.log
 # watchdog 的"这条我已经提醒过"标记：纯运行态，入库会让 git status 长期脏
 releases/suite/.stale_notified.json

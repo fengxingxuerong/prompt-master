@@ -192,6 +192,35 @@ def test_agent_submit_payload_from_cases_file(
     assert "test_cases" not in p2 and p2["assertion_mode"] == "contains"
 
 
+def test_agent_submit_accepts_a_pinned_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pm.datasets import add_version
+
+    add_version("qa", [{"input": "old", "expected": "A", "mode": "contains"}])
+    add_version("qa", [{"input": "new", "expected": "B", "mode": "contains"}])
+    seen: dict[str, Any] = {}
+
+    def fake(
+        method: str, url: str, payload: dict[str, Any] | None = None, timeout: float = 30.0
+    ) -> dict[str, Any]:
+        seen.update(payload=payload)
+        return {"run_id": "R1"}
+
+    monkeypatch.setattr(agent_mode, "_http_json", fake)
+    assert (
+        agent_mode.agent_subcommand(
+            "submit", ["--task", "T", "--dataset", "qa:1", "--assert-mode", "rule"]
+        )
+        == 0
+    )
+    assert seen["payload"]["assertion_mode"] == "rule"
+    assert seen["payload"]["n_test_cases"] == 1
+    assert seen["payload"]["test_cases"][0]["input"] == "old"
+    with pytest.raises(SystemExit):
+        agent_mode.agent_subcommand(
+            "submit", ["--task", "T", "--dataset", "qa", "--cases-file", "x"]
+        )
+
+
 def test_agent_submit_accepts_custom_and_rule_modes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
