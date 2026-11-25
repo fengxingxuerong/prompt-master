@@ -107,7 +107,7 @@ python run.py calibrate --aggregate     # 零调用，纯账本重算
 | 静态体检 | `run.py check`（`--prompt-file` / `--cases-file`） | **零调用、零出网**：量一版提示词，或数一份用例集有几票真能否决 |
 | 版本差分 | `run.py diff A B` / `--base-ref origin/main x.md` | **零调用**：改了什么、修好几条、新引入几条；适合放进你自己的 CI |
 | 改动门禁 | `run.py gate` | **零调用**：只拦本次**新引入**的规则失败模式（判增量不判绝对值）。⚠️ 对象是 Python 模块里的「全大写 = 字符串常量」提示词模板（默认 `pm/prompts.py`）；**markdown 提示词文件走 `diff --base-ref`**（实测：把 `.md` 喂给 `gate` 会退 2 报"源码无法解析"） |
-| 事实断言 | `--cases-file cases.json --assert-mode rule` | 你给的 `expected` 有一票否决权；`custom:<名>` 可挂你自己的断言函数 |
+| 事实断言 | `--cases-file cases.json --assert-mode rule` | `exact` / `contains` / `contains-any` / `not-contains` / `regex` 可一票否决；`custom:<名>` 可挂你自己的断言函数 |
 | 资产与校准 | `run.py library` / `history` / `calibrate` | 达标成品检索与导出 · Δ 显著性 · 评委可信度 |
 | 图形入口 | `run.py panel` / `run.py desktop` | 浏览器小窗 / 原生窗口（桌面端是**可选附件**，不随 `pip install .` 安装） |
 
@@ -164,7 +164,7 @@ pm/                 产品实现（nodes/ 图节点、cli/ 命令、modelhub/ �
 run.py run_server.py  两个入口薄壳（真实逻辑在 pm/cli/、pm/server.py）
 docs/               agent-cli-guide（CLI）· rest-api（HTTP）· operations（验证/部署/门禁）
                     evaluation（评分方法学与实测）· agent-skill · suite/（三服务）
-tests/              pytest 用例（CI 门禁；2223 条，无 Key、禁止真实出网）
+tests/              pytest 用例（CI 门禁；2227 条，无 Key、禁止真实出网）
 extras/             可选附件（桌面窗口 + 项目扫描/分析后端）：不随 `pip install .` 安装，不入主门禁
 case_templates/     可直接喂 --cases-file 的领域用例集
 releases/           三服务套件与历史发布快照（不是本产品）

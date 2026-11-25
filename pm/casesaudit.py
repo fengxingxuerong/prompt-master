@@ -26,13 +26,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pm.assertions import RULE_MODE, _is_literal_flag, looks_like_rule
+from pm.assertions import RULE_MODE, _is_literal_flag, looks_like_rule, parse_contains_any
 
 # 与 run.py 的 --assert-mode 缺省值一致（那条 help 写的就是"默认 contains"）。
 DEFAULT_MODE = "contains"
 # 只有这两种模式存在"expected 该是字面片段还是需求规则"的问题。
 LITERAL_MODES = ("contains", "exact")
-VALID_MODES = ("exact", "contains", "regex", RULE_MODE)
+VALID_MODES = ("exact", "contains", "contains-any", "not-contains", "regex", RULE_MODE)
 
 # 场景词表与 execute.py 的 mockgen 覆盖校验同源（那里是闭包，这里是它调用的纯函数）。
 SCENARIO_MAIN_PATH = "main_path"
@@ -67,6 +67,8 @@ def has_assertion(case: dict[str, Any]) -> bool:
         return False
     if mode.startswith("custom:"):
         return True
+    if mode == "contains-any":
+        return bool(parse_contains_any(case.get("expected")))
     return bool(str(case.get("expected") or "").strip())
 
 
@@ -119,7 +121,7 @@ def _is_hollow(case: dict[str, Any]) -> bool:
     mode = mode_of(case)
     if mode == RULE_MODE or mode.startswith("custom:"):
         return False
-    return not str(case.get("expected") or "").strip()
+    return not has_assertion(case)
 
 
 def _case_findings(index: int, case: dict[str, Any]) -> list[dict[str, Any]]:
@@ -143,7 +145,15 @@ def _case_findings(index: int, case: dict[str, Any]) -> list[dict[str, Any]]:
                 index,
             )
         )
-    if is_advisory(case):
+    if mode == "contains-any" and parse_contains_any(case.get("expected")) is None:
+        out.append(
+            _finding(
+                "bad_expected",
+                "contains-any 的 expected 必须是由非空字符串组成的 JSON 数组",
+                index,
+            )
+        )
+    elif is_advisory(case):
         out.append(
             _finding(
                 "rule_like",

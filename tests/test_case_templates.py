@@ -16,7 +16,7 @@ from pathlib import Path
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "case_templates"
 
-VALID_MODES = {"exact", "contains", "regex", "rule"}
+VALID_MODES = {"exact", "contains", "contains-any", "not-contains", "regex", "rule"}
 
 
 def _mode_problem(mode: str, name: str) -> str | None:

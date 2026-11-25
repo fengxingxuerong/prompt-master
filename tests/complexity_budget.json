@@ -2,7 +2,7 @@
   "eval_prompts.py::check_live": 18,
   "eval_prompts.py::check_structure": 11,
   "examples/e2e_round_report.py::analyze": 12,
-  "pm/assertions.py::check_assertion": 18,
+  "pm/assertions.py::_check_assertion": 18,
   "pm/calibration/history.py::aggregate_history": 12,
   "pm/cli/calibrate.py::_apply_score_form": 17,
   "pm/cli/diffcmd.py::render_text": 16,

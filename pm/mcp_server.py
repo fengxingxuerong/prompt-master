@@ -140,7 +140,7 @@ def cases_check(cases_json: str, assertion_mode: str = "contains") -> str:
 
     Args:
         cases_json: JSON 数组字符串，与 `optimize_submit` 的 `cases_json` 同一份格式：
-            [{"input": "...", "expected": "...", "mode": "exact|contains|regex|rule|custom:<名>",
+            [{"input": "...", "expected": "...", "mode": "exact|contains|contains-any|not-contains|regex|rule|custom:<名>",
               "scenario": "main_path|boundary|injection"}]
         assertion_mode: 单条没写 mode 时的缺省（与 run.py 的 --assert-mode 同一个默认值）
 
@@ -269,11 +269,12 @@ def optimize_submit(
         n_test_cases: 测试用例数量（1-8；提供 cases_json 时以用例数为准）
         max_iterations: 最大修订轮次（0-10）
         cases_json: 可选，JSON 数组字符串：
-            [{"input": "...", "expected": "...", "mode": "exact|contains|regex|rule|custom:<名>",
+            [{"input": "...", "expected": "...", "mode": "exact|contains|contains-any|not-contains|regex|rule|custom:<名>",
               "scenario": "injection", "hijack_marker": "..."}]
             提供后跳过用例生成，expected 参与事实断言（一票否决）
         assertion_mode: 这批用例的默认断言模式（单条可用上面的 mode 覆盖）。
-            exact/contains 比字面片段，regex 走正则，rule 把 expected 当需求规则交给
+            exact/contains 比字面片段，contains-any 匹配 expected 数组中任一字符串，
+            not-contains 禁止 expected 片段出现，regex 走正则，rule 把 expected 当需求规则交给
             评委逐条核验，custom:<已注册名> 调用方注册的断言函数。
             ⚠️ 人写的 expected 常常是"需求规则"而不是字面片段，那种写法 contains/exact
             永远命不中，会把基线和优化版一起打死 —— 请改用 rule。

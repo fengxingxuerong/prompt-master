@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -430,6 +431,9 @@ def _case_ground_truth(
     def expected(i: int) -> str:
         if not 0 <= i < len(seeds):
             return ""
+        value = seeds[i].get("expected") if isinstance(seeds[i], dict) else None
+        if isinstance(value, list):
+            return json.dumps(value, ensure_ascii=False)
         return _field(seeds[i], "expected")
 
     def mode(i: int) -> str:

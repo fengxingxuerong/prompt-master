@@ -30,7 +30,7 @@ from typing import Any, cast
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import __version__ as PKG_VERSION
 from .assertions import rule_like_expected_detail
@@ -317,11 +317,21 @@ class CaseInput(BaseModel):
 
     input: str = Field(min_length=1, max_length=8000, description="测试输入")
     expected: str = Field(default="", max_length=8000, description="期望输出（ground-truth，可空）")
+
+    @field_validator("expected", mode="before")
+    @classmethod
+    def normalize_expected_array(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            if any(not isinstance(item, str) for item in value):
+                raise ValueError("expected 数组只能包含字符串")
+            return json.dumps(value, ensure_ascii=False)
+        return value
+
     # 逐条覆盖全局 assertion_mode：一份用例集里混着写字面片段与需求规则才是常态
     assert_mode: str = Field(
         default="",
         max_length=40,
-        pattern=r"^(|exact|contains|regex|rule|custom:[a-zA-Z][a-zA-Z0-9_]*)$",
+        pattern=r"^(|exact|contains|contains-any|not-contains|regex|rule|custom:[a-zA-Z][a-zA-Z0-9_]*)$",
         description="本条的断言模式；空 = 用请求级的 assertion_mode",
     )
     # 注入存活专项（确定性校验，不经评委）的可选标记：与 CLI cases-file 同口径透传
@@ -354,7 +364,7 @@ class OptimizeRequest(BaseModel):
     assertion_mode: str = Field(
         default="",
         max_length=40,
-        pattern=r"^(|exact|contains|regex|rule|custom:[a-zA-Z][a-zA-Z0-9_]*)$",
+        pattern=r"^(|exact|contains|contains-any|not-contains|regex|rule|custom:[a-zA-Z][a-zA-Z0-9_]*)$",
         description="事实断言模式；空 = contains，rule = 把 expected 当需求规则交评委核验",
     )
     seed_prompt: str = Field(

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,23 @@ def test_exact_mode():
 def test_contains_mode():
     assert check_assertion("华东", "华东销售额 120 万", "contains").passed
     assert not check_assertion("华南", "华东销售额 120 万", "contains").passed
+
+
+def test_contains_any_mode():
+    assert check_assertion(["甲", "乙"], "输出包含乙", "contains-any").passed
+    assert check_assertion('["甲", "乙"]', "输出包含甲", "contains-any").passed
+    assert not check_assertion(["甲", "乙"], "输出包含丙", "contains-any").passed
+    assert check_assertion(["ID: 42"], "ｉｄ：４２", "contains-any").passed
+    assert check_assertion("[]", "任意输出", "contains-any") is None
+    bad = check_assertion("不是数组", "任意输出", "contains-any")
+    assert bad is not None and not bad.passed and "JSON 数组" in bad.detail
+
+
+def test_not_contains_mode():
+    assert check_assertion("禁止词", "安全输出", "not-contains").passed
+    assert not check_assertion("禁止词", "这里出现禁止词", "not-contains").passed
+    assert check_assertion("ID: 42", "ｉｄ：４３", "not-contains").passed
+    assert not check_assertion("ID: 42", "ｉｄ：４２", "not-contains").passed
 
 
 def test_regex_mode():
@@ -381,6 +399,8 @@ def test_cli_accepts_registered_custom_assert_mode():
 
     assert run_mod.assert_mode_arg("custom:no_apology") == "custom:no_apology"
     assert run_mod.assert_mode_arg("  regex  ") == "regex"
+    assert run_mod.assert_mode_arg("contains-any") == "contains-any"
+    assert run_mod.assert_mode_arg("not-contains") == "not-contains"
     import argparse
 
     with pytest.raises(argparse.ArgumentTypeError, match="未知断言模式"):
@@ -891,6 +911,31 @@ def test_mixed_modes_end_to_end():
     assert "未提供：订单号" in report and "不得编造取件时间" in report
 
 
+def test_new_assertion_modes_execute_through_the_graph():
+    def plain(role, system, user, overrides=None):
+        output = "甲 禁止词" if role == "target" else "优化后的提示词"
+        return output, {"role": role, "model": "fake", "channel": "plain"}
+
+    state = initial_state(
+        task="让AI分析销售数据",
+        target_model="fake",
+        n_test_cases=2,
+        max_iterations=0,
+        seed_cases=[
+            {"input": "用例一", "expected": ["甲", "乙"], "mode": "contains-any"},
+            {"input": "用例二", "expected": "禁止词", "mode": "not-contains"},
+        ],
+    )
+    with testing.scope("progress", plain=plain):
+        final = build_app().invoke(
+            state, {"configurable": {"thread_id": "new-assertion-modes"}, "recursion_limit": 60}
+        )
+    by_case = {int(run["test_case_index"]): run["assertion"] for run in final["test_runs"]}
+    assert by_case[0]["mode"] == "contains-any" and by_case[0]["passed"] is True
+    assert by_case[1]["mode"] == "not-contains" and by_case[1]["passed"] is False
+    assert final["aggregate"]["assertion_veto"] is True
+
+
 def test_cli_per_case_mode_overrides_global_and_validates(tmp_path):
     """非法的逐条 mode 必须当场报错并指出是第几条，不能静默回退成字面比对。"""
     import json
@@ -949,13 +994,32 @@ def test_cli_per_case_mode_overrides_global_and_validates(tmp_path):
     # 预检放行后才走到 Key 检查：说明"逐条 mode"确实改变了判定路径，而不是被忽略
     assert "未检测到 PM_API_KEY" in (allowed.stderr or ""), allowed.stderr[-300:]
 
+    new_modes = run_cli(
+        [
+            {"input": "a", "expected": ["甲", "乙"], "mode": "contains-any"},
+            {"input": "b", "expected": "禁止词", "mode": "not-contains"},
+        ],
+        ["--max-iter", "0"],
+    )
+    assert "未检测到 PM_API_KEY" in (new_modes.stderr or ""), new_modes.stderr[-300:]
+
 
 def test_api_case_level_assert_mode():
-    from pm.server import CaseInput
+    from pm.server import CaseInput, OptimizeRequest
 
     ok = CaseInput(input="a", expected="必须标注缺失项", assert_mode="rule")
     assert ok.assert_mode == "rule"
     assert CaseInput(input="a").assert_mode == "", "留空表示用请求级默认"
+    array = CaseInput(input="a", expected=["甲", "乙"], assert_mode="contains-any")
+    assert json.loads(array.expected) == ["甲", "乙"]
+    assert (
+        OptimizeRequest(task="分析数据", assertion_mode="contains-any").assertion_mode
+        == "contains-any"
+    )
+    assert (
+        OptimizeRequest(task="分析数据", assertion_mode="not-contains").assertion_mode
+        == "not-contains"
+    )
     import pytest
     from pydantic import ValidationError
 

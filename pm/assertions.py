@@ -28,6 +28,7 @@ exact / contains / regex / 自定义函数这类确定性校验可以做到 LLM 
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
@@ -309,7 +310,9 @@ def _get_custom(name: str) -> Callable[[str, str], bool] | None:
 
 
 class AssertionResult(BaseModel):
-    mode: str = Field(description="断言模式：exact / contains / regex / custom:<name>")
+    mode: str = Field(
+        description="断言模式：exact / contains / contains-any / not-contains / regex / custom:<name>"
+    )
     passed: bool
     detail: str = Field(default="", description="失败原因或校验说明")
     score: float = Field(description="1.0 通过 / 0.0 失败")
@@ -332,7 +335,78 @@ class AssertionResult(BaseModel):
 RULE_MODE = "rule"
 
 
+def parse_contains_any(expected: Any) -> list[str] | None:
+    """解析 contains-any 的期望数组；非法形状返回 None，空数组返回空列表。"""
+    if isinstance(expected, list):
+        value = expected
+    else:
+        try:
+            value = json.loads(str(expected or ""))
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        return None
+    return [item.strip() for item in value if item.strip()]
+
+
+def _check_collection_assertion(
+    expected: str, output: str, mode: str, exp_full: str, excerpt: str
+) -> AssertionResult | None:
+    expected = (expected or "").strip()
+    out_scan = (output or "")[:_MAX_SCANNED]
+    if mode == "contains-any":
+        values = parse_contains_any(expected)
+        if values is None:
+            return AssertionResult(
+                mode=mode,
+                passed=False,
+                detail="contains-any 的 expected 必须是非空字符串组成的 JSON 数组",
+                score=0.0,
+                expected=exp_full,
+                output_excerpt=excerpt,
+            )
+        if not values:
+            return None
+        normalized = _flag("PM_ASSERT_NORMALIZE", True)
+        matched_values = [
+            value
+            for value in values
+            if (_fold(value) in _fold(out_scan) if normalized else value in out_scan)
+        ]
+        return AssertionResult(
+            mode=mode,
+            passed=bool(matched_values),
+            detail="" if matched_values else "输出未包含 expected 数组中的任一期望片段",
+            score=1.0 if matched_values else 0.0,
+            expected=exp_full,
+            output_excerpt=excerpt,
+        )
+
+    normalized = _flag("PM_ASSERT_NORMALIZE", True)
+    present = _fold(expected) in _fold(out_scan) if normalized else expected in out_scan
+    return AssertionResult(
+        mode=mode,
+        passed=not present,
+        detail="" if not present else f"输出包含禁止出现的片段：{exp_full}",
+        score=0.0 if present else 1.0,
+        expected=exp_full,
+        output_excerpt=excerpt,
+    )
+
+
 def check_assertion(
+    expected: str | list[str], output: str, mode: str, *, literal: bool = False
+) -> AssertionResult | None:
+    if isinstance(expected, list):
+        expected = json.dumps(expected, ensure_ascii=False)
+    if mode in {"contains-any", "not-contains"}:
+        return _check_collection_assertion(
+            expected, output, mode, _clip(expected, _EXPECTED_CLIP), _clip(output, _OUTPUT_CLIP)
+        )
+    return _check_assertion(expected, output, mode, literal=literal)
+
+
+def _check_assertion(
     expected: str, output: str, mode: str, *, literal: bool = False
 ) -> AssertionResult | None:
     """执行确定性断言。

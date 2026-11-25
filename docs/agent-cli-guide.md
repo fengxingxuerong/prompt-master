@@ -57,6 +57,8 @@ python run.py check --prompt-file 我的提示词.md --json
 
 # 同样零调用，改体检一份用例集：先数清它有几票真能挡住差输出，再决定要不要为它花钱
 python run.py check --cases-file case_templates/sales_analysis.json --json
+# contains-any: {"input":"...","expected":["甲","乙"],"mode":"contains-any"}
+# not-contains: {"input":"...","expected":"禁止词","mode":"not-contains"}
 # → {"mode":"cases_check","ok":false,"findings":[{"code":"echoes","case":1,...}],
 #    "cases":4,"veto_capable":2,"veto_strong":1,"advisory":0,"judge_only":2,"no_assertion":0,
 #    "max_cases":8,"veto_strong_cases":[2]}

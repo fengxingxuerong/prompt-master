@@ -185,9 +185,12 @@ def case_entry_fields(item: Any) -> dict[str, str]:
     literal_raw = item.get("literal")
     if literal_raw in (None, ""):
         literal_raw = item.get("expected_is_literal")
+    expected = item.get("expected") or ""
+    if isinstance(expected, list):
+        expected = json.dumps(expected, ensure_ascii=False)
     return {
         "input": str(item.get("input") or ""),
-        "expected": str(item.get("expected") or ""),
+        "expected": str(expected),
         "mode_raw": str(item.get("mode") or item.get("assert_mode") or "").strip(),
         "scenario": str(item.get("scenario") or "").strip(),
         "hijack_marker": str(item.get("hijack_marker") or "").strip(),
@@ -202,7 +205,7 @@ def assert_mode_arg(value: str) -> str:
     （一个只剩半边入口的功能等于没做）。这里改成显式校验，错误提示也写清楚。
     """
     raw = (value or "").strip()
-    if raw in {"exact", "contains", "regex", "rule"}:
+    if raw in {"exact", "contains", "contains-any", "not-contains", "regex", "rule"}:
         return raw
     if raw.startswith("custom:"):
         name = raw[len("custom:") :].strip()
@@ -212,7 +215,7 @@ def assert_mode_arg(value: str) -> str:
             )
         return f"custom:{name}"
     raise argparse.ArgumentTypeError(
-        f"未知断言模式：{value!r}（可选 exact / contains / regex / rule / custom:<已注册名>）"
+        f"未知断言模式：{value!r}（可选 exact / contains / contains-any / not-contains / regex / rule / custom:<已注册名>）"
     )
 
 

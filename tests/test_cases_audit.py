@@ -122,6 +122,18 @@ def test_the_cap_comes_from_one_constant_not_a_second_copy() -> None:
     assert 'default="contains"' not in check_src and 'default="contains"' not in main_src
 
 
+def test_new_assertion_modes_are_audited_consistently() -> None:
+    cases = [
+        {"input": "a", "expected": ["甲", "乙"], "mode": "contains-any"},
+        {"input": "b", "expected": "禁止词", "mode": "not-contains"},
+        {"input": "c", "expected": "不是数组", "mode": "contains-any"},
+    ]
+    report = audit_cases(cases, max_cases=MAX_SEED_CASES)
+    assert "bad_mode" not in _codes(report)
+    assert "bad_expected" in _codes(report)
+    assert report["stats"]["veto_capable"] == 2
+
+
 def test_bucket_partition_is_exhaustive() -> None:
     """四桶必须不重不漏地覆盖全部用例 —— 这是这份体检唯一的"数得对"证明。"""
     cases = [
