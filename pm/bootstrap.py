@@ -11,6 +11,7 @@ Windows 下把中文日志重定向到文件时，stdout 默认走系统码页�
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable
 from io import StringIO
@@ -38,6 +39,21 @@ def _load_one_env(path: str, load_dotenv: Callable[..., bool]) -> None:
         load_dotenv(stream=StringIO(decoded.text), override=False)
 
 
+_SKIP_ENV_FILE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _env_file_disabled() -> bool:
+    """`PM_SKIP_ENV_FILE=1` 时一个 `.env` 都不读。
+
+    为什么需要这个开关（2026-11-26）：CLI 边界用例（`tests/test_assertions.py` 里跑
+    `run.py` 子进程那种）必须把"有 Key"这条路彻底掐断才算真隔离。原先靠"把 PM_API_KEY
+    置空"实现，但只要 `.env` 里有**角色级** `PM_<ROLE>_API_KEY`，Key 闸门照样被满足，
+    用例就从"秒级红"退化成"真打网络 120 秒超时"（本轮实测踩到）。
+    置空单个变量挡不住文件注入，只有"不读文件"挡得住。
+    """
+    return os.environ.get("PM_SKIP_ENV_FILE", "").strip().lower() in _SKIP_ENV_FILE_VALUES
+
+
 def load_env_files(repo_root: Path | None = None) -> list[str]:
     """按用户可预期的顺序加载 `.env`，返回实际加载的文件路径。
 
@@ -54,6 +70,8 @@ def load_env_files(repo_root: Path | None = None) -> list[str]:
     已存在于进程环境里的变量不会被 `.env` 覆盖（`override=False`）：
     CI 显式传的环境变量优先于文件，这是既有契约。
     """
+    if _env_file_disabled():
+        return []
     try:
         from dotenv import find_dotenv, load_dotenv
     except ImportError:  # 零调用子命令不依赖 python-dotenv 也能跑

@@ -131,6 +131,7 @@ def _covered_by_connection_fixture(key: str) -> bool:
     return key.endswith(("_API_KEY", "_BASE_URL", "_MODEL")) or key in (
         "PM_API_KEYS",
         "PM_PROVIDER",
+        "PM_SKIP_ENV_FILE",
     )
 
 

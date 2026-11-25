@@ -968,12 +968,17 @@ def test_cli_per_case_mode_overrides_global_and_validates(tmp_path):
             # ⚠️ `PM_API_KEYS`（多 Key 池）也必须清：2026-10-22 Key 闸门改成认这个池之后，
             #    只清 `PM_API_KEY` 会让 .env 那份池子从 load_dotenv 补进来，
             #    闸门误判"有 Key"而放行到真跑，这条用例就不再到 Key 检查那一站了。
+            # ⚠️ 2026-11-26 起改成**按前缀整族清空**：给 clarifier/mockgen/target 加了角色级
+            #    `PM_<ROLE>_API_KEY` / `PM_<ROLE>_BASE_URL` 之后，逐个点名已经挡不住
+            #    load_dotenv 补进来的角色级 Key（实测这条用例从"秒红"变成"真跑 120 秒超时"）。
             env={
-                **os.environ,
+                **{k: v for k, v in os.environ.items() if not k.startswith("PM_")},
                 "PYTHONIOENCODING": "utf-8",
+                # 只有"不读 .env"才挡得住角色级 Key（PM_<ROLE>_API_KEY）：
+                # 置空 PM_API_KEY / PM_API_KEYS 挡不住文件注入，闸门照样放行到真跑。
+                "PM_SKIP_ENV_FILE": "1",
                 "PM_API_KEY": "",
                 "PM_API_KEYS": "",
-                "PM_TARGET_API_KEY": "",
                 "PM_BASE_URL": "http://127.0.0.1:9/v1",
             },
             timeout=120,

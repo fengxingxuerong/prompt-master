@@ -257,7 +257,9 @@ def isolate_host_connection_env(monkeypatch: pytest.MonkeyPatch) -> None:
             up.endswith("_API_KEY")
             or up.endswith("_BASE_URL")
             or up.endswith("_MODEL")
-            or up in ("PM_API_KEYS", "PM_PROVIDER")
+            # PM_SKIP_ENV_FILE 决定"要不要读 .env"，等价于连接来源开关：
+            # 宿主机设了它，测试里 monkeypatch 的连接配置就会看起来"没生效"。
+            or up in ("PM_API_KEYS", "PM_PROVIDER", "PM_SKIP_ENV_FILE")
         ):
             monkeypatch.delenv(k, raising=False)
 

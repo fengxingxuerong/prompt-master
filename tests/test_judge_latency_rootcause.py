@@ -227,16 +227,23 @@ def test_second_seat_degrades() -> None:
 
 
 def test_second_seat_degradation_is_model_not_endpoint() -> None:
-    """钉住：两个评委走**同一个端点**，差别只在模型。
+    """钉住：两个评委必须是**两个不同模型**，且各自的端点都显式写出来。
 
-    §三十·十七 我两次把劣化归给"glm-5.2 那个端点"，都错了。
-    `.env` 里 `PM_EVALUATOR_B_BASE_URL` 与 `PM_BASE_URL` 都是
-    `https://token.sensenova.cn/v1` —— 同端点，不同模型。
-    ⇒ 该换的是二号位的**模型**，不是端点。
+    §三十·十七 我两次把劣化归给"glm-5.2 那个端点"，都错了 ——
+    当时 `.env` 里两席同端点（`token.sensenova.cn`），差别只在模型，
+    ⇒ 该换的是二号位的**模型**，不是端点。这条教训不变。
+
+    **2026-11-26 判据修订（有意为之，不是放宽）**：架构上已经**故意**把两席分端点 ——
+    A 走 StepFun、B 走本地白鹿代理，因为实测 `sensenova-6.8-flash-lite` 面对长评委提示词
+    会把 max_tokens 全烧在 reasoning 上返回**空正文**（run e046e3d94085：「空内容——通常是
+    reasoning 耗尽」），它跑不出合法评委 JSON，再要求"同端点"等于要求两席一起瞎。
+    所以现在钉的是**模型不同**（制衡成立的必要条件）+ **两席端点都显式声明**
+    （不许靠全局 `PM_BASE_URL` 兜底，否则又回到"看不出谁在替谁背锅"的老路）。
+    端点相同或不同都不再是判据本身。
 
     ⚠️ 这条**必须读 .env 原文**，不能用 build_config：
     CI 把 `PM_*_BASE_URL` 全覆盖成同一个死地址（127.0.0.1:9），
-    用 build_config 的话「同端点」恒真 ⇒ 守卫变装饰品。
+    用 build_config 的话这些断言恒真 ⇒ 守卫变装饰品。
     （这个坑踩过一次：改成不同端点跑，守卫仍然绿。）
     """
     dotenv = Path(__file__).resolve().parents[1] / ".env"
@@ -249,18 +256,20 @@ def test_second_seat_degradation_is_model_not_endpoint() -> None:
             k, v = line.split("=", 1)
             raw[k.strip()] = v.strip()
 
-    ev = raw.get("PM_BASE_URL", "")
-    evb = raw.get("PM_EVALUATOR_B_BASE_URL", "")
-    if not ev or not evb:
-        pytest.skip(".env 里没有显式写这两个 BASE_URL，判据不适用")
-    assert ev == evb, (
-        f"两个评委现在走不同端点（{ev} vs {evb}）——"
-        "若这是有意的（例如为了端点隔离），请把 §三十·十七 的诊断改写成"
-        "『端点差异』，并同步更新这条守卫的意图"
+    a_url = raw.get("PM_EVALUATOR_BASE_URL", "")
+    b_url = raw.get("PM_EVALUATOR_B_BASE_URL", "")
+    if not a_url or not b_url:
+        pytest.skip("两席评委没有各自显式写 BASE_URL，判据不适用")
+
+    a_model = raw.get("PM_EVALUATOR_MODEL", "")
+    b_model = raw.get("PM_EVALUATOR_B_MODEL", "")
+    assert a_model and b_model, (
+        f"两席评委模型没有都写死（A={a_model!r} B={b_model!r}）——"
+        "靠全局 PM_MODEL 兜底的话，两席很可能落到同一个模型上，制衡机制不成立"
     )
-    assert raw.get("PM_EVALUATOR_MODEL") != raw.get("PM_EVALUATOR_B_MODEL"), (
-        "两个评委现在用**同一个模型**——那『双评委』其实是同模型两次采样，"
-        "制衡机制不成立。这是另一条更严重的问题，本条只负责提醒"
+    assert a_model != b_model, (
+        f"两个评委现在用**同一个模型**（{a_model}）——那『双评委』其实是同模型两次采样，"
+        "制衡机制不成立；端点是否相同与这件事无关"
     )
 
 

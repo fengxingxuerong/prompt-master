@@ -173,3 +173,22 @@ def test_zero_call_entry_survives_without_python_dotenv(monkeypatch) -> None:
     """零调用子命令不该因为没装 python-dotenv 就启动失败。"""
     monkeypatch.setitem(sys.modules, "dotenv", None)
     assert load_env_files() == []
+
+
+def test_skip_env_file_switch_reads_no_file_at_all(tmp_path, monkeypatch) -> None:
+    """`PM_SKIP_ENV_FILE=1` 必须一个 `.env` 都不读。
+
+    起因（2026-11-26）：CLI 边界用例要断言"没 Key 时退出码 2 + 指引文案"，
+    但只要 `.env` 里有**角色级** `PM_<ROLE>_API_KEY`，闸门就被满足，
+    用例从"秒级红"退化成"真打网络 120 秒超时"。把 `PM_API_KEY` 置空挡不住文件注入，
+    只有"完全不读文件"挡得住 —— 这条用例钉的就是这个开关本身。
+    """
+    cwd_dir = tmp_path / "project"
+    cwd_dir.mkdir()
+    marker = "PM_TEST_SKIP_SWITCH_20261126"
+    _write_env(cwd_dir / ".env", **{marker: "from-file"})
+    monkeypatch.chdir(cwd_dir)
+    monkeypatch.delenv(marker, raising=False)
+    monkeypatch.setenv("PM_SKIP_ENV_FILE", "1")
+    assert load_env_files(repo_root=tmp_path / "checkout") == []
+    assert marker not in os.environ, "开关打开时文件里的变量一个都不该被加载"
