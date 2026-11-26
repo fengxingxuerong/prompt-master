@@ -256,7 +256,7 @@ node examples/browser_runtime_check.cjs http://127.0.0.1:8097/
 ### 发版与 PyPI 发布（2026-10-23 起）
 
 **版本线**：产品版本只有一处事实源 `pm/__init__.py:__version__`（`pyproject` 用 `dynamic` 读它）；
-`git tag v1.x` 是**套件发布线**，与产品线独立，别混。产品线 tag 用 **`v<产品版本>`**（当前 `v2.4.0`）。
+`git tag v1.x` 是**套件发布线**，与产品线独立，别混。产品线 tag 用 **`v<产品版本>`**（当前 `v2.5.0`）。
 
 一次性检查（任何机器都能跑，不联网、不花钱）：
 
@@ -312,20 +312,23 @@ python run.py calibrate       # ④ 评委可信度校准 + 漂移对比
   （台账原则不动、缓存靠清除/重跑、死重由 `scripts/logs_usage.py` 只读列出后 owner 手动整删）。
 - 配套守卫：`tests/test_logs_archive.py`（dry-run 零写入 / commit 不改字节 / 文档引用不归档）。
 
-### 尚待 owner 亲决（2026-11-13 更新：v2.4.0 已推 tag，剩三项）
+### 尚待 owner 亲决（2026-11-26 更新：v2.5.0 发布列车，剩三项）
 
 `v2.3.0` 已用 release.yml 在真实 Runner 上跑通四条 gate（build-check / artifact /
 github-release / pypi 降级），GitHub Release 已生成；`v2.4.0` tag 已于 2026-11-13
-推送（Release workflow 同通道重跑）。剩三项**仍只差 owner 亲自动手**：
+推送；`v2.5.0`（版本化考卷 + 实验矩阵 + 反馈信号补盲）走同一通道。剩三项
+**仍只差 owner 亲自动手**：
 
 1. **PyPI 上传**：`.github/workflows/release.yml` 已配好 pypi job，上传路径 100% 就绪
    （已核对：pypi.org 上 `prompt-master` 名字当前**空闲**、pyproject 元数据完整、twine 命令正确）。
    只需 owner 三步照做：
    1. GitHub → **Settings → Secrets and variables → Actions** → New repository secret，
       名字 `PYPI_TOKEN`、值你的 PyPI account-scoped token（PyPI → Account settings → API tokens）。
-   2. **让 Release workflow 重跑**：Actions → Release（v2.4.0 那次 run）→ Re-run all jobs
-      ——pypi job 当时因无 token 跳过，重跑时 secret 已在就会真上传；不想动旧 run 的话，
-      推下一个 `v*` tag（如 `v2.4.1`）同样触发全通道。
+   2. **让 Release workflow 重跑**：Actions → Release（最近一次 tag 的 run）→ Re-run all jobs
+      ——pypi job 在没有 token 时跳过，重跑时 secret 已在就会真上传；不想动旧 run 的话，
+      推下一个 `v*` tag 同样触发全通道。
+   3. 等 Actions → Release workflow 跑完，在 pypi job 确认 `Upload to PyPI` 成功，
+      并访问 `https://pypi.org/project/prompt-master/<版本>/` 核对。
    3. 等 Actions → Release workflow 跑完，在 pypi job 确认 `Upload to PyPI` 成功，
       并访问 `https://pypi.org/project/prompt-master/<版本>/` 核对。
 

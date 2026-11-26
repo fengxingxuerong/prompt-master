@@ -42,6 +42,12 @@ data/agents.json
 /.cov*.txt
 /pytest_summary.txt
 
+# 本机验证/诊断现场（2026-11-26 出索引）：外部语料交叉测试产物与手工探测脚本，
+# 都不是产品的一部分。留在工作树里会让 `scripts/release_pypi.py --check` 的
+# `git status --porcelain` 判脏、发布前直接退 2
+_cross_test/
+_pm_manual_test/
+
 # 覆盖率产物
 .coverage
 coverage.xml
