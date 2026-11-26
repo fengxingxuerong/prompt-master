@@ -575,17 +575,36 @@ def judge_seat_absent(state: ReportState) -> dict[int, list[str]]:
 def _revision_delta_lines(state: ReportState) -> list[str]:
     # 逐条得失：均分看不出的"修 4 坏 3"必须让读者看见（震荡的直接证据）
     delta = state.get("revision_delta") or {}
-    if not (isinstance(delta, dict) and (delta.get("fixed") or delta.get("broken"))):
+    if not isinstance(delta, dict):
         return []
     fixed, broken = delta.get("fixed") or [], delta.get("broken") or []
-    # 空列表不渲染成空括号（……弄坏 0 条（）），2026-10-23 顺手修
-    fixed_s = f"（{'、'.join('#' + str(i) for i in fixed)}）" if fixed else ""
-    broken_s = f"（{'、'.join('#' + str(i) for i in broken)}）" if broken else ""
-    return [
-        f"- 与上一版逐条对照：修好 {len(fixed)} 条{fixed_s}"
-        f"／弄坏 {len(broken)} 条{broken_s}"
-        f"，净值 {delta.get('net', 0)}"
-    ]
+    up, down = delta.get("up") or [], delta.get("down") or []
+    raw_points = delta.get("points")
+    # 全员低于 8.0 时 fixed/broken 恒空（阈值盲区），但分数位移照样有信息量：
+    # 硬集上整节消失会让读者以为"这一轮没有任何变化"（2026-11-26 run a9dbb3a219f0 实测）。
+    # 先落成 float | None：mypy 不会跨 `movable` 这个 bool 收窄，格式化处得自己带类型。
+    points = float(raw_points) if isinstance(raw_points, (int, float)) else None
+    movable = points is not None and bool(up or down)
+    if not (fixed or broken or movable):
+        return []
+    lines: list[str] = []
+    if fixed or broken:
+        # 空列表不渲染成空括号（……弄坏 0 条（）），2026-10-23 顺手修
+        fixed_s = f"（{'、'.join('#' + str(i) for i in fixed)}）" if fixed else ""
+        broken_s = f"（{'、'.join('#' + str(i) for i in broken)}）" if broken else ""
+        lines.append(
+            f"- 与上一版逐条对照：修好 {len(fixed)} 条{fixed_s}"
+            f"／弄坏 {len(broken)} 条{broken_s}"
+            f"，净值 {delta.get('net', 0)}"
+        )
+    if points is not None and (up or down):
+        up_s = f"（{'、'.join('#' + str(i) for i in up)}）" if up else ""
+        down_s = f"（{'、'.join('#' + str(i) for i in down)}）" if down else ""
+        lines.append(
+            f"- 分数位移：合计 {points:+.2f} 分"
+            f"，上升 {len(up)} 条{up_s}／下降 {len(down)} 条{down_s}"
+        )
+    return lines
 
 
 def _baseline_lines(state: ReportState) -> list[str]:

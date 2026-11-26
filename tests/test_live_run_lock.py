@@ -50,13 +50,21 @@ print("RELEASED", flush=True)
 
 
 def _wait_for(path: Path, deadline: float = 25.0) -> str:
-    """等文件出现并返回其内容；超时是"并发用例自己没跑起来"，不是通过。"""
+    """等文件**写出内容**并返回；超时是"并发用例自己没跑起来"，不是通过。
+
+    "存在"不等于"写完了"：子进程用 `Path.write_text` 落 PID（先创建再写），全量
+    pytest 负载高时这两个动作之间能隔出可见窗口，父进程此刻读到的是空串。
+    2026-11-26 全量跑实测：`holder_pid=''` → `isdigit()` 假 → 这条偶发红，
+    单跑 17 条全绿。所以判据取"内容非空"，而不是"文件已创建"。
+    """
     end = time.monotonic() + deadline
     while time.monotonic() < end:
         if path.exists():
-            return path.read_text(encoding="utf-8").strip()
+            text = path.read_text(encoding="utf-8").strip()
+            if text:
+                return text
         time.sleep(0.02)
-    raise AssertionError(f"等 {path} 出现超时（{deadline}s）——并发用例自己没跑起来")
+    raise AssertionError(f"等 {path} 出现并写入内容超时（{deadline}s）——并发用例自己没跑起来")
 
 
 def _busy_holder(**kw: Any) -> Any:

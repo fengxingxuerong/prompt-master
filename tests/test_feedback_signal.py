@@ -195,3 +195,112 @@ def test_judge_spec_pins_rubric_version():
     spec = _judge_spec(["evaluator"])
     assert spec.endswith(f"|rubric={rubric_stamp()}")
     assert len(rubric_stamp()) == 10
+
+
+# --------------------------------------------------------------------------
+# 分数位移：全员低于阈值时 fixed/broken 恒空，修订器需要另一条梯度（2026-11-26）
+# --------------------------------------------------------------------------
+def test_score_delta_sees_a_drop_that_never_crosses_the_threshold():
+    """实测 run a9dbb3a219f0：5.23 → 4.97 → 4.51，三轮 fixed/broken 全空、net=0。
+
+    阈值账本只在 8.0 上数穿越，硬集上恒等于「什么都没变」——修订器因此失去梯度。
+    位移必须能看见这 0.72 分的下滑。
+    """
+    from pm.nodes.judge import _score_delta
+
+    prev = {"0": 5.23, "1": 4.88, "2": 5.57}
+    cur = {0: 4.51, 1: 4.03, 2: 5.00}
+    delta = _score_delta(prev, cur)
+    assert delta["down"] == [0, 1, 2] and delta["up"] == []
+    assert delta["points"] == -2.14  # 逐条累加，不是均分差
+    assert delta["margin"] == 0.5
+
+
+def test_score_delta_ignores_noise_under_the_margin():
+    """抖动不是信号：0.3 分以内的变动来自评委复现性，不该被当成涨跌。"""
+    from pm.nodes.judge import _score_delta
+
+    delta = _score_delta({"0": 5.00}, {0: 5.30})
+    assert delta["up"] == [] and delta["down"] == []
+    assert delta["points"] == 0.3
+
+
+def test_score_delta_skips_cases_scored_on_one_side_only():
+    """与 _fixed_broken 同口径：只有两侧都评过的用例才可比。"""
+    from pm.nodes.judge import _score_delta
+
+    delta = _score_delta({"0": 5.0, "9": 1.0}, {0: 6.0, 1: 2.0})
+    assert delta["up"] == [0] and delta["down"] == []
+    assert _score_delta(None, {0: 1.0})["points"] == 0.0
+
+
+def test_feedback_says_the_round_got_worse_even_with_zero_fixed_broken():
+    from pm.schemas import AggregateScore
+
+    evals = [_ev(0, 4.51), _ev(1, 4.03)]
+    agg = AggregateScore.from_evaluations(evals, n_expected=2)
+    state = {
+        "test_runs": [],
+        "revision_delta": {
+            "fixed": [],
+            "broken": [],
+            "net": 0,
+            "comparable": 2,
+            "up": [],
+            "down": [0, 1],
+            "points": -1.57,
+            "margin": 0.5,
+        },
+    }
+    text = _build_feedback(agg, evals, state)
+    assert "分数位移：合计 -1.57 分" in text
+    assert "下降 2 条（case#0、case#1）" in text
+    assert "本轮整体比上一版差" in text
+    # 净赔时不能只说"继续改"，必须指向回退
+    assert "恢复上一版被删掉或改写的段" in text
+
+
+def test_feedback_keeps_quiet_when_nothing_moved():
+    """没有任何位移时不渲染那一行，免得每轮都印一句“合计 +0.00 分”。"""
+    from pm.schemas import AggregateScore
+
+    evals = [_ev(0, 5.0), _ev(1, 5.0)]
+    agg = AggregateScore.from_evaluations(evals, n_expected=2)
+    state = {
+        "test_runs": [],
+        "revision_delta": {
+            "fixed": [],
+            "broken": [],
+            "net": 0,
+            "comparable": 2,
+            "up": [],
+            "down": [],
+            "points": 0.0,
+            "margin": 0.5,
+        },
+    }
+    assert "分数位移" not in _build_feedback(agg, evals, state)
+
+
+def test_report_shows_movement_when_threshold_ledger_is_empty():
+    """报告侧同一个盲区：整节消失会让读者以为这一轮没有任何变化。"""
+    from pm.report_sections import _revision_delta_lines
+
+    lines = _revision_delta_lines(
+        {
+            "revision_delta": {
+                "fixed": [],
+                "broken": [],
+                "net": 0,
+                "comparable": 3,
+                "up": [1],
+                "down": [0, 2],
+                "points": -0.72,
+                "margin": 0.5,
+            }
+        }
+    )
+    joined = "\n".join(lines)
+    assert "分数位移：合计 -0.72 分" in joined
+    assert "上升 1 条（#1）" in joined and "下降 2 条（#0、#2）" in joined
+    assert "逐条对照" not in joined  # 阈值账本确实是空的，不该硬编一行"修好 0 条"

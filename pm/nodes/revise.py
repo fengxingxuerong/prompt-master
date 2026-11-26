@@ -10,7 +10,7 @@ from typing import Any
 
 from ..llm import CallBudgetExceeded
 from ..prompts import REVISER_SYSTEM, REVISER_USER, render
-from ..quality import MIN_PROMPT_LENGTH, SIZE_GROWTH_RATIO
+from ..quality import MIN_PROMPT_LENGTH, SIZE_GROWTH_RATIO, SIZE_SHRINK_FLOOR
 from ..schemas import PromptVersion
 from ..state import State
 from .common import _apply
@@ -33,6 +33,57 @@ def _attempted_text(state: State) -> str:
             + (f"（下界 {h.get('ci_lower')}）" if h.get("ci_lower") is not None else "")
         )
     return "\n".join(lines) if lines else "（无历史记录，本轮是首次修订）"
+
+
+def _size_check(prev_len: int, new_len: int) -> tuple[float | None, bool, bool, str]:
+    """长度预算的确定性核对：返回 (净增量%, 超增长, 破下限, 版本注记后缀)。
+
+    与质量门同一哲学——**只记账不重写**：为长度重写可能换来内容回归
+    （这条是 2026-10-23 为"超增长"定下的，净减少沿用同一口径）。
+
+    净减少下限单列的理由：REVISER_SYSTEM 规则 7 写了"净减少不得超过 20%"，但那只是
+    散文，实测被无视——1751 → 1204 字（-31%）那一轮，示例段虽保住，约束段被砍，
+    均分 4.97 → 4.51。模型不会为此自责，只能由代码把事实记进版本注记与日志。
+    """
+    # 百分比只在基准有意义时才报：真实跑里出过 v0 只有 12 字符（优化器空返回后残留的
+    # 骨架）的情况，对这种基准算净增量得到 74100% 这种荒谬数字，反而掩盖真问题。
+    # 门槛直接沿用质量门的"提示词过短"口径（MIN_PROMPT_LENGTH）。
+    growth_pct: float | None = (
+        round((new_len / prev_len - 1) * 100, 1) if prev_len >= MIN_PROMPT_LENGTH else None
+    )
+    max_len = int(prev_len * SIZE_GROWTH_RATIO)
+    over_budget = new_len > max_len
+    if over_budget:
+        logger.warning("修订净增量超预算：%d → %d 字符（预算 %d 字符）", prev_len, new_len, max_len)
+
+    min_len = int(prev_len * SIZE_SHRINK_FLOOR)
+    under_floor = prev_len >= MIN_PROMPT_LENGTH and new_len < min_len
+    if under_floor:
+        logger.warning(
+            "修订净减少超下限：%d → %d 字符（下限 %d 字符，即净减少不得超过 %d%%）",
+            prev_len,
+            new_len,
+            min_len,
+            round((1 - SIZE_SHRINK_FLOOR) * 100),
+        )
+
+    if over_budget:
+        # 2026-10-23 修：旧写法在带净增量的分支永不闭合括号（"（…超 N 预算，净增量 X%"）。
+        note = f"（长度 {prev_len}→{new_len} 字符，超 {max_len} 预算"
+        if growth_pct is not None:
+            note += f"，净增量 {growth_pct:.0f}%"
+        return growth_pct, over_budget, under_floor, note + "）"
+    if under_floor:
+        # 同一条注记通道：读者看版本列表就知道这一版是被"砍"出来的，而不是凭空变短
+        # （降分时这一点是判断"该不该退回上一版"的直接依据）。
+        note = (
+            f"（长度 {prev_len}→{new_len} 字符，净减少超过 "
+            f"{round((1 - SIZE_SHRINK_FLOOR) * 100)}% 下限"
+        )
+        if growth_pct is not None:
+            note += f"，净减少 {abs(growth_pct):.0f}%"
+        return growth_pct, over_budget, under_floor, note + "）"
+    return growth_pct, over_budget, under_floor, ""
 
 
 def revise_node(state: State) -> dict[str, Any]:
@@ -116,20 +167,10 @@ def revise_node(state: State) -> dict[str, Any]:
     # 骨架）的情况，对这种基准算净增量得到 74100% 这种荒谬数字，反而掩盖真问题。
     # 门槛直接沿用质量门的"提示词过短"口径（MIN_PROMPT_LENGTH）：低于它就已经不是
     # 一份能拿来对比长度的交付物了。
-    growth_pct = round((new_len / prev_len - 1) * 100, 1) if prev_len >= MIN_PROMPT_LENGTH else None
-    max_len = int(prev_len * SIZE_GROWTH_RATIO)
-    over_budget = new_len > max_len
-    if over_budget:
-        logger.warning("修订净增量超预算：%d → %d 字符（预算 %d 字符）", prev_len, new_len, max_len)
+    growth_pct, over_budget, under_floor, size_note = _size_check(prev_len, new_len)
 
     versions = list(state.get("prompt_versions", []))
-    note = f"第 {state.get('iteration', 0) + 1} 轮修订"
-    if over_budget:
-        # 2026-10-23 修：旧写法在带净增量的分支永不闭合括号（"（…超 N 预算，净增量 X%"）。
-        note += f"（长度 {prev_len}→{new_len} 字符，超 {max_len} 预算"
-        if growth_pct is not None:
-            note += f"，净增量 {growth_pct:.0f}%"
-        note += "）"
+    note = f"第 {state.get('iteration', 0) + 1} 轮修订" + size_note
     versions.append(
         PromptVersion(
             iteration=state.get("iteration", 0) + 1,
@@ -161,6 +202,7 @@ def revise_node(state: State) -> dict[str, Any]:
         prev_prompt_chars=prev_len,
         growth_pct=growth_pct,
         size_budget_exceeded=over_budget,
+        size_floor_breached=under_floor,
         quality_ok=q_report.ok,
         quality_issues=q_report.describe() or None,
         retried=calls > 1,

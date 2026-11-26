@@ -927,6 +927,93 @@ def _fixed_broken(
     }
 
 
+def _score_delta(
+    prev: dict[Any, Any] | None, cur: dict[int, float], margin: float = 0.5
+) -> dict[str, Any]:
+    """本轮相对上一版的**分数位移**——补 `_fixed_broken` 的阈值盲区。
+
+    为什么需要：`_fixed_broken` 只在 `PASS_THRESHOLD` 上数"穿越"。全部用例都远低于
+    阈值时，它恒返回 `fixed=[] / broken=[] / net=0`，而修订器拿到的反馈文本里
+    那一行是"修好 0 条／弄坏 0 条，净值 0"——**读起来就是"什么也没变"**。
+
+    实测（2026-11-26 run a9dbb3a219f0，三用例硬集）：均分 5.23 → 4.97 → 4.51，
+    每轮实打实掉 0.3~0.5 分，three 轮 `revision_delta` 全是 `net=0`。修订器
+    因此失去梯度，继续在错的方向上加约束，最后 `early_stopped`。
+
+    `margin` 取 0.5：五维是 1-10 整数、按固定权重合成后分差以 0.05 为粒度，
+    0.5 分相当于"一个维度的整数档没变"之外的最低可感知变化——低于它的抖动
+    多半来自评委复现性，不该当成信号（噪声带另由 `aggregate.noise` 呈现）。
+
+    只用两侧都评过的用例；任一侧缺失的用例不计入（与 `_fixed_broken` 同口径）。
+    """
+    if not isinstance(prev, dict) or not prev:
+        return {"up": [], "down": [], "points": 0.0, "margin": margin}
+    prev_scores: dict[int, float] = {}
+    for k, v in prev.items():
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and str(k).lstrip("-").isdigit():
+            prev_scores[int(k)] = float(v)
+    common = sorted(set(prev_scores) & set(cur))
+    up: list[int] = []
+    down: list[int] = []
+    points = 0.0
+    for i in common:
+        d = float(cur[i]) - prev_scores[i]
+        points += d
+        if d >= margin:
+            up.append(i)
+        elif d <= -margin:
+            down.append(i)
+    return {"up": up, "down": down, "points": round(points, 2), "margin": margin}
+
+
+def _delta_block(delta: Any) -> list[str]:
+    """「与上一版的得失」渲染成反馈行：阈值账本 + 分数位移。
+
+    单列的原因有两个：`_build_feedback` 本来就在复杂度地板上（一圈就顶破 CC 17），
+    以及这段判据是**成对**的——`_fixed_broken` 数跨阈值，`_score_delta` 数位移，
+    两行必须一起出现或一起不出现，拆在别处容易只改一半。
+    """
+    if not isinstance(delta, dict) or not delta.get("comparable"):
+        return []
+    out: list[str] = []
+    fixed, broken = delta.get("fixed") or [], delta.get("broken") or []
+    if fixed or broken:
+        out.append(
+            f"与上一版逐条对照：修好 {len(fixed)} 条（case#{', '.join(map(str, fixed)) or '-'}）"
+            f"／弄坏 {len(broken)} 条（case#{', '.join(map(str, broken)) or '-'}）"
+            f"，净值 {delta.get('net', 0)}"
+        )
+        if broken:
+            out.append(
+                "  → 被弄坏的那些**原本是通过的**：本轮先恢复它们，"
+                "再加新约束；同一处来回改说明规则有两种读法，请写成互斥分支而不是加码。"
+            )
+        out.append("")
+
+    # 分数位移：不依赖 8.0 阈值，全员低于阈值时也能给出"这轮是涨是跌"。
+    # 没有这一行，上面那段（fixed/broken 全 0）在硬集上等于什么都没说。
+    up, down = delta.get("up") or [], delta.get("down") or []
+    points = delta.get("points")
+    margin = float(delta.get("margin") or 0.5)
+    if isinstance(points, (int, float)) and (up or down or abs(points) >= margin):
+        up_s = "、".join(f"case#{i}" for i in up) or "-"
+        down_s = "、".join(f"case#{i}" for i in down) or "-"
+        out.append(
+            f"分数位移：合计 {points:+.2f} 分"
+            f"（上升 {len(up)} 条（{up_s}）／下降 {len(down)} 条（{down_s}））"
+        )
+        if points <= -margin:
+            out.append(
+                "  → **本轮整体比上一版差**：不要在这版基础上继续加码，"
+                "先恢复上一版被删掉或改写的段（尤其是示例与已被评委认可的硬约束），"
+                "再动别处；若说不清哪处改动导致了下降，就退回上一版只改一个问题。"
+            )
+        elif points >= margin:
+            out.append("  → 方向对：本轮的改动保留，别回头动这些段落；下一轮只针对仍失败的用例。")
+        out.append("")
+    return out
+
+
 def _contrastive_slice(evals: list[EvaluationResult], runs: list[dict[str, Any]]) -> str:
     """把"最好的一条通过用例"与"最差的一条失败用例"并排给修订器看。
 
@@ -975,22 +1062,9 @@ def _build_feedback(agg: AggregateScore, evals: list[EvaluationResult], state: A
             lines.append(f"  - {h}")
         lines.append("")
 
-    # 上一版的得失账：净赔的改法要先止盈，再谈新约束
+    # 上一版的得失账：净赔的改法要先止盈，再谈新约束（渲染见 _delta_block）
     delta = (state or {}).get("revision_delta") if isinstance(state, dict) else None
-    if isinstance(delta, dict) and delta.get("comparable"):
-        fixed, broken = delta.get("fixed") or [], delta.get("broken") or []
-        if fixed or broken:
-            lines.append(
-                f"与上一版逐条对照：修好 {len(fixed)} 条（case#{', '.join(map(str, fixed)) or '-'}）"
-                f"／弄坏 {len(broken)} 条（case#{', '.join(map(str, broken)) or '-'}）"
-                f"，净值 {delta.get('net', 0)}"
-            )
-            if broken:
-                lines.append(
-                    "  → 被弄坏的那些**原本是通过的**：本轮先恢复它们，"
-                    "再加新约束；同一处来回改说明规则有两种读法，请写成互斥分支而不是加码。"
-                )
-            lines.append("")
+    lines.extend(_delta_block(delta))
 
     # 找出最薄弱维度，提示 Reviser 优先修
     from ..schemas import WEIGHTS
@@ -1149,9 +1223,11 @@ def evaluate_node(state: State) -> dict[str, Any]:
     # 记下“本轮是针对什么反馈改出来的、结果如何”：修订器下一轮能看到，
     # 就不会在两种解释之间来回震荡（旧版只给本轮反馈，历史全靠模型记性）
     history = list(state.get("revision_history", []) or [])
-    revision_delta = _fixed_broken(
-        history[-1].get("case_scores") if history else None, cur_pass, PASS_THRESHOLD
-    )
+    prev_scores = history[-1].get("case_scores") if history else None
+    revision_delta = _fixed_broken(prev_scores, cur_pass, PASS_THRESHOLD)
+    # 分数位移补阈值盲区（见 _score_delta 的实测说明）：fixed/broken 数的是"跨过 8.0"，
+    # 全员低于阈值时恒为 0 —— 修订器会收到"净赚 0"的假信号。位移是连续量，不依赖阈值。
+    revision_delta.update(_score_delta(prev_scores, cur_scores))
     history.append(
         {
             "iteration": iteration,
